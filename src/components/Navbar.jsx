@@ -15,6 +15,7 @@ const navLinks = [
   { label: 'Rewards', to: '/rewards' },
   { label: 'Suggest', to: '/suggest' },
   { label: 'Admin', to: '/lgu/places', adminOnly: true },
+  { label: 'Profile', to: '/profile', authOnly: true },
 ]
 
 export default function Navbar() {
@@ -36,7 +37,11 @@ export default function Navbar() {
     checkAdmin()
   }, [user])
 
-  const visibleLinks = navLinks.filter(link => !link.adminOnly || isUserAdmin)
+  const visibleLinks = navLinks.filter(link => {
+    if (link.adminOnly && !isUserAdmin) return false
+    if (link.authOnly && !user) return false
+    return true
+  })
   
   const isHomePage = location.pathname === '/'
 

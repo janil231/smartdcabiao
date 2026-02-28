@@ -7,6 +7,7 @@ import {
   signInWithPopup,
   GoogleAuthProvider,
   FacebookAuthProvider,
+  sendPasswordResetEmail,
 } from 'firebase/auth'
 import { auth } from '../lib/firebase'
 
@@ -38,6 +39,9 @@ export function AuthProvider({ children }) {
   const signInWithFacebook = () =>
     signInWithPopup(auth, new FacebookAuthProvider())
 
+  const resetPassword = (email) =>
+    sendPasswordResetEmail(auth, email)
+
   const value = {
     user,
     loading,
@@ -46,6 +50,7 @@ export function AuthProvider({ children }) {
     logout,
     signInWithGoogle,
     signInWithFacebook,
+    resetPassword,
     isAuthenticated: !!user,
   }
 

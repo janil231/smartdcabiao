@@ -22,6 +22,7 @@ import SuggestPlacePage from './pages/SuggestPlacePage'
 import LGUDashboardPage from './pages/LGUDashboardPage'
 import LGUPlacesPage from './pages/lgu/LGUPlacesPage'
 import LGUPlaceFormPage from './pages/lgu/LGUPlaceFormPage'
+import ProfilePage from './pages/ProfilePage'
 
 function App() {
   return (
@@ -46,6 +47,7 @@ function App() {
                 <Route path="/data-deletion" element={<DataDeletionPage />} />
                 <Route path="/about" element={<AboutPage />} />
                 <Route path="/suggest" element={<SuggestPlacePage />} />
+                <Route path="/profile" element={<ProfilePage />} />
                 <Route path="/lgu" element={<LGUDashboardPage />} />
                 <Route path="/lgu/places" element={<LGUPlacesPage />} />
                 <Route path="/lgu/places/:type/new" element={<LGUPlaceFormPage />} />

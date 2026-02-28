@@ -1,4 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react'
+import { getFavorites, toggleFavorite as toggleFav, isFavorite as checkIsFavorite } from '../services/favorites.service'
+import { useAuth } from './AuthContext'
 
 const FavoritesContext = createContext()
 
@@ -11,49 +13,31 @@ export function useFavorites() {
 }
 
 export function FavoritesProvider({ children }) {
-  const [favorites, setFavorites] = useState(() => {
-    try {
-      const storedFavorites = localStorage.getItem('cabiao-favorites')
-      return storedFavorites ? JSON.parse(storedFavorites) : []
-    } catch (error) {
-      console.error('Error parsing favorites from localStorage:', error)
-      return []
-    }
-  })
+  const { user } = useAuth()
+  const uid = user?.uid || 'guest'
+  const [favorites, setFavorites] = useState(() => getFavorites(uid))
 
-  // Save favorites to localStorage whenever they change
   useEffect(() => {
-    if (favorites.length > 0) {
-      localStorage.setItem('cabiao-favorites', JSON.stringify(favorites))
-    } else {
-      localStorage.removeItem('cabiao-favorites')
-    }
-  }, [favorites])
+    setFavorites(getFavorites(uid))
+  }, [uid])
 
   const addFavorite = (item) => {
-    setFavorites((prev) => {
-      const exists = prev.some((fav) => fav.id === item.id && fav.type === item.type)
-      if (!exists) {
-        return [...prev, item]
-      }
-      return prev
-    })
+    const newFavorites = toggleFav(uid, item.type, item.id, item)
+    setFavorites(newFavorites)
   }
 
   const removeFavorite = (itemId, itemType) => {
-    setFavorites((prev) => prev.filter((fav) => !(fav.id === itemId && fav.type === itemType)))
+    const newFavorites = toggleFav(uid, itemType, itemId)
+    setFavorites(newFavorites)
   }
 
   const isFavorite = (itemId, itemType) => {
-    return favorites.some((fav) => fav.id === itemId && fav.type === itemType)
+    return checkIsFavorite(uid, itemType, itemId)
   }
 
   const toggleFavorite = (item) => {
-    if (isFavorite(item.id, item.type)) {
-      removeFavorite(item.id, item.type)
-    } else {
-      addFavorite(item)
-    }
+    const newFavorites = toggleFav(uid, item.type, item.id, item)
+    setFavorites(newFavorites)
   }
 
   const getFavoriteBusinesses = () => {
