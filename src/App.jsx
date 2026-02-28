@@ -19,6 +19,9 @@ import TermsPage from './pages/TermsPage'
 import DataDeletionPage from './pages/DataDeletionPage'
 import AboutPage from './pages/AboutPage'
 import SuggestPlacePage from './pages/SuggestPlacePage'
+import LGUDashboardPage from './pages/LGUDashboardPage'
+import LGUPlacesPage from './pages/lgu/LGUPlacesPage'
+import LGUPlaceFormPage from './pages/lgu/LGUPlaceFormPage'
 
 function App() {
   return (
@@ -43,6 +46,10 @@ function App() {
                 <Route path="/data-deletion" element={<DataDeletionPage />} />
                 <Route path="/about" element={<AboutPage />} />
                 <Route path="/suggest" element={<SuggestPlacePage />} />
+                <Route path="/lgu" element={<LGUDashboardPage />} />
+                <Route path="/lgu/places" element={<LGUPlacesPage />} />
+                <Route path="/lgu/places/:type/new" element={<LGUPlaceFormPage />} />
+                <Route path="/lgu/places/:type/:id/edit" element={<LGUPlaceFormPage />} />
               </Routes>
             </PageTransition>
             <BottomNav />

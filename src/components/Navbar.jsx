@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { isAdmin } from '../services/adminRole.service'
 import LoginModal from './Auth/LoginModal'
 import SearchBar from './SearchBar'
 
@@ -12,13 +13,30 @@ const navLinks = [
   { label: 'Favorites', to: '/favorites' },
   { label: 'Events', to: '/events' },
   { label: 'Rewards', to: '/rewards' },
+  { label: 'Suggest', to: '/suggest' },
+  { label: 'Admin', to: '/lgu/places', adminOnly: true },
 ]
 
 export default function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [authModalOpen, setAuthModalOpen] = useState(false)
+  const [isUserAdmin, setIsUserAdmin] = useState(false)
   const location = useLocation()
   const { user, logout } = useAuth()
+
+  useEffect(() => {
+    async function checkAdmin() {
+      if (user) {
+        const adminStatus = await isAdmin(user.uid)
+        setIsUserAdmin(adminStatus)
+      } else {
+        setIsUserAdmin(false)
+      }
+    }
+    checkAdmin()
+  }, [user])
+
+  const visibleLinks = navLinks.filter(link => !link.adminOnly || isUserAdmin)
   
   const isHomePage = location.pathname === '/'
 
@@ -50,7 +68,7 @@ export default function Navbar() {
 
         {/* Desktop menu */}
         <ul className="hidden items-center gap-8 md:flex">
-          {navLinks.map((link) => (
+          {visibleLinks.map((link) => (
             <li key={link.label}>
               {link.to ? (
                 <Link
@@ -86,6 +104,11 @@ export default function Navbar() {
                   isHomePage ? 'text-white' : 'text-gray-600'
                 }`} title={user.email}>
                   {user.email}
+                </span>
+                <span className={`text-xs truncate ${
+                  isHomePage ? 'text-white/60' : 'text-gray-400'
+                }`} title={user.uid}>
+                  UID: {user.uid?.slice(0, 8)}...
                 </span>
                 <button
                   type="button"
@@ -162,7 +185,7 @@ export default function Navbar() {
             <SearchBar placeholder="Search businesses, destinations..." />
           </div>
           <ul className="flex flex-col gap-2">
-            {navLinks.map((link) => (
+            {visibleLinks.map((link) => (
               <li key={link.label}>
                 {link.to ? (
                   <Link
