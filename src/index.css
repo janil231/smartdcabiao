@@ -1,0 +1,96 @@
+@import "tailwindcss";
+
+@layer base {
+  html {
+    @apply scroll-smooth;
+  }
+  
+  /* Reduced motion support */
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+  
+  body {
+    @apply antialiased text-gray-800 bg-white;
+  }
+}
+
+/* Mobile-safe area padding for fixed bottom elements */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  
+  .bottom-nav-safe {
+    padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+  }
+}
+
+/* Mobile container utilities */
+@layer utilities {
+  .mobile-container {
+    @apply px-4 sm:px-6 lg:px-8;
+  }
+  
+  /* Touch target minimum size */
+  .touch-target {
+    @apply min-h-11 min-w-11;
+  }
+  
+  /* Button press effect */
+  .btn-press {
+    @apply active:scale-[0.98] transition-transform duration-150;
+  }
+}
+
+/* Page transition animations */
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.page-enter {
+  animation: page-enter 220ms ease-out forwards;
+  will-change: opacity, transform;
+}
+
+.reveal {
+  animation: reveal 420ms ease-out forwards;
+  animation-delay: var(--delay, 0ms);
+  will-change: opacity, transform;
+}
+
+/* Disable animations for reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .page-enter,
+  .reveal {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Leaflet custom markers: hide default icon styling */
+.leaflet-div-icon.custom-marker {
+  background: none !important;
+  border: none !important;
+}

@@ -1,0 +1,17 @@
+<svg width="640" height="360" viewBox="0 0 640 360" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="shop-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#10b981;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#14b8a6;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <rect width="640" height="360" fill="url(#shop-gradient)"/>
+  <g transform="translate(320, 180)">
+    <rect x="-35" y="-25" width="70" height="50" rx="3" fill="rgba(255,255,255,0.1)" stroke="rgba(255,255,255,0.3)" stroke-width="2"/>
+    <path d="M -20 -15 L 20 -15 L 20 25 L -20 25 Z" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="2"/>
+    <circle cx="0" cy="5" r="8" fill="rgba(255,255,255,0.4)" stroke="rgba(255,255,255,0.5)" stroke-width="2"/>
+    <path d="M -8 -10 L 8 -10" stroke="rgba(255,255,255,0.5)" stroke-width="2"/>
+    <path d="M 0 -10 L 0 20" stroke="rgba(255,255,255,0.5)" stroke-width="2"/>
+  </g>
+  <text x="320" y="280" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-family="system-ui" font-size="18" font-weight="600">Shop</text>
+</svg>
