@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
 import { useAuth } from '../contexts/AuthContext'
@@ -6,48 +7,17 @@ import { getActiveSeason } from '../services/seasons.service'
 import { getQuestById } from '../services/quests.service'
 import { getUserParticipations, expireMyStaleParticipations } from '../services/participations.service'
 import { getUserSeasonPointsSummary } from '../services/pointsLedger.service'
-import { participation as mockParticipation, rewardTotals as mockRewardTotals, REWARD_STATUS } from '../data'
+import { participation as mockParticipation, rewardTotals as mockRewardTotals } from '../data'
 
-const STATUS_STYLES = {
-  pending: 'bg-yellow-500/10 text-yellow-800 border-yellow-200',
-  released: 'bg-emerald-500/10 text-emerald-800 border-emerald-200',
-  expired: 'bg-red-500/10 text-red-800 border-red-200',
-  joined: 'bg-blue-500/10 text-blue-800 border-blue-200',
-  completed: 'bg-sky-500/10 text-sky-800 border-sky-200',
-  cancelled: 'bg-gray-500/10 text-gray-800 border-gray-200',
+const STATUS_CONFIG = {
+  joined: { style: 'bg-amber-100 text-amber-800 border-amber-200', label: 'Pending', icon: '⏳' },
+  completed: { style: 'bg-emerald-100 text-emerald-800 border-emerald-200', label: 'Completed', icon: '✅' },
+  expired: { style: 'bg-red-100 text-red-800 border-red-200', label: 'Expired', icon: '❌' },
+  cancelled: { style: 'bg-gray-100 text-gray-800 border-gray-200', label: 'Cancelled', icon: '🚫' },
 }
 
-const STATUS_ICONS = {
-  pending: (
-    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-  ),
-  released: (
-    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-  ),
-  expired: (
-    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-  ),
-  joined: (
-    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-  ),
-  completed: (
-    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-  ),
-}
-
-function ParticipationCard({ participation, questTitle, points }) {
-  const statusStyle = STATUS_STYLES[participation.rewardStatus] || STATUS_STYLES[participation.status] || 'bg-gray-100 text-gray-800'
-  const icon = STATUS_ICONS[participation.rewardStatus] || STATUS_ICONS[participation.status] || STATUS_ICONS.pending
+function ParticipationCard({ participation, questTitle, points, onGoToQuest }) {
+  const statusConfig = STATUS_CONFIG[participation.status] || STATUS_CONFIG.cancelled
 
   const formatDate = (dateStr) => {
     if (!dateStr) return ''
@@ -55,72 +25,82 @@ function ParticipationCard({ participation, questTitle, points }) {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
   }
 
-  const getStatusLabel = () => {
-    if (participation.rewardStatus === 'released') {
-      return `${points} pts released`
-    }
-    if (participation.rewardStatus === 'pending') {
-      return 'Pending completion'
-    }
-    if (participation.rewardStatus === 'expired' || participation.status === 'expired') {
-      return 'Expired'
-    }
-    if (participation.status === 'completed') {
-      return 'Completed'
-    }
-    if (participation.status === 'cancelled') {
-      return 'Cancelled'
-    }
-    return participation.status || 'Unknown'
-  }
-
   const joinedDate = participation.joinedAt ? formatDate(participation.joinedAt) : ''
   const completedDate = participation.completedAt ? formatDate(participation.completedAt) : ''
+  const expiresDate = participation.expiresAt ? formatDate(participation.expiresAt) : ''
+
+  const isPending = participation.status === 'joined'
+  const isReleased = participation.rewardStatus === 'released'
 
   return (
     <article className="flex flex-col rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition hover:shadow-md">
-      <h2 className="text-lg font-semibold text-gray-900">{questTitle || 'Unknown Quest'}</h2>
-      <p className="mt-1 text-sm text-gray-500">
-        {joinedDate && `Joined: ${joinedDate}`}
-        {completedDate && ` • Completed: ${completedDate}`}
-      </p>
-      <div className="mt-4 flex flex-wrap items-start gap-3">
-        <span className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium ${statusStyle}`}>
-          {icon}
-          {getStatusLabel()}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1">
+          <h3 className="text-lg font-semibold text-gray-900">{questTitle || 'Unknown Quest'}</h3>
+          <p className="mt-1 text-sm text-gray-500">
+            {joinedDate && `Joined: ${joinedDate}`}
+            {completedDate && ` • Completed: ${completedDate}`}
+            {!completedDate && expiresDate && isPending && ` • Expires: ${expiresDate}`}
+          </p>
+        </div>
+        <span className={`shrink-0 inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium ${statusConfig.style}`}>
+          {statusConfig.icon} {statusConfig.label}
         </span>
       </div>
-      {participation.rewardStatus === 'released' && (
-        <p className="mt-3 text-sm text-gray-600">
-          Points have been added to your account.
-        </p>
-      )}
-      {participation.rewardStatus === 'pending' && participation.expiresAt && (
-        <p className="mt-3 text-sm text-gray-600">
-          Complete by {formatDate(participation.expiresAt)} to receive your reward.
-        </p>
+
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        {isReleased ? (
+          <div className="flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2">
+            <span className="text-emerald-700 font-bold text-lg">+{points || 0}</span>
+            <span className="text-emerald-600 text-sm">points released</span>
+          </div>
+        ) : isPending ? (
+          <div className="flex items-center gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
+            <span className="text-amber-700 font-medium">Pending</span>
+            <span className="text-amber-600 text-sm">{points || 0} points</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2">
+            <span className="text-gray-500 text-sm">
+              {participation.status === 'expired' ? 'No points (expired)' : 'No points'}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {isPending && (
+        <div className="mt-4">
+          <button
+            onClick={() => onGoToQuest(participation.questId)}
+            className="text-sm font-medium text-emerald-600 hover:text-emerald-700"
+          >
+            → Go to quest
+          </button>
+        </div>
       )}
     </article>
   )
 }
 
 function MockRewardCard({ entry }) {
-  const statusStyle = STATUS_STYLES[entry.rewardStatus] || STATUS_STYLES.completed
-  const icon = STATUS_ICONS[entry.rewardStatus] || STATUS_ICONS.completed
+  const statusConfig = STATUS_CONFIG[entry.status] || STATUS_CONFIG.cancelled
 
   return (
-    <article className="flex flex-col rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition hover:shadow-md">
-      <h2 className="text-lg font-semibold text-gray-900">{entry.activityName}</h2>
-      <p className="mt-1 text-sm text-gray-500">{entry.date}</p>
-      <div className="mt-4 flex flex-wrap items-start gap-3">
-        <span className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium ${statusStyle}`}>
-          {icon}
-          {entry.rewardLabel}
+    <article className="flex flex-col rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1">
+          <h3 className="text-lg font-semibold text-gray-900">{entry.activityName}</h3>
+          <p className="mt-1 text-sm text-gray-500">{entry.date}</p>
+        </div>
+        <span className={`shrink-0 inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium ${statusConfig.style}`}>
+          {statusConfig.icon} {statusConfig.label}
         </span>
       </div>
-      {entry.rewardDetail && (
-        <p className="mt-3 text-sm text-gray-600">{entry.rewardDetail}</p>
-      )}
+      <div className="mt-4">
+        <div className="rounded-lg bg-gray-50 border border-gray-200 px-3 py-2">
+          <span className="text-gray-600 text-sm">{entry.rewardLabel || 'Sample reward'}</span>
+        </div>
+      </div>
     </article>
   )
 }
@@ -175,8 +155,7 @@ export default function RewardsPreviewPage() {
         } else {
           setUseMockData(true)
         }
-      } catch (err) {
-        console.error('Error loading rewards:', err)
+      } catch {
         setUseMockData(true)
       } finally {
         setLoading(false)
@@ -186,94 +165,164 @@ export default function RewardsPreviewPage() {
     loadData()
   }, [user])
 
-  const pendingCount = participations.filter(p => p.status === 'joined').length
-  const completedCount = participations.filter(p => p.status === 'completed').length
-  const releasedCount = participations.filter(p => p.rewardStatus === 'released').length
+  const sortedParticipations = useMemo(() => {
+    return [...participations].sort((a, b) => {
+      const dateA = new Date(b.joinedAt || 0)
+      const dateB = new Date(a.joinedAt || 0)
+      return dateA - dateB
+    })
+  }, [participations])
+
+  const stats = useMemo(() => {
+    const pending = participations.filter(p => p.status === 'joined').length
+    const completed = participations.filter(p => p.status === 'completed').length
+    const released = participations.filter(p => p.rewardStatus === 'released').length
+    const expired = participations.filter(p => p.status === 'expired' || p.status === 'cancelled').length
+    return { pending, completed, released, expired }
+  }, [participations])
+
+  const getSeasonCountdown = () => {
+    if (!activeSeason?.endAt) return ''
+    const endDate = new Date(activeSeason.endAt)
+    const now = new Date()
+    const daysLeft = Math.ceil((endDate - now) / (1000 * 60 * 60 * 24))
+    if (daysLeft <= 0) return 'Season ended'
+    return `Ends in ${daysLeft} day${daysLeft > 1 ? 's' : ''}`
+  }
+
+  const handleGoToQuest = (questId) => {
+    window.location.href = `/events?focusQuestId=${questId}`
+  }
 
   return (
     <div className="flex min-h-screen flex-col">
       <Navbar />
       <main className="flex-1 pb-20 md:pb-0">
         <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-          <div className="mb-10">
+          <div className="mb-8">
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl">
               Rewards & Participation
             </h1>
             <p className="mt-3 max-w-2xl text-lg text-gray-600">
-              Your community actions support city improvement and local businesses.
-              {user ? (useMockData === false ? ' Here are your participation and earned rewards.' : ' Loading…') : ' Sign in to see your rewards and participation.'}
+              Track your quest participation and rewards. Complete quests to earn points!
             </p>
           </div>
 
           {activeSeason && (
-            <div className="mb-6 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-2 text-sm text-emerald-800">
-              Season: <strong>{activeSeason.name}</strong>
+            <div className="mb-6 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <span className="text-emerald-800 font-medium">Season: </span>
+                  <strong className="text-emerald-900">{activeSeason.name}</strong>
+                  {activeSeason.startAt && activeSeason.endAt && (
+                    <span className="text-emerald-600 ml-2">
+                      ({new Date(activeSeason.startAt).toLocaleDateString()} - {new Date(activeSeason.endAt).toLocaleDateString()})
+                    </span>
+                  )}
+                </div>
+                <span className="text-sm font-medium text-emerald-700">
+                  {getSeasonCountdown()}
+                </span>
+              </div>
             </div>
           )}
 
           {!user && (
-            <div className="mb-10 rounded-xl border border-amber-200 bg-amber-50 p-5 text-amber-800">
+            <div className="mb-8 rounded-xl border border-amber-200 bg-amber-50 p-5 text-amber-800">
               <p className="font-medium">Preview mode</p>
               <p className="mt-1 text-sm">Below is sample data. Log in to see your real points and rewards from completed quests.</p>
             </div>
           )}
 
           {user && useMockData && !loading && (
-            <div className="mb-10 rounded-xl border border-amber-200 bg-amber-50 p-5 text-amber-800">
+            <div className="mb-8 rounded-xl border border-amber-200 bg-amber-50 p-5 text-amber-800">
               <p className="font-medium">No active season</p>
               <p className="mt-1 text-sm">There are no active quests at the moment. Check back soon!</p>
             </div>
           )}
 
-          <div className="mb-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-xl border border-gray-200 bg-gradient-to-br from-amber-50 to-orange-50 p-5">
-              <p className="text-sm font-medium text-amber-800">Total points (season)</p>
-              <p className="mt-1 text-2xl font-bold text-amber-900 sm:text-3xl">{loading && user ? '…' : (useMockData ? mockRewardTotals.totalPoints : totalPoints)}</p>
-              <p className="mt-1 text-xs text-amber-700">Earned from quests</p>
+          <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 p-5">
+              <p className="text-sm font-medium text-amber-800">Total Points</p>
+              <p className="mt-1 text-3xl font-bold text-amber-900">
+                {loading && user ? '...' : (useMockData ? mockRewardTotals.totalPoints : totalPoints)}
+              </p>
+              <p className="mt-1 text-xs text-amber-700">This season</p>
             </div>
-            <div className="rounded-xl border border-gray-200 bg-gradient-to-br from-emerald-50 to-teal-50 p-5">
-              <p className="text-sm font-medium text-emerald-800">Rewards released</p>
-              <p className="mt-1 text-2xl font-bold text-emerald-900 sm:text-3xl">{loading && user ? '…' : (useMockData ? mockRewardTotals.voucherCount : releasedCount)}</p>
+            <div className="rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-teal-50 p-5">
+              <p className="text-sm font-medium text-emerald-800">Rewards Released</p>
+              <p className="mt-1 text-3xl font-bold text-emerald-900">
+                {loading && user ? '...' : (useMockData ? mockRewardTotals.voucherCount : stats.released)}
+              </p>
               <p className="mt-1 text-xs text-emerald-700">Points unlocked</p>
             </div>
-            <div className="rounded-xl border border-gray-200 bg-gradient-to-br from-blue-50 to-indigo-50 p-5">
-              <p className="text-sm font-medium text-blue-800">Quests completed</p>
-              <p className="mt-1 text-2xl font-bold text-blue-900 sm:text-3xl">{loading && user ? '…' : (useMockData ? mockParticipation.filter(p => p.rewardStatus === 'completed').length : completedCount)}</p>
-              <p className="mt-1 text-xs text-blue-700">Finished quests</p>
+            <div className="rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50 p-5">
+              <p className="text-sm font-medium text-blue-800">Quests Completed</p>
+              <p className="mt-1 text-3xl font-bold text-blue-900">
+                {loading && user ? '...' : (useMockData ? mockParticipation.filter(p => p.status === 'completed').length : stats.completed)}
+              </p>
+              <p className="mt-1 text-xs text-blue-700">Finished</p>
             </div>
-            <div className="rounded-xl border border-gray-200 bg-gradient-to-br from-yellow-50 to-amber-50 p-5">
+            <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-yellow-50 to-amber-50 p-5">
               <p className="text-sm font-medium text-yellow-800">Pending</p>
-              <p className="mt-1 text-2xl font-bold text-yellow-900 sm:text-3xl">{loading && user ? '…' : pendingCount}</p>
+              <p className="mt-1 text-3xl font-bold text-yellow-900">
+                {loading && user ? '...' : stats.pending}
+              </p>
               <p className="mt-1 text-xs text-yellow-700">Awaiting completion</p>
             </div>
           </div>
 
           <div>
-            <h2 className="text-xl font-semibold text-gray-900">Your participation</h2>
-            <p className="mt-1 text-sm text-gray-600">
-              Quests you've joined and rewards earned. Complete quests within the deadline to receive your points.
-            </p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900">Your Quest History</h2>
+                <p className="mt-1 text-sm text-gray-600">
+                  {participations.length > 0 
+                    ? `Showing ${participations.length} quest${participations.length !== 1 ? 's' : ''} - most recent first`
+                    : 'Join quests on the Events page to start earning rewards!'
+                  }
+                </p>
+              </div>
+              {participations.length > 0 && (
+                <Link
+                  to="/events"
+                  className="text-sm font-medium text-emerald-600 hover:text-emerald-700"
+                >
+                  Browse quests →
+                </Link>
+              )}
+            </div>
+
             {loading && user ? (
               <p className="mt-6 text-gray-500">Loading…</p>
             ) : (
               <div className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
                 {useMockData ? (
                   mockParticipation.length === 0 ? (
-                    <p className="text-gray-500">No participation yet. Join quests on the Events page.</p>
+                    <p className="text-gray-500 col-span-full">No participation yet. Join quests on the Events page.</p>
                   ) : (
                     mockParticipation.map((entry, index) => (
-                      <MockRewardCard key={`${entry.activityId ?? index}-${entry.activityName}`} entry={entry} index={index} />
+                      <MockRewardCard key={`${entry.activityId ?? index}-${entry.activityName}`} entry={entry} />
                     ))
                   )
                 ) : participations.length === 0 ? (
-                  <p className="text-gray-500">No participation yet. Join quests on the Events page.</p>
+                  <div className="col-span-full rounded-xl border border-gray-200 bg-gray-50 p-8 text-center">
+                    <p className="text-gray-500 mb-4">You haven't joined any quests yet.</p>
+                    <Link
+                      to="/events"
+                      className="inline-flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium"
+                    >
+                      Browse Available Quests
+                    </Link>
+                  </div>
                 ) : (
-                  participations.map((entry, index) => (
+                  sortedParticipations.map((entry, index) => (
                     <ParticipationCard 
                       key={`${entry.questId ?? index}-${entry.id}`} 
                       participation={entry} 
                       questTitle={questTitles[entry.questId]}
-                      points={entry.pointsAwarded}
+                      points={entry.pointsAwarded || entry.status === 'completed' ? (entry.pointsAwarded || 0) : 0}
+                      onGoToQuest={handleGoToQuest}
                     />
                   ))
                 )}

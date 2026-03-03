@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Link } from 'react-router-dom'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
 import { useAuth } from '../contexts/AuthContext'
@@ -25,50 +25,58 @@ const TYPE_LABELS = {
   [ACTIVITY_TYPES.event]: 'Event',
 }
 
-const QUEST_STATUS_STYLES = {
-  joined: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-  completed: 'bg-blue-100 text-blue-800 border-blue-200',
-  cancelled: 'bg-gray-100 text-gray-800 border-gray-200',
-  expired: 'bg-red-100 text-red-800 border-red-200',
-}
-
-const REWARD_STATUS_STYLES = {
-  pending: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-  released: 'bg-green-100 text-green-800 border-green-200',
-  expired: 'bg-red-100 text-red-800 border-red-200',
-}
-
-function QuestCard({ quest, participation, onJoin, onCancel, isLoading }) {
+function QuestCard({ quest, participation, onJoin, onCancel, isLoading, focused }) {
   const typeStyle = TYPE_STYLES[quest.category] || 'bg-gray-100 text-gray-700 border-gray-200'
   const typeLabel = TYPE_LABELS[quest.category] || 'Quest'
 
   const slotsLeft = quest.capacity - (quest.reservedCount || 0)
   const isFull = slotsLeft <= 0
   
+  const isJoined = participation?.status === 'joined'
+  const isCompleted = participation?.status === 'completed'
+  const isCancelledOrExpired = participation?.status === 'cancelled' || participation?.status === 'expired'
+  
+  const formatDate = (dateStr) => {
+    if (!dateStr) return ''
+    const date = new Date(dateStr)
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  }
+
   const getStatusBadge = () => {
     if (!participation) return null
     
-    const statusStyle = QUEST_STATUS_STYLES[participation.status] || 'bg-gray-100 text-gray-800'
+    const statusConfig = {
+      joined: { style: 'bg-amber-100 text-amber-800 border-amber-200', label: 'Joined' },
+      completed: { style: 'bg-emerald-100 text-emerald-800 border-emerald-200', label: 'Completed' },
+      expired: { style: 'bg-red-100 text-red-800 border-red-200', label: 'Expired' },
+      cancelled: { style: 'bg-gray-100 text-gray-800 border-gray-200', label: 'Cancelled' },
+    }
+    
+    const config = statusConfig[participation.status] || statusConfig.cancelled
     
     return (
-      <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium ${statusStyle}`}>
-        {participation.status === 'joined' && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />}
-        {participation.status.charAt(0).toUpperCase() + participation.status.slice(1)}
+      <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium ${config.style}`}>
+        {participation.status === 'joined' && <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />}
+        {config.label}
       </span>
     )
   }
 
   const getRewardBadge = () => {
-    if (!participation || participation.rewardStatus === 'pending') return null
-    
-    const rewardStyle = REWARD_STATUS_STYLES[participation.rewardStatus] || 'bg-gray-100 text-gray-800'
-    const rewardLabel = participation.rewardStatus === 'released' 
-      ? `${participation.pointsAwarded || quest.points} pts released`
-      : 'Reward expired'
+    if (!participation) return null
+
+    const rewardConfig = {
+      pending: { style: 'bg-yellow-100 text-yellow-800 border-yellow-200', label: 'Reward: Pending' },
+      released: { style: 'bg-emerald-100 text-emerald-800 border-emerald-200', label: `+${participation.pointsAwarded || quest.points} pts released` },
+      expired: { style: 'bg-red-100 text-red-800 border-red-200', label: 'Reward: Expired' },
+    }
+
+    const status = participation.rewardStatus || participation.status
+    const config = rewardConfig[status] || rewardConfig.pending
     
     return (
-      <span className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs font-medium ${rewardStyle}`}>
-        {rewardLabel}
+      <span className={`inline-flex items-center rounded border px-2 py-0.5 text-xs font-medium ${config.style}`}>
+        {config.label}
       </span>
     )
   }
@@ -81,7 +89,13 @@ function QuestCard({ quest, participation, onJoin, onCancel, isLoading }) {
     const isExpired = expiresAt < now
     
     if (isExpired) {
-      return <span className="text-red-600 font-medium">Expired</span>
+      return (
+        <div className="mt-2 rounded-lg bg-red-50 border border-red-200 px-3 py-2">
+          <span className="text-red-700 font-medium text-sm">
+            Expired on {formatDate(participation.expiresAt)}
+          </span>
+        </div>
+      )
     }
     
     const hoursLeft = Math.max(0, Math.floor((expiresAt - now) / (1000 * 60 * 60)))
@@ -90,24 +104,25 @@ function QuestCard({ quest, participation, onJoin, onCancel, isLoading }) {
     
     let timeText
     if (daysLeft > 0) {
-      timeText = `${daysLeft}d ${remainingHours}h left`
+      timeText = `${daysLeft}d ${remainingHours}h`
     } else if (hoursLeft > 0) {
-      timeText = `${hoursLeft}h left`
+      timeText = `${hoursLeft}h`
     } else {
       const minsLeft = Math.floor((expiresAt - now) / (1000 * 60))
-      timeText = `${minsLeft}m left`
+      timeText = `${minsLeft}m`
     }
     
+    const isUrgent = hoursLeft < 6
+    
     return (
-      <span className={hoursLeft < 6 ? 'text-orange-600 font-medium' : 'text-gray-600'}>
-        Complete by: {expiresAt.toLocaleDateString()} ({timeText})
-      </span>
+      <div className={`mt-2 rounded-lg px-3 py-2 ${isUrgent ? 'bg-orange-50 border border-orange-200' : 'bg-blue-50 border border-blue-200'}`}>
+        <span className={isUrgent ? 'text-orange-700 font-medium text-sm' : 'text-blue-700 text-sm'}>
+          {isUrgent ? '⏰ ' : '⏳ '}
+          Time left: {timeText} (complete by {formatDate(participation.expiresAt)})
+        </span>
+      </div>
     )
   }
-
-  const isJoined = participation?.status === 'joined'
-  const isCompleted = participation?.status === 'completed'
-  const isCancelledOrExpired = participation?.status === 'cancelled' || participation?.status === 'expired'
 
   const handleAction = () => {
     if (isJoined) {
@@ -117,14 +132,13 @@ function QuestCard({ quest, participation, onJoin, onCancel, isLoading }) {
     }
   }
 
-  const formatDate = (dateStr) => {
-    if (!dateStr) return ''
-    const date = new Date(dateStr)
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-  }
-
   return (
-    <article className="flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition hover:shadow-md">
+    <article 
+      ref={focused ? (el) => el?.scrollIntoView({ behavior: 'smooth', block: 'center' }) : undefined}
+      className={`flex flex-col overflow-hidden rounded-xl border bg-white shadow-sm transition hover:shadow-md ${
+        focused ? 'border-emerald-400 ring-2 ring-emerald-200' : 'border-gray-200'
+      }`}
+    >
       <div className="flex flex-1 flex-col p-5">
         <div className="flex flex-wrap items-center gap-2">
           <span className={`inline-block w-fit rounded border px-2 py-0.5 text-xs font-medium uppercase tracking-wider ${typeStyle}`}>
@@ -138,42 +152,42 @@ function QuestCard({ quest, participation, onJoin, onCancel, isLoading }) {
         <p className="mt-2 flex-1 text-sm text-gray-600 line-clamp-3">{quest.description}</p>
         
         <dl className="mt-4 flex flex-col gap-1.5 text-sm text-gray-500">
-          <div className="flex items-start gap-2">
-            <dt className="shrink-0 font-medium text-gray-600">Dates</dt>
+          <div className="flex items-center gap-2">
+            <dt className="shrink-0 font-medium">📅</dt>
             <dd>{formatDate(quest.startAt)} - {formatDate(quest.endAt)}</dd>
           </div>
-          <div className="flex items-start gap-2">
-            <dt className="shrink-0 font-medium text-gray-600">Points</dt>
-            <dd className="text-amber-600 font-medium">{quest.points} pts</dd>
+          <div className="flex items-center gap-2">
+            <dt className="shrink-0 font-medium">⭐</dt>
+            <dd className="text-amber-600 font-semibold">{quest.points} points</dd>
           </div>
-          <div className="flex items-start gap-2">
-            <dt className="shrink-0 font-medium text-gray-600">Slots</dt>
-            <dd className={isFull ? 'text-red-600 font-medium' : ''}>
-              {slotsLeft} of {quest.capacity} available
+          <div className="flex items-center gap-2">
+            <dt className="shrink-0 font-medium">🎯</dt>
+            <dd className={isFull ? 'text-red-600 font-semibold' : slotsLeft <= 3 ? 'text-orange-600 font-medium' : ''}>
+              {isFull ? (
+                <span>Slots: FULL</span>
+              ) : (
+                <span>Slots left: {slotsLeft} / {quest.capacity}</span>
+              )}
             </dd>
           </div>
-          {getDeadlineInfo() && (
-            <div className="flex items-start gap-2">
-              <dt className="shrink-0 font-medium text-gray-600">Deadline</dt>
-              <dd>{getDeadlineInfo()}</dd>
-            </div>
-          )}
         </dl>
+        
+        {getDeadlineInfo()}
         
         <button
           type="button"
           onClick={handleAction}
-          disabled={isLoading || isCompleted || isCancelledOrExpired || (isJoined === false && isFull)}
-          className={`mt-4 inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 ${
+          disabled={isLoading || isCompleted || isCancelledOrExpired || (!isJoined && isFull)}
+          className={`mt-4 inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition focus:outline-none focus:ring-2 focus:ring-offset-2 ${
             isCompleted
-              ? 'cursor-default bg-blue-100 text-blue-600'
+              ? 'cursor-default bg-emerald-100 text-emerald-700'
               : isCancelledOrExpired
-              ? 'cursor-default bg-gray-100 text-gray-500'
+              ? 'cursor-default bg-gray-100 text-gray-400'
               : isJoined
-              ? 'bg-red-100 text-red-700 hover:bg-red-200'
+              ? 'bg-red-100 text-red-700 hover:bg-red-200 focus:ring-red-400'
               : isFull
               ? 'cursor-not-allowed bg-gray-100 text-gray-400'
-              : 'bg-emerald-600 text-white hover:bg-emerald-700'
+              : 'bg-emerald-600 text-white hover:bg-emerald-700 focus:ring-emerald-500'
           }`}
         >
           {isLoading ? (
@@ -190,16 +204,16 @@ function QuestCard({ quest, participation, onJoin, onCancel, isLoading }) {
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
-              Cancel
+              Cancel Joining
             </>
           ) : isFull ? (
-            'Full'
+            'Full - No Slots Available'
           ) : (
             <>
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
               </svg>
-              Join
+              Join Quest
             </>
           )}
         </button>
@@ -226,12 +240,12 @@ function MockQuestCard({ activity }) {
         <h2 className="mt-3 text-lg font-semibold text-gray-900">{activity.name}</h2>
         <p className="mt-2 flex-1 text-sm text-gray-600 line-clamp-3">{activity.description}</p>
         <dl className="mt-4 flex flex-col gap-1.5 text-sm text-gray-500">
-          <div className="flex items-start gap-2">
-            <dt className="shrink-0 font-medium text-gray-600">Date</dt>
+          <div className="flex items-center gap-2">
+            <dt className="shrink-0 font-medium">📅</dt>
             <dd>{activity.date}</dd>
           </div>
-          <div className="flex items-start gap-2">
-            <dt className="shrink-0 font-medium text-gray-600">Location</dt>
+          <div className="flex items-center gap-2">
+            <dt className="shrink-0 font-medium">📍</dt>
             <dd>{activity.location}</dd>
           </div>
         </dl>
@@ -243,8 +257,42 @@ function MockQuestCard({ activity }) {
   )
 }
 
+function CancelConfirmModal({ isOpen, onClose, onConfirm, isLoading, questTitle }) {
+  if (!isOpen) return null
+  
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
+        <h3 className="text-lg font-bold text-gray-900">Cancel Joining?</h3>
+        <p className="mt-2 text-gray-600">
+          Are you sure you want to cancel your joining for "{questTitle}"? Your slot will be freed and you won't receive the points.
+        </p>
+        <div className="mt-6 flex gap-3">
+          <button
+            onClick={onClose}
+            disabled={isLoading}
+            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+          >
+            Keep My Spot
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={isLoading}
+            className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-gray-300"
+          >
+            {isLoading ? 'Cancelling...' : 'Cancel Joining'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function CommunityActivitiesPage() {
   const { user } = useAuth()
+  const [searchParams] = useSearchParams()
+  const focusQuestId = searchParams.get('focusQuestId')
+  
   const [quests, setQuests] = useState([])
   const [participations, setParticipations] = useState({})
   const [loading, setLoading] = useState(true)
@@ -252,6 +300,14 @@ export default function CommunityActivitiesPage() {
   const [actionLoading, setActionLoading] = useState(null)
   const [activeSeason, setActiveSeason] = useState(null)
   const [useMockData, setUseMockData] = useState(false)
+  const [activeTab, setActiveTab] = useState('all')
+  const [toast, setToast] = useState(null)
+  const [cancelConfirm, setCancelConfirm] = useState(null)
+
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type })
+    setTimeout(() => setToast(null), 4000)
+  }
 
   const loadQuests = useCallback(async () => {
     try {
@@ -286,8 +342,7 @@ export default function CommunityActivitiesPage() {
       } else {
         setUseMockData(true)
       }
-    } catch (err) {
-      console.error('Error loading quests:', err)
+    } catch {
       setUseMockData(true)
     } finally {
       setLoading(false)
@@ -298,12 +353,24 @@ export default function CommunityActivitiesPage() {
     loadQuests()
   }, [loadQuests])
 
+  const myQuestIds = useMemo(() => {
+    return new Set(Object.keys(participations))
+  }, [participations])
+
+  const filteredQuests = useMemo(() => {
+    if (activeTab === 'my') {
+      return quests.filter(q => myQuestIds.has(q.id))
+    }
+    return quests
+  }, [quests, activeTab, myQuestIds])
+
   const handleJoin = async (questId) => {
     if (!user) return
     setActionLoading(questId)
     setError(null)
     
     try {
+      const quest = quests.find(q => q.id === questId)
       await joinQuest({
         uid: user.uid,
         questId,
@@ -316,15 +383,21 @@ export default function CommunityActivitiesPage() {
         partsMap[p.questId] = p
       })
       setParticipations(partsMap)
+      
+      const expiresDate = new Date(Date.now() + (quest?.gracePeriodHours || 24) * 60 * 60 * 1000)
+      showToast(`🎉 Joined! Complete by ${expiresDate.toLocaleDateString()} to earn ${quest?.points || 0} points.`, 'success')
     } catch (err) {
       setError(err.message ?? 'Failed to join quest')
+      showToast(err.message ?? 'Failed to join quest', 'error')
     } finally {
       setActionLoading(null)
     }
   }
 
-  const handleCancel = async (questId) => {
-    if (!user) return
+  const handleCancel = async () => {
+    if (!user || !cancelConfirm) return
+    const questId = cancelConfirm
+    
     setActionLoading(questId)
     setError(null)
     
@@ -340,15 +413,37 @@ export default function CommunityActivitiesPage() {
         partsMap[p.questId] = p
       })
       setParticipations(partsMap)
+      
+      showToast('Your spot has been released.', 'success')
+      setCancelConfirm(null)
     } catch (err) {
       setError(err.message ?? 'Failed to cancel quest')
+      showToast(err.message ?? 'Failed to cancel quest', 'error')
     } finally {
       setActionLoading(null)
     }
   }
 
-  const joinedCount = Object.values(participations).filter(p => p.status === 'joined').length
-  const completedCount = Object.values(participations).filter(p => p.status === 'completed').length
+  const myQuestsCount = useMemo(() => {
+    return Object.keys(participations).length
+  }, [participations])
+
+  const joinedCount = useMemo(() => {
+    return Object.values(participations).filter(p => p.status === 'joined').length
+  }, [participations])
+
+  const completedCount = useMemo(() => {
+    return Object.values(participations).filter(p => p.status === 'completed').length
+  }, [participations])
+
+  const getSeasonCountdown = () => {
+    if (!activeSeason?.endAt) return null
+    const endDate = new Date(activeSeason.endAt)
+    const now = new Date()
+    const daysLeft = Math.ceil((endDate - now) / (1000 * 60 * 60 * 24))
+    if (daysLeft <= 0) return 'Season ended'
+    return `Ends in ${daysLeft} day${daysLeft > 1 ? 's' : ''}`
+  }
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -365,53 +460,100 @@ export default function CommunityActivitiesPage() {
                 {user ? ' Your participation is saved to your account.' : ' Sign in to save your participation.'}
               </p>
             </div>
-            {error && (
-              <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-                {error}
-              </p>
-            )}
-            <div className="flex flex-wrap items-center gap-3">
-              {joinedCount > 0 && (
-                <p className="text-sm font-medium text-emerald-700">
-                  {joinedCount} joined, {completedCount} completed
-                </p>
+          </div>
+
+          {activeSeason && (
+            <div className="mt-4 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <span className="text-emerald-800 font-medium">Season: </span>
+                  <strong className="text-emerald-900">{activeSeason.name}</strong>
+                  {activeSeason.startAt && activeSeason.endAt && (
+                    <span className="text-emerald-600 ml-2">
+                      ({new Date(activeSeason.startAt).toLocaleDateString()} - {new Date(activeSeason.endAt).toLocaleDateString()})
+                    </span>
+                  )}
+                </div>
+                <span className="text-sm font-medium text-emerald-700">
+                  {getSeasonCountdown()}
+                </span>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-6 flex gap-2 border-b border-gray-200">
+            <button
+              onClick={() => setActiveTab('all')}
+              className={`px-4 py-2 -mb-px text-sm font-medium border-b-2 transition ${
+                activeTab === 'all'
+                  ? 'border-emerald-500 text-emerald-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              All Quests
+              {quests.length > 0 && (
+                <span className="ml-2 text-xs bg-gray-200 px-2 py-0.5 rounded-full">{quests.length}</span>
               )}
+            </button>
+            <button
+              onClick={() => setActiveTab('my')}
+              disabled={!user || myQuestsCount === 0}
+              className={`px-4 py-2 -mb-px text-sm font-medium border-b-2 transition ${
+                activeTab === 'my'
+                  ? 'border-emerald-500 text-emerald-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed'
+              }`}
+            >
+              My Quests
+              {user && myQuestsCount > 0 && (
+                <span className="ml-2 text-xs bg-emerald-100 px-2 py-0.5 rounded-full">{myQuestsCount}</span>
+              )}
+            </button>
+          </div>
+
+          {user && joinedCount > 0 && (
+            <div className="mt-4 flex flex-wrap items-center gap-4 text-sm">
+              <span className="text-amber-700 font-medium">⏳ {joinedCount} pending</span>
+              <span className="text-emerald-700 font-medium">✅ {completedCount} completed</span>
               <Link
                 to="/rewards"
-                className="text-sm font-medium text-emerald-600 hover:text-emerald-700"
+                className="ml-auto text-emerald-600 hover:text-emerald-700 font-medium"
               >
                 View rewards →
               </Link>
             </div>
-          </div>
+          )}
 
-          {activeSeason && (
-            <div className="mt-4 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-2 text-sm text-emerald-800">
-              Season: <strong>{activeSeason.name}</strong>
-              {activeSeason.startAt && activeSeason.endAt && (
-                <span> ({new Date(activeSeason.startAt).toLocaleDateString()} - {new Date(activeSeason.endAt).toLocaleDateString()})</span>
-              )}
+          {error && (
+            <div className="mt-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3">
+              <p className="text-sm text-red-700">{error}</p>
             </div>
           )}
 
-          <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {loading ? (
               <p className="col-span-full text-center text-gray-500">Loading quests...</p>
             ) : useMockData ? (
               activities.slice(0, 6).map((activity) => (
-                <MockQuestCard key={activity.id} activity={activity} index={activity.id} />
+                <MockQuestCard key={activity.id} activity={activity} />
               ))
-            ) : quests.length === 0 ? (
-              <p className="col-span-full text-center text-gray-500">No active quests at the moment. Check back soon!</p>
+            ) : filteredQuests.length === 0 ? (
+              <p className="col-span-full text-center text-gray-500">
+                {activeTab === 'my' ? 'You haven\'t joined any quests yet.' : 'No active quests at the moment. Check back soon!'}
+              </p>
             ) : (
-              quests.map((quest) => (
+              filteredQuests.map((quest) => (
                 <QuestCard
                   key={quest.id}
                   quest={quest}
                   participation={participations[quest.id]}
                   onJoin={handleJoin}
-                  onCancel={handleCancel}
+                  onCancel={(id) => {
+                    const q = quests.find(qu => qu.id === id)
+                    setCancelConfirm({ questId: id, title: q?.title })
+                  }}
                   isLoading={actionLoading === quest.id}
+                  focused={focusQuestId === quest.id}
                 />
               ))
             )}
@@ -419,6 +561,22 @@ export default function CommunityActivitiesPage() {
         </div>
       </main>
       <Footer />
+
+      <CancelConfirmModal
+        isOpen={!!cancelConfirm}
+        onClose={() => setCancelConfirm(null)}
+        onConfirm={handleCancel}
+        isLoading={actionLoading !== null}
+        questTitle={cancelConfirm?.title}
+      />
+
+      {toast && (
+        <div className={`fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg z-50 ${
+          toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'
+        }`}>
+          {toast.message}
+        </div>
+      )}
     </div>
   )
 }

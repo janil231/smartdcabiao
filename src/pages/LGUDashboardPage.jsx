@@ -1225,6 +1225,12 @@ export default function LGUDashboardPage() {
             >
               Places
             </Link>
+            <Link
+              to="/lgu/checkin"
+              className="flex-1 py-3 px-4 font-medium text-sm rounded-lg transition-colors bg-emerald-600 text-white hover:bg-emerald-700 text-center"
+            >
+              Check-in
+            </Link>
           </div>
 
           {loading ? (
