@@ -14,7 +14,7 @@ const navLinks = [
   { label: 'Events', to: '/events' },
   { label: 'Rewards', to: '/rewards' },
   { label: 'Suggest', to: '/suggest' },
-  { label: 'Admin', to: '/lgu/places', adminOnly: true },
+  { label: 'Admin', to: '/lgu', adminOnly: true },
   { label: 'Profile', to: '/profile', authOnly: true },
 ]
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
 import { useAuth } from '../contexts/AuthContext'
@@ -15,11 +15,31 @@ import {
   markReportInProgress, 
   markReportResolved 
 } from '../services/adminReports.service'
+import { 
+  getActiveSeason, 
+  listSeasons, 
+  createSeason, 
+  activateSeason, 
+  closeSeason 
+} from '../services/seasons.service'
+import { 
+  listActiveQuests, 
+  listQuestsBySeason,
+  createQuest,
+  updateQuest,
+  activateQuest,
+  deactivateQuest
+} from '../services/quests.service'
+import { getQuestParticipations, adminMarkCompleted, expireAllStaleParticipations } from '../services/participations.service'
 import { isWithinCabiaoBounds, CABIAO_BOUNDS } from '../constants/cabiaoGeo'
 
 const TABS = {
   SUBMISSIONS: 'submissions',
-  REPORTS: 'reports'
+  REPORTS: 'reports',
+  SEASONS: 'seasons',
+  QUESTS: 'quests',
+  QUEST_VERIFICATIONS: 'quest_verifications',
+  PLACES: 'places'
 }
 
 function StatusBadge({ status }) {
@@ -275,6 +295,341 @@ function ReportModal({ report, onClose, onMarkInProgress, onMarkResolved, isLoad
   )
 }
 
+function QuestVerificationModal({ participation, quest, onClose, onMarkCompleted, isLoading }) {
+  if (!participation) return null
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return 'N/A'
+    return new Date(dateStr).toLocaleString()
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="p-6 border-b border-gray-200">
+          <div className="flex justify-between items-start">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">Quest Participation</h2>
+              <div className="flex gap-2 mt-2">
+                <span className="px-2 py-1 bg-emerald-100 text-emerald-800 rounded text-xs font-medium">
+                  {quest?.title || 'Quest'}
+                </span>
+                <span className={`px-2 py-1 rounded text-xs font-medium ${
+                  participation.status === 'joined' ? 'bg-blue-100 text-blue-800' :
+                  participation.status === 'completed' ? 'bg-green-100 text-green-800' :
+                  'bg-gray-100 text-gray-800'
+                }`}>
+                  {participation.status?.toUpperCase() || 'JOINED'}
+                </span>
+              </div>
+            </div>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <div>
+            <p className="text-sm font-medium text-gray-500">User ID</p>
+            <p className="text-gray-900 font-mono text-sm">{participation.uid}</p>
+          </div>
+          {participation.userEmail && (
+            <div>
+              <p className="text-sm font-medium text-gray-500">Email</p>
+              <p className="text-gray-900">{participation.userEmail}</p>
+            </div>
+          )}
+          <div>
+            <p className="text-sm font-medium text-gray-500">Points</p>
+            <p className="text-gray-900">{quest?.points || 0} pts</p>
+          </div>
+          <div>
+            <p className="text-sm font-medium text-gray-500">Joined At</p>
+            <p className="text-gray-900">{formatDate(participation.joinedAt)}</p>
+          </div>
+          <div>
+            <p className="text-sm font-medium text-gray-500">Expires At</p>
+            <p className="text-gray-900">{formatDate(participation.expiresAt)}</p>
+          </div>
+          {participation.completedAt && (
+            <div>
+              <p className="text-sm font-medium text-gray-500">Completed At</p>
+              <p className="text-gray-900">{formatDate(participation.completedAt)}</p>
+            </div>
+          )}
+          <div>
+            <p className="text-sm font-medium text-gray-500">Reward Status</p>
+            <p className={`font-medium ${
+              participation.rewardStatus === 'released' ? 'text-green-600' :
+              participation.rewardStatus === 'pending' ? 'text-yellow-600' :
+              'text-gray-600'
+            }`}>
+              {participation.rewardStatus?.toUpperCase() || 'PENDING'}
+            </p>
+          </div>
+        </div>
+
+        {participation.status === 'joined' && (
+          <div className="p-6 border-t border-gray-200 bg-gray-50 flex flex-wrap gap-3">
+            <button
+              onClick={onMarkCompleted}
+              disabled={isLoading}
+              className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:bg-gray-300 font-medium"
+            >
+              {isLoading ? 'Processing...' : 'Mark Completed & Release Reward'}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function SeasonFormModal({ onClose, onSubmit, isLoading }) {
+  const [name, setName] = useState('')
+  const [startAt, setStartAt] = useState('')
+  const [endAt, setEndAt] = useState('')
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    if (!name || !startAt || !endAt) return
+    onSubmit({ name, startAt, endAt })
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl max-w-md w-full" onClick={e => e.stopPropagation()}>
+        <div className="p-6 border-b border-gray-200">
+          <h2 className="text-xl font-bold text-gray-900">Create New Season</h2>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Season Name *</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Start Date *</label>
+            <input
+              type="date"
+              value={startAt}
+              onChange={(e) => setStartAt(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">End Date *</label>
+            <input
+              type="date"
+              value={endAt}
+              onChange={(e) => setEndAt(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              required
+            />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isLoading || !name || !startAt || !endAt}
+              className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:bg-gray-300"
+            >
+              {isLoading ? 'Creating...' : 'Create Season'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+function QuestFormModal({ quest, onClose, onSubmit, isLoading }) {
+  const [title, setTitle] = useState(quest?.title || '')
+  const [description, setDescription] = useState(quest?.description || '')
+  const [category, setCategory] = useState(quest?.category || 'event')
+  const [points, setPoints] = useState(quest?.points || 50)
+  const [capacity, setCapacity] = useState(quest?.capacity || 20)
+  const [startAt, setStartAt] = useState(quest?.startAt ? quest.startAt.split('T')[0] : '')
+  const [endAt, setEndAt] = useState(quest?.endAt ? quest.endAt.split('T')[0] : '')
+  const [gracePeriodHours, setGracePeriodHours] = useState(quest?.gracePeriodHours || 24)
+  const [capacityError, setCapacityError] = useState('')
+
+  const reservedCount = quest?.reservedCount || 0
+
+  const handleCapacityChange = (e) => {
+    const value = e.target.value
+    setCapacity(value)
+    
+    if (value && reservedCount > 0) {
+      const capacityNum = parseInt(value, 10)
+      if (capacityNum < reservedCount) {
+        setCapacityError(`Capacity cannot be lower than reserved slots (${reservedCount})`)
+      } else {
+        setCapacityError('')
+      }
+    } else {
+      setCapacityError('')
+    }
+  }
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    if (!title || !description || !startAt || !endAt) return
+    
+    if (capacityError) return
+    
+    onSubmit({
+      title,
+      description,
+      category,
+      points: parseInt(points, 10),
+      capacity: parseInt(capacity, 10),
+      startAt: new Date(startAt).toISOString(),
+      endAt: new Date(endAt).toISOString(),
+      gracePeriodHours: parseInt(gracePeriodHours, 10),
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="p-6 border-b border-gray-200">
+          <h2 className="text-xl font-bold text-gray-900">{quest ? 'Edit Quest' : 'Create New Quest'}</h2>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Description *</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              rows={3}
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+            >
+              <option value="event">Event</option>
+              <option value="cleanup">Clean-up</option>
+              <option value="treePlanting">Tree Planting</option>
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Points *</label>
+              <input
+                type="number"
+                value={points}
+                onChange={(e) => setPoints(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                min="1"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Capacity *
+                {quest && reservedCount > 0 && (
+                  <span className="ml-1 text-xs text-gray-500">(reserved: {reservedCount})</span>
+                )}
+              </label>
+              <input
+                type="number"
+                value={capacity}
+                onChange={handleCapacityChange}
+                className={`w-full px-3 py-2 border rounded-lg ${capacityError ? 'border-red-500' : 'border-gray-300'}`}
+                min="1"
+                required
+              />
+              {capacityError && (
+                <p className="text-xs text-red-600 mt-1">{capacityError}</p>
+              )}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Start Date *</label>
+              <input
+                type="date"
+                value={startAt}
+                onChange={(e) => setStartAt(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">End Date *</label>
+              <input
+                type="date"
+                value={endAt}
+                onChange={(e) => setEndAt(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                required
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Grace Period (hours)</label>
+            <input
+              type="number"
+              value={gracePeriodHours}
+              onChange={(e) => setGracePeriodHours(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              min="1"
+            />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isLoading || !title || !description || !startAt || !endAt || !!capacityError}
+              className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:bg-gray-300"
+            >
+              {isLoading ? 'Saving...' : quest ? 'Update Quest' : 'Create Quest'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 function NotAuthorized() {
   return (
     <div className="min-h-screen bg-gray-50">
@@ -327,17 +682,28 @@ function TabButton({ active, onClick, count, children }) {
 
 export default function LGUDashboardPage() {
   const { user } = useAuth()
-  const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState(TABS.SUBMISSIONS)
   const [submissions, setSubmissions] = useState([])
   const [reports, setReports] = useState([])
+  const [seasons, setSeasons] = useState([])
+  const [quests, setQuests] = useState([])
+  const [activeSeason, setActiveSeason] = useState(null)
+  const [selectedSeasonFilter, setSelectedSeasonFilter] = useState('')
+  const [questParticipations, setQuestParticipations] = useState([])
+  const [questDetails, setQuestDetails] = useState({})
   const [loading, setLoading] = useState(true)
   const [checkingAdmin, setCheckingAdmin] = useState(true)
   const [isUserAdmin, setIsUserAdmin] = useState(false)
   const [selectedSubmission, setSelectedSubmission] = useState(null)
   const [selectedReport, setSelectedReport] = useState(null)
+  const [selectedParticipation, setSelectedParticipation] = useState(null)
+  const [selectedQuest, setSelectedQuest] = useState(null)
+  const [showSeasonModal, setShowSeasonModal] = useState(false)
+  const [showQuestModal, setShowQuestModal] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
   const [toast, setToast] = useState(null)
+  const [expandedQuestStats, setExpandedQuestStats] = useState({})
+  const [loadingQuestStats, setLoadingQuestStats] = useState(null)
 
   useEffect(() => {
     async function checkAdminStatus() {
@@ -355,26 +721,122 @@ export default function LGUDashboardPage() {
 
   useEffect(() => {
     if (!user || !isUserAdmin) return
-    loadData()
-  }, [user, activeTab, isUserAdmin])
+
+    async function fetchData() {
+      setLoading(true)
+      try {
+        if (activeTab === TABS.SUBMISSIONS) {
+          const data = await listSubmissions({ status: null })
+          setSubmissions(data)
+        } else if (activeTab === TABS.REPORTS) {
+          const data = await listReports({ status: null })
+          setReports(data)
+        } else if (activeTab === TABS.SEASONS) {
+          const seasonList = await listSeasons()
+          setSeasons(seasonList)
+          const active = await getActiveSeason()
+          setActiveSeason(active)
+          if (active && !selectedSeasonFilter) {
+            setSelectedSeasonFilter(active.id)
+          }
+        } else if (activeTab === TABS.QUESTS) {
+          const seasonList = await listSeasons()
+          setSeasons(seasonList)
+          const active = await getActiveSeason()
+          setActiveSeason(active)
+          const filterId = selectedSeasonFilter || active?.id
+          if (filterId) {
+            const questList = await listQuestsBySeason(filterId)
+            setQuests(questList)
+          } else {
+            setQuests([])
+          }
+        } else if (activeTab === TABS.QUEST_VERIFICATIONS) {
+          const season = await getActiveSeason()
+          if (season) {
+            const quests = await listActiveQuests(season.id)
+            const questTitles = {}
+            quests.forEach(q => {
+              questTitles[q.id] = q
+            })
+            setQuestDetails(questTitles)
+            
+            const allParticipations = []
+            for (const quest of quests) {
+              const participations = await getQuestParticipations(quest.id)
+              allParticipations.push(...participations)
+            }
+            setQuestParticipations(allParticipations)
+          } else {
+            setQuestParticipations([])
+          }
+        }
+      } catch {
+        // Error loading data - handled silently
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchData()
+  }, [user, activeTab, isUserAdmin, selectedSeasonFilter])
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type })
     setTimeout(() => setToast(null), 3000)
   }
 
-  const loadData = async () => {
+  async function loadData() {
     setLoading(true)
     try {
       if (activeTab === TABS.SUBMISSIONS) {
         const data = await listSubmissions({ status: null })
         setSubmissions(data)
-      } else {
+      } else if (activeTab === TABS.REPORTS) {
         const data = await listReports({ status: null })
         setReports(data)
+      } else if (activeTab === TABS.SEASONS) {
+        const seasonList = await listSeasons()
+        setSeasons(seasonList)
+        const active = await getActiveSeason()
+        setActiveSeason(active)
+        if (active && !selectedSeasonFilter) {
+          setSelectedSeasonFilter(active.id)
+        }
+      } else if (activeTab === TABS.QUESTS) {
+        const seasonList = await listSeasons()
+        setSeasons(seasonList)
+        const active = await getActiveSeason()
+        setActiveSeason(active)
+        const filterId = selectedSeasonFilter || active?.id
+        if (filterId) {
+          const questList = await listQuestsBySeason(filterId)
+          setQuests(questList)
+        } else {
+          setQuests([])
+        }
+      } else if (activeTab === TABS.QUEST_VERIFICATIONS) {
+        const season = await getActiveSeason()
+        if (season) {
+          const quests = await listActiveQuests(season.id)
+          const questTitles = {}
+          quests.forEach(q => {
+            questTitles[q.id] = q
+          })
+          setQuestDetails(questTitles)
+          
+          const allParticipations = []
+          for (const quest of quests) {
+            const participations = await getQuestParticipations(quest.id)
+            allParticipations.push(...participations)
+          }
+          setQuestParticipations(allParticipations)
+        } else {
+          setQuestParticipations([])
+        }
       }
-    } catch (error) {
-      console.error('Error loading data:', error)
+    } catch {
+      // Error loading data - handled silently
     } finally {
       setLoading(false)
     }
@@ -492,6 +954,187 @@ export default function LGUDashboardPage() {
     }
   }
 
+  const handleMarkQuestCompleted = async () => {
+    if (!selectedParticipation) return
+    setActionLoading(true)
+    try {
+      const result = await adminMarkCompleted({
+        uid: selectedParticipation.uid,
+        questId: selectedParticipation.questId,
+        adminUser: { uid: user.uid, email: user.email }
+      })
+      if (result.success) {
+        showToast('Quest marked as completed! Reward released.')
+        setSelectedParticipation(null)
+        loadData()
+      } else {
+        showToast(result.error || 'Failed to complete', 'error')
+      }
+    } catch (error) {
+      showToast(error.message, 'error')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleCreateSeason = async (formData) => {
+    setActionLoading(true)
+    try {
+      await createSeason(formData, { uid: user.uid, email: user.email })
+      showToast('Season created successfully!')
+      setShowSeasonModal(false)
+      loadData()
+    } catch (error) {
+      showToast(error.message, 'error')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleActivateSeason = async (seasonId) => {
+    setActionLoading(true)
+    try {
+      await activateSeason(seasonId, { uid: user.uid, email: user.email })
+      showToast('Season activated!')
+      loadData()
+    } catch (error) {
+      showToast(error.message, 'error')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleCloseSeason = async (seasonId) => {
+    setActionLoading(true)
+    try {
+      await closeSeason(seasonId, { uid: user.uid, email: user.email })
+      showToast('Season closed!')
+      loadData()
+    } catch (error) {
+      showToast(error.message, 'error')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleCreateQuest = async (formData) => {
+    setActionLoading(true)
+    try {
+      const seasonId = selectedSeasonFilter || activeSeason?.id
+      if (!seasonId) {
+        throw new Error('No active season selected')
+      }
+      await createQuest({ ...formData, seasonId }, { uid: user.uid, email: user.email })
+      showToast('Quest created successfully!')
+      setShowQuestModal(false)
+      loadData()
+    } catch (error) {
+      showToast(error.message, 'error')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleUpdateQuest = async (questId, formData) => {
+    setActionLoading(true)
+    try {
+      await updateQuest(questId, formData, { uid: user.uid, email: user.email })
+      showToast('Quest updated successfully!')
+      setSelectedQuest(null)
+      loadData()
+    } catch (error) {
+      showToast(error.message, 'error')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleToggleQuestStatus = async (questId, currentStatus) => {
+    setActionLoading(true)
+    try {
+      if (currentStatus === 'active') {
+        await deactivateQuest(questId, { uid: user.uid, email: user.email })
+        showToast('Quest deactivated!')
+      } else {
+        await activateQuest(questId, { uid: user.uid, email: user.email })
+        showToast('Quest activated!')
+      }
+      loadData()
+    } catch (error) {
+      showToast(error.message, 'error')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleToggleQuestStats = async (questId) => {
+    if (expandedQuestStats[questId]) {
+      const newStats = { ...expandedQuestStats }
+      delete newStats[questId]
+      setExpandedQuestStats(newStats)
+      return
+    }
+
+    setLoadingQuestStats(questId)
+    try {
+      const participations = await getQuestParticipations(questId)
+      const now = new Date()
+      
+      let pendingCount = 0
+      let completedCount = 0
+      let expiredCount = 0
+      let cancelledCount = 0
+
+      participations.forEach(p => {
+        if (p.status === 'completed') {
+          completedCount++
+        } else if (p.status === 'cancelled') {
+          cancelledCount++
+        } else if (p.status === 'expired') {
+          expiredCount++
+        } else if (p.status === 'joined') {
+          if (p.expiresAt && new Date(p.expiresAt) < now) {
+            expiredCount++
+          } else {
+            pendingCount++
+          }
+        }
+      })
+
+      setExpandedQuestStats({
+        ...expandedQuestStats,
+        [questId]: {
+          pendingCount,
+          completedCount,
+          expiredCount,
+          cancelledCount,
+          total: participations.length
+        }
+      })
+    } catch {
+      showToast('Error loading stats', 'error')
+    } finally {
+      setLoadingQuestStats(null)
+    }
+  }
+
+  const [showCleanupConfirm, setShowCleanupConfirm] = useState(false)
+  const [cleanupLoading, setCleanupLoading] = useState(false)
+
+  const handleRunCleanup = async () => {
+    setCleanupLoading(true)
+    try {
+      const result = await expireAllStaleParticipations()
+      showToast(`Expired ${result.expiredCount} participations, freed ${result.freedSlots} slots`)
+      setShowCleanupConfirm(false)
+      loadData()
+    } catch (error) {
+      showToast('Error running cleanup: ' + error.message, 'error')
+    } finally {
+      setCleanupLoading(false)
+    }
+  }
+
   if (!user) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -528,6 +1171,7 @@ export default function LGUDashboardPage() {
 
   const newSubmissions = submissions.filter(s => s.status === 'new').length
   const newReports = reports.filter(r => r.status === 'new').length
+  const pendingQuests = questParticipations.filter(p => p.status === 'joined').length
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -541,7 +1185,7 @@ export default function LGUDashboardPage() {
             <p className="text-sm text-gray-500 mt-1">Signed in as: {user.email}</p>
           </div>
 
-          <div className="flex gap-2 mb-6">
+          <div className="flex gap-2 mb-6 flex-wrap">
             <TabButton 
               active={activeTab === TABS.SUBMISSIONS} 
               onClick={() => setActiveTab(TABS.SUBMISSIONS)}
@@ -556,6 +1200,31 @@ export default function LGUDashboardPage() {
             >
               Reports
             </TabButton>
+            <TabButton 
+              active={activeTab === TABS.SEASONS} 
+              onClick={() => setActiveTab(TABS.SEASONS)}
+            >
+              Seasons
+            </TabButton>
+            <TabButton 
+              active={activeTab === TABS.QUESTS} 
+              onClick={() => setActiveTab(TABS.QUESTS)}
+            >
+              Quests
+            </TabButton>
+            <TabButton 
+              active={activeTab === TABS.QUEST_VERIFICATIONS} 
+              onClick={() => setActiveTab(TABS.QUEST_VERIFICATIONS)}
+              count={pendingQuests}
+            >
+              Verifications
+            </TabButton>
+            <Link
+              to="/lgu/places"
+              className="flex-1 py-3 px-4 font-medium text-sm rounded-lg transition-colors bg-white text-gray-600 hover:bg-gray-100 border border-gray-200 text-center"
+            >
+              Places
+            </Link>
           </div>
 
           {loading ? (
@@ -606,39 +1275,71 @@ export default function LGUDashboardPage() {
                 </div>
               )}
             </div>
-          ) : (
+          ) : activeTab === TABS.SEASONS ? (
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-              {reports.length === 0 ? (
+              <div className="p-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 className="text-lg font-semibold">Seasons</h3>
+                <button
+                  onClick={() => setShowSeasonModal(true)}
+                  className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm font-medium"
+                >
+                  + Create Season
+                </button>
+              </div>
+              {seasons.length === 0 ? (
                 <div className="text-center py-12 text-gray-500">
-                  No reports found
+                  No seasons found. Create one to get started.
                 </div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead className="bg-gray-50 border-b border-gray-200">
                       <tr>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Type</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Issue</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Message</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Date</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Name</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Start</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">End</th>
                         <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {reports.map(report => (
-                        <tr 
-                          key={report.id} 
-                          onClick={() => setSelectedReport(report)}
-                          className="hover:bg-gray-50 cursor-pointer"
-                        >
-                          <td className="px-4 py-3 text-gray-600">{report.targetType || '-'}</td>
-                          <td className="px-4 py-3 text-gray-600">{report.issueType || '-'}</td>
-                          <td className="px-4 py-3 text-gray-600 max-w-xs truncate">{report.message || '-'}</td>
+                      {seasons.map(season => (
+                        <tr key={season.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-3 font-medium text-gray-900">{season.name}</td>
                           <td className="px-4 py-3 text-gray-600 text-sm">
-                            {report.createdAt ? new Date(report.createdAt).toLocaleDateString() : '-'}
+                            {season.startAt ? new Date(season.startAt).toLocaleDateString() : '-'}
+                          </td>
+                          <td className="px-4 py-3 text-gray-600 text-sm">
+                            {season.endAt ? new Date(season.endAt).toLocaleDateString() : '-'}
                           </td>
                           <td className="px-4 py-3">
-                            <StatusBadge status={report.status} />
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                              season.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                            }`}>
+                              {season.isActive ? 'ACTIVE' : 'INACTIVE'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex gap-2">
+                              {!season.isActive && (
+                                <button
+                                  onClick={() => handleActivateSeason(season.id)}
+                                  disabled={actionLoading}
+                                  className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
+                                >
+                                  Activate
+                                </button>
+                              )}
+                              {season.isActive && (
+                                <button
+                                  onClick={() => handleCloseSeason(season.id)}
+                                  disabled={actionLoading}
+                                  className="px-3 py-1 bg-red-600 text-white rounded text-xs hover:bg-red-700"
+                                >
+                                  Close
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -647,7 +1348,221 @@ export default function LGUDashboardPage() {
                 </div>
               )}
             </div>
-          )}
+          ) : activeTab === TABS.QUESTS ? (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="p-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                <h3 className="text-lg font-semibold">Quests</h3>
+                <div className="flex gap-2 w-full sm:w-auto flex-wrap">
+                  <select
+                    value={selectedSeasonFilter || activeSeason?.id || ''}
+                    onChange={(e) => setSelectedSeasonFilter(e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  >
+                    <option value="">Select Season</option>
+                    {seasons.map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => setShowCleanupConfirm(true)}
+                    className="px-3 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 text-sm font-medium"
+                  >
+                    Run Cleanup
+                  </button>
+                  <button
+                    onClick={() => setShowQuestModal(true)}
+                    disabled={!selectedSeasonFilter && !activeSeason}
+                    className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm font-medium disabled:bg-gray-300"
+                  >
+                    + Create Quest
+                  </button>
+                </div>
+              </div>
+              {quests.length === 0 ? (
+                <div className="text-center py-12 text-gray-500">
+                  No quests found for this season.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                      <tr>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Title</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Category</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Points</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Capacity</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Reserved</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Slots Left</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {quests.map(quest => {
+                        const reservedCount = quest.reservedCount || 0
+                        const slotsLeft = (quest.capacity || 0) - reservedCount
+                        const isFull = slotsLeft <= 0
+                        const isExpanded = expandedQuestStats[quest.id]
+                        const stats = expandedQuestStats[quest.id]
+                        const isLoadingStats = loadingQuestStats === quest.id
+
+                        return (
+                          <>
+                            <tr key={quest.id} className="hover:bg-gray-50">
+                              <td className="px-4 py-3 font-medium text-gray-900">{quest.title}</td>
+                              <td className="px-4 py-3 text-gray-600 text-sm">{quest.category || '-'}</td>
+                              <td className="px-4 py-3 text-gray-600">{quest.points}</td>
+                              <td className="px-4 py-3 text-gray-600">{quest.capacity}</td>
+                              <td className="px-4 py-3 text-gray-600">{reservedCount}</td>
+                              <td className="px-4 py-3">
+                                {isFull ? (
+                                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                    Full
+                                  </span>
+                                ) : (
+                                  <span className={slotsLeft <= 2 ? 'text-orange-600 font-medium' : ''}>
+                                    {slotsLeft}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                  quest.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                                }`}>
+                                  {quest.status?.toUpperCase() || 'ACTIVE'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="flex gap-2 flex-wrap">
+                                  <button
+                                    onClick={() => handleToggleQuestStats(quest.id)}
+                                    disabled={isLoadingStats}
+                                    className="px-3 py-1 bg-purple-600 text-white rounded text-xs hover:bg-purple-700 disabled:bg-gray-300"
+                                  >
+                                    {isLoadingStats ? 'Loading...' : isExpanded ? 'Hide Stats' : 'View Stats'}
+                                  </button>
+                                  <button
+                                    onClick={() => setSelectedQuest(quest)}
+                                    className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    onClick={() => handleToggleQuestStatus(quest.id, quest.status)}
+                                    disabled={actionLoading}
+                                    className={`px-3 py-1 rounded text-xs ${
+                                      quest.status === 'active' 
+                                        ? 'bg-gray-200 text-gray-700 hover:bg-gray-300' 
+                                        : 'bg-green-600 text-white hover:bg-green-700'
+                                    }`}
+                                  >
+                                    {quest.status === 'active' ? 'Deactivate' : 'Activate'}
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                            {isExpanded && (
+                              <tr key={`${quest.id}-stats`} className="bg-purple-50">
+                                <td colSpan={8} className="px-4 py-4">
+                                  <div className="flex flex-wrap gap-4">
+                                    <div className="bg-white rounded-lg px-4 py-2 shadow-sm">
+                                      <p className="text-xs text-gray-500 uppercase">Total</p>
+                                      <p className="text-lg font-bold text-gray-900">{stats?.total || 0}</p>
+                                    </div>
+                                    <div className="bg-white rounded-lg px-4 py-2 shadow-sm">
+                                      <p className="text-xs text-gray-500 uppercase">Pending</p>
+                                      <p className="text-lg font-bold text-blue-600">{stats?.pendingCount || 0}</p>
+                                    </div>
+                                    <div className="bg-white rounded-lg px-4 py-2 shadow-sm">
+                                      <p className="text-xs text-gray-500 uppercase">Completed</p>
+                                      <p className="text-lg font-bold text-green-600">{stats?.completedCount || 0}</p>
+                                    </div>
+                                    <div className="bg-white rounded-lg px-4 py-2 shadow-sm">
+                                      <p className="text-xs text-gray-500 uppercase">Expired</p>
+                                      <p className="text-lg font-bold text-red-600">{stats?.expiredCount || 0}</p>
+                                    </div>
+                                    <div className="bg-white rounded-lg px-4 py-2 shadow-sm">
+                                      <p className="text-xs text-gray-500 uppercase">Cancelled</p>
+                                      <p className="text-lg font-bold text-gray-600">{stats?.cancelledCount || 0}</p>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ) : activeTab === TABS.QUEST_VERIFICATIONS ? (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              {questParticipations.length === 0 ? (
+                <div className="text-center py-12 text-gray-500">
+                  No quest participations found
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                      <tr>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Quest</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">User</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Points</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Joined</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Reward</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {questParticipations.map(part => (
+                        <tr 
+                          key={part.id} 
+                          onClick={() => setSelectedParticipation(part)}
+                          className="hover:bg-gray-50 cursor-pointer"
+                        >
+                          <td className="px-4 py-3 font-medium text-gray-900">
+                            {questDetails[part.questId]?.title || part.questId}
+                          </td>
+                          <td className="px-4 py-3 text-gray-600 text-sm">
+                            {part.userEmail || (part.uid ? part.uid.substring(0, 8) + '...' : '-')}
+                          </td>
+                          <td className="px-4 py-3 text-gray-600">
+                            {questDetails[part.questId]?.points || 0} pts
+                          </td>
+                          <td className="px-4 py-3 text-gray-600 text-sm">
+                            {part.joinedAt ? new Date(part.joinedAt).toLocaleDateString() : '-'}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                              part.status === 'joined' ? 'bg-blue-100 text-blue-800' :
+                              part.status === 'completed' ? 'bg-green-100 text-green-800' :
+                              part.status === 'expired' ? 'bg-red-100 text-red-800' :
+                              'bg-gray-100 text-gray-800'
+                            }`}>
+                              {part.status?.toUpperCase() || 'UNKNOWN'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                              part.rewardStatus === 'released' ? 'bg-green-100 text-green-800' :
+                              part.rewardStatus === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                              part.rewardStatus === 'expired' ? 'bg-red-100 text-red-800' :
+                              'bg-gray-100 text-gray-800'
+                            }`}>
+                              {part.rewardStatus?.toUpperCase() || 'PENDING'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ) : null}
         </div>
       </main>
 
@@ -672,6 +1587,72 @@ export default function LGUDashboardPage() {
           onMarkResolved={handleMarkResolved}
           isLoading={actionLoading}
         />
+      )}
+
+      {selectedParticipation && (
+        <QuestVerificationModal
+          participation={selectedParticipation}
+          quest={questDetails[selectedParticipation.questId]}
+          onClose={() => setSelectedParticipation(null)}
+          onMarkCompleted={handleMarkQuestCompleted}
+          isLoading={actionLoading}
+        />
+      )}
+
+      {showSeasonModal && (
+        <SeasonFormModal
+          onClose={() => setShowSeasonModal(false)}
+          onSubmit={handleCreateSeason}
+          isLoading={actionLoading}
+        />
+      )}
+
+      {showQuestModal && (
+        <QuestFormModal
+          onClose={() => setShowQuestModal(false)}
+          onSubmit={handleCreateQuest}
+          isLoading={actionLoading}
+        />
+      )}
+
+      {selectedQuest && (
+        <QuestFormModal
+          quest={selectedQuest}
+          onClose={() => setSelectedQuest(null)}
+          onSubmit={(data) => handleUpdateQuest(selectedQuest.id, data)}
+          isLoading={actionLoading}
+        />
+      )}
+
+      {showCleanupConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Run Expiration Cleanup</h3>
+            <p className="text-gray-600 mb-4">
+              This will check all participations and expire any that have passed their deadline. 
+              Slots will be freed for expired participations.
+            </p>
+            <p className="text-sm text-yellow-600 mb-6">
+              This action will be logged for audit purposes.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowCleanupConfirm(false)}
+                disabled={cleanupLoading}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRunCleanup}
+                disabled={cleanupLoading}
+                className="flex-1 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:bg-gray-300"
+              >
+                {cleanupLoading ? 'Running...' : 'Run Cleanup'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {toast && (

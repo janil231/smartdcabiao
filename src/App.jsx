@@ -22,6 +22,7 @@ import SuggestPlacePage from './pages/SuggestPlacePage'
 import LGUDashboardPage from './pages/LGUDashboardPage'
 import LGUPlacesPage from './pages/lgu/LGUPlacesPage'
 import LGUPlaceFormPage from './pages/lgu/LGUPlaceFormPage'
+import LGUCheckinPage from './pages/lgu/LGUCheckinPage'
 import ProfilePage from './pages/ProfilePage'
 
 function App() {
@@ -52,6 +53,7 @@ function App() {
                 <Route path="/lgu/places" element={<LGUPlacesPage />} />
                 <Route path="/lgu/places/:type/new" element={<LGUPlaceFormPage />} />
                 <Route path="/lgu/places/:type/:id/edit" element={<LGUPlaceFormPage />} />
+                <Route path="/lgu/checkin" element={<LGUCheckinPage />} />
               </Routes>
             </PageTransition>
             <BottomNav />
