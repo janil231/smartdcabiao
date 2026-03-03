@@ -4,9 +4,10 @@
  * Uses Firestore when VITE_USE_FIRESTORE_DATA=true, falls back to mock data
  */
 
-import { getDocs, doc, getDoc, collection } from 'firebase/firestore'
+import { getDocs, collection } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { getDestinations as getMockDestinations } from '../data'
+import { readCache, writeCache, getCacheMeta, CACHE_KEYS } from './cache.service'
 
 const USE_FIRESTORE = import.meta.env.VITE_USE_FIRESTORE_DATA === 'true'
 const DESTINATIONS_COLLECTION = 'destinations'
@@ -54,68 +55,71 @@ async function fetchFromFirestore() {
   try {
     const querySnapshot = await getDocs(collection(db, DESTINATIONS_COLLECTION))
     if (querySnapshot.empty) {
-      if (import.meta.env.DEV) {
-        console.warn('[Destinations] Firestore collection empty, using mock data')
-      }
       return null
     }
     const destinations = querySnapshot.docs.map(normalizeDestinationDoc)
     return destinations
-  } catch (error) {
-    if (import.meta.env.DEV) {
-      console.warn('[Destinations] Firestore fetch failed, using mock data:', error.message)
-    }
+  } catch {
     return null
   }
 }
 
-export async function listDestinations() {
+export async function listDestinations({ forceRefresh = false } = {}) {
   if (USE_FIRESTORE) {
+    if (forceRefresh) {
+      destinationsCache = null
+    }
+    
     if (!destinationsCache) {
-      destinationsCache = await fetchFromFirestore()
+      const firestoreData = await fetchFromFirestore()
+      
+      if (firestoreData && firestoreData.length > 0) {
+        destinationsCache = firestoreData
+        writeCache(CACHE_KEYS.destinations, destinationsCache)
+        return { data: destinationsCache, source: 'live' }
+      }
+      
+      const cached = readCache(CACHE_KEYS.destinations)
+      if (cached) {
+        destinationsCache = cached.data
+        return { data: destinationsCache, source: 'cache' }
+      }
+      
+      return { data: getMockDestinations(), source: 'mock' }
     }
-    if (destinationsCache) {
-      return destinationsCache
-    }
+    
+    return { data: destinationsCache, source: 'live' }
   }
-  return getMockDestinations()
+  
+  return { data: getMockDestinations(), source: 'mock' }
 }
 
 export async function getDestinationById(id) {
-  if (USE_FIRESTORE) {
-    if (!destinationsCache) {
-      destinationsCache = await fetchFromFirestore()
-    }
-    if (destinationsCache) {
-      return destinationsCache.find(d => String(d.id) === String(id)) || null
-    }
-  }
-  const mockDestinations = getMockDestinations()
-  return mockDestinations.find(d => d.id === parseInt(id, 10)) || null
+  const { data } = await listDestinations()
+  return data.find(d => String(d.id) === String(id)) || null
 }
 
 export async function getDestinationBarangays() {
   try {
-    const destinations = await listDestinations()
-    const barangays = [...new Set(destinations
+    const { data } = await listDestinations()
+    const barangays = [...new Set(data
       .map(d => d.barangay)
       .filter(Boolean)
     )].sort()
     return barangays
-  } catch (error) {
-    if (import.meta.env.DEV) {
-      console.error('[Destinations] Error fetching barangays:', error)
-    }
+  } catch {
     return []
   }
 }
 
 export async function searchDestinations(query = '', filters = {}) {
-  let results = await listDestinations()
+  const { data: results } = await listDestinations()
+
+  let filtered = results
 
   if (query.trim()) {
     const lowercaseQuery = query.toLowerCase()
-    results = results.filter(d =>
+    filtered = filtered.filter(d =>
       d.name.toLowerCase().includes(lowercaseQuery) ||
       d.description?.toLowerCase().includes(lowercaseQuery) ||
       d.address?.toLowerCase().includes(lowercaseQuery) ||
@@ -125,20 +129,25 @@ export async function searchDestinations(query = '', filters = {}) {
   }
 
   if (filters.barangay) {
-    results = results.filter(d => d.barangay === filters.barangay)
+    filtered = filtered.filter(d => d.barangay === filters.barangay)
   }
 
   if (filters.type) {
-    results = results.filter(d => d.type === filters.type)
+    filtered = filtered.filter(d => d.type === filters.type)
   }
 
   if (filters.verified !== undefined) {
-    results = results.filter(d => d.verified === filters.verified)
+    filtered = filtered.filter(d => d.verified === filters.verified)
   }
 
-  return results
+  return filtered
 }
 
 export function clearDestinationsCache() {
   destinationsCache = null
+}
+
+export function getDestinationsLastSynced() {
+  const meta = getCacheMeta(CACHE_KEYS.destinations)
+  return meta?.savedAt || null
 }

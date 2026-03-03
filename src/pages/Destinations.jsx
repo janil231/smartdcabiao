@@ -1,12 +1,13 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useSearchParams, Link } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
 import SearchBar from '../components/SearchBar'
 import FavoriteButton from '../components/FavoriteButton'
 import AppImage from '../components/ui/AppImage'
+import DataStatusBadge from '../components/DataStatusBadge'
 import { getDestinationImage } from '../utils/placeImages'
-import { listDestinations, getDestinationBarangays, searchDestinations } from '../services/destinations.service'
+import { getDestinationsLastSynced } from '../services/destinations.service'
 
 // Consistent styling with BusinessCard
 const TYPE_STYLES = {
@@ -110,28 +111,51 @@ export default function DestinationsPage() {
   const [barangays, setBarangays] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
+  const [dataSource, setDataSource] = useState('live')
+  const [lastSynced, setLastSynced] = useState(null)
   const searchQuery = searchParams.get('search') || ''
+
+  const loadDestinations = useCallback(async (forceRefresh = false) => {
+    try {
+      setLoading(true)
+      const { listDestinations: fetchDestinations } = await import('../services/destinations.service')
+      const { data, source } = await fetchDestinations({ forceRefresh })
+      
+      let filtered = data
+      if (searchQuery.trim()) {
+        const lowercaseQuery = searchQuery.toLowerCase()
+        filtered = data.filter(d =>
+          d.name.toLowerCase().includes(lowercaseQuery) ||
+          d.description?.toLowerCase().includes(lowercaseQuery) ||
+          d.barangay?.toLowerCase().includes(lowercaseQuery) ||
+          d.tags?.some(tag => tag.toLowerCase().includes(lowercaseQuery))
+        )
+      }
+      if (filter && filter !== 'all') {
+        filtered = filtered.filter(d => d.barangay === filter)
+      }
+      
+      setDestinations(filtered)
+      setDataSource(source)
+      setLastSynced(getDestinationsLastSynced())
+      
+      const barangaysData = [...new Set(data.map(d => d.barangay).filter(Boolean))].sort()
+      setBarangays(barangaysData)
+    } catch {
+      setDataSource('mock')
+    } finally {
+      setLoading(false)
+    }
+  }, [searchQuery, filter])
 
   // Load destinations and barangays
   useEffect(() => {
-    async function loadData() {
-      try {
-        setLoading(true)
-        const [destinationsData, barangaysData] = await Promise.all([
-          searchDestinations(searchQuery, filter !== 'all' ? { barangay: filter } : {}),
-          getDestinationBarangays()
-        ])
-        setDestinations(destinationsData)
-        setBarangays(barangaysData)
-      } catch (error) {
-        console.error('Error loading destinations:', error)
-      } finally {
-        setLoading(false)
-      }
-    }
+    loadDestinations()
+  }, [loadDestinations])
 
-    loadData()
-  }, [searchQuery, filter])
+  const handleRefresh = useCallback(async () => {
+    await loadDestinations(true)
+  }, [loadDestinations])
 
   // Build filter options
   const filterOptions = useMemo(() => [
@@ -151,6 +175,14 @@ export default function DestinationsPage() {
             <p className="mt-2 sm:mt-3 max-w-2xl text-base sm:text-lg text-gray-600">
               Explore beautiful destinations and points of interest in Cabiao. Discover natural attractions, historical sites, and local landmarks.
             </p>
+
+            <div className="mt-4">
+              <DataStatusBadge 
+                source={dataSource} 
+                lastSyncedAt={lastSynced}
+                onRefresh={handleRefresh}
+              />
+            </div>
           </div>
 
           {/* Search and Filter Section - Sticky on mobile */}

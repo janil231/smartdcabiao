@@ -4,9 +4,10 @@
  * Uses Firestore when VITE_USE_FIRESTORE_DATA=true, falls back to mock data
  */
 
-import { getDocs, doc, getDoc, collection } from 'firebase/firestore'
+import { getDocs, collection } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { businesses as mockBusinesses, BUSINESS_TYPES } from '../data'
+import { readCache, writeCache, getCacheMeta, CACHE_KEYS } from './cache.service'
 
 const USE_FIRESTORE = import.meta.env.VITE_USE_FIRESTORE_DATA === 'true'
 const BUSINESSES_COLLECTION = 'businesses'
@@ -51,52 +52,58 @@ async function fetchFromFirestore() {
   try {
     const querySnapshot = await getDocs(collection(db, BUSINESSES_COLLECTION))
     if (querySnapshot.empty) {
-      if (import.meta.env.DEV) {
-        console.warn('[Businesses] Firestore collection empty, using mock data')
-      }
       return null
     }
     const businesses = querySnapshot.docs.map(normalizeBusinessDoc)
     return businesses
-  } catch (error) {
-    if (import.meta.env.DEV) {
-      console.warn('[Businesses] Firestore fetch failed, using mock data:', error.message)
-    }
+  } catch {
     return null
   }
 }
 
-export async function listBusinesses() {
+export async function listBusinesses({ forceRefresh = false } = {}) {
   if (USE_FIRESTORE) {
+    if (forceRefresh) {
+      businessesCache = null
+    }
+    
     if (!businessesCache) {
-      businessesCache = await fetchFromFirestore()
+      const firestoreData = await fetchFromFirestore()
+      
+      if (firestoreData && firestoreData.length > 0) {
+        businessesCache = firestoreData
+        writeCache(CACHE_KEYS.businesses, businessesCache)
+        return { data: businessesCache, source: 'live' }
+      }
+      
+      const cached = readCache(CACHE_KEYS.businesses)
+      if (cached) {
+        businessesCache = cached.data
+        return { data: businessesCache, source: 'cache' }
+      }
+      
+      return { data: mockBusinesses, source: 'mock' }
     }
-    if (businessesCache) {
-      return businessesCache
-    }
+    
+    return { data: businessesCache, source: 'live' }
   }
-  return mockBusinesses
+  
+  return { data: mockBusinesses, source: 'mock' }
 }
 
 export async function getBusinessById(id) {
-  if (USE_FIRESTORE) {
-    if (!businessesCache) {
-      businessesCache = await fetchFromFirestore()
-    }
-    if (businessesCache) {
-      return businessesCache.find(b => String(b.id) === String(id)) || null
-    }
-  }
-  const numericId = parseInt(id, 10)
-  return mockBusinesses.find(b => b.id === numericId) || null
+  const { data } = await listBusinesses()
+  return data.find(b => String(b.id) === String(id)) || null
 }
 
 export async function searchBusinesses(query = '', filters = {}) {
-  let results = await listBusinesses()
+  const { data: results } = await listBusinesses()
+
+  let filtered = results
 
   if (query.trim()) {
     const lowercaseQuery = query.toLowerCase()
-    results = results.filter(b =>
+    filtered = filtered.filter(b =>
       b.name.toLowerCase().includes(lowercaseQuery) ||
       b.category?.toLowerCase().includes(lowercaseQuery) ||
       b.description?.toLowerCase().includes(lowercaseQuery)
@@ -104,18 +111,23 @@ export async function searchBusinesses(query = '', filters = {}) {
   }
 
   if (filters.type && filters.type !== 'all') {
-    results = results.filter(b => b.type === filters.type)
+    filtered = filtered.filter(b => b.type === filters.type)
   }
 
-  return results
+  return filtered
 }
 
 export async function getFeaturedBusinesses() {
-  const allBusinesses = await listBusinesses()
+  const { data } = await listBusinesses()
   const FEATURED_IDS = [1, 2, 3]
-  return allBusinesses.filter(b => FEATURED_IDS.includes(b.id))
+  return data.filter(b => FEATURED_IDS.includes(b.id))
 }
 
 export function clearBusinessesCache() {
   businessesCache = null
+}
+
+export function getBusinessesLastSynced() {
+  const meta = getCacheMeta(CACHE_KEYS.businesses)
+  return meta?.savedAt || null
 }

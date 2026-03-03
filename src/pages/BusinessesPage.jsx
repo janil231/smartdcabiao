@@ -1,13 +1,14 @@
 import { Link, useSearchParams } from 'react-router-dom'
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
 import SearchBar from '../components/SearchBar'
 import FavoriteButton from '../components/FavoriteButton'
 import AppImage from '../components/ui/AppImage'
 import Reveal from '../components/animations/Reveal'
+import DataStatusBadge from '../components/DataStatusBadge'
 import { getBusinessImage } from '../utils/placeImages'
-import { searchBusinesses } from '../services/businesses.service'
+import { getBusinessesLastSynced } from '../services/businesses.service'
 import { BUSINESS_TYPES } from '../data'
 
 const TYPE_STYLES = {
@@ -108,23 +109,46 @@ export default function BusinessesPage() {
   const [filter, setFilter] = useState('all')
   const [businesses, setBusinesses] = useState([])
   const [loading, setLoading] = useState(true)
+  const [dataSource, setDataSource] = useState('live')
+  const [lastSynced, setLastSynced] = useState(null)
   const searchQuery = searchParams.get('search') || ''
 
-  useEffect(() => {
-    async function loadBusinesses() {
-      try {
-        setLoading(true)
-        const data = await searchBusinesses(searchQuery, { type: filter })
-        setBusinesses(data)
-      } catch (error) {
-        console.error('Error loading businesses:', error)
-        setBusinesses([])
-      } finally {
-        setLoading(false)
+  const loadBusinesses = useCallback(async (forceRefresh = false) => {
+    try {
+      setLoading(true)
+      const { listBusinesses } = await import('../services/businesses.service')
+      const { data, source } = await listBusinesses({ forceRefresh })
+      
+      let filtered = data
+      if (searchQuery.trim()) {
+        const lowercaseQuery = searchQuery.toLowerCase()
+        filtered = data.filter(b =>
+          b.name.toLowerCase().includes(lowercaseQuery) ||
+          b.category?.toLowerCase().includes(lowercaseQuery) ||
+          b.description?.toLowerCase().includes(lowercaseQuery)
+        )
       }
+      if (filter && filter !== 'all') {
+        filtered = filtered.filter(b => b.type === filter)
+      }
+      
+      setBusinesses(filtered)
+      setDataSource(source)
+      setLastSynced(getBusinessesLastSynced())
+    } catch {
+      setDataSource('mock')
+    } finally {
+      setLoading(false)
     }
+  }, [searchQuery, filter])
+
+  useEffect(() => {
     loadBusinesses()
-  }, [filter, searchQuery])
+  }, [loadBusinesses])
+
+  const handleRefresh = useCallback(async () => {
+    await loadBusinesses(true)
+  }, [loadBusinesses])
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -142,6 +166,16 @@ export default function BusinessesPage() {
               Discover shops, restaurants, and attractions in Cabiao. Click "View on Map" to see a
               business location on the interactive map.
             </p>
+          </Reveal>
+
+          <Reveal delay={120}>
+            <div className="mt-4">
+              <DataStatusBadge 
+                source={dataSource} 
+                lastSyncedAt={lastSynced}
+                onRefresh={handleRefresh}
+              />
+            </div>
           </Reveal>
 
           {/* Search and Filter Section - Sticky on mobile */}

@@ -61,8 +61,7 @@ export default function BusinessDetailPage() {
         } else {
           navigate('/businesses', { replace: true })
         }
-      } catch (error) {
-        console.error('Error loading business:', error)
+      } catch {
         navigate('/businesses', { replace: true })
       } finally {
         setLoading(false)
@@ -70,6 +69,16 @@ export default function BusinessDetailPage() {
     }
     loadBusiness()
   }, [id, navigate])
+
+  // Create an images array for gallery - must be called before early returns
+  const businessImage = getBusinessImage(business)
+  const businessImages = useMemo(() => {
+    if (!business) return [businessImage]
+    if (business?.images?.length > 0) {
+      return business.images
+    }
+    return [businessImage]
+  }, [business, businessImage])
 
   if (loading) {
     return (
@@ -123,16 +132,6 @@ export default function BusinessDetailPage() {
   }
 
   const categoryStyle = TYPE_STYLES[business.type] || TYPE_STYLES[BUSINESS_TYPES.shop]
-  const businessImage = getBusinessImage(business)
-  
-  // Create an images array for gallery (use placeholder if no real images)
-  const businessImages = useMemo(() => {
-    if (business?.images?.length > 0) {
-      return business.images
-    }
-    // Use placeholder as single image if no real images
-    return [businessImage]
-  }, [business, businessImage])
   
   const nextImage = () => {
     setSelectedImage((prev) => (prev + 1) % businessImages.length)
