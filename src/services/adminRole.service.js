@@ -19,7 +19,13 @@ export async function isAdmin(uid) {
     adminCache.set(uid, isAdmin)
     return isAdmin
   } catch (error) {
-    console.error('Error checking admin status:', error)
+    if (error.code === 'permission-denied' || error.code === 'firestore/permission-denied') {
+      if (import.meta.env.DEV) {
+        console.warn('Permission denied checking admin status (user may not have admin doc)')
+      }
+    } else {
+      console.error('Error checking admin status:', error)
+    }
     return false
   }
 }
@@ -33,7 +39,13 @@ export async function getAdminDoc(uid) {
     if (!docSnap.exists()) return null
     return { id: docSnap.id, ...docSnap.data() }
   } catch (error) {
-    console.error('Error getting admin doc:', error)
+    if (error.code === 'permission-denied' || error.code === 'firestore/permission-denied') {
+      if (import.meta.env.DEV) {
+        console.warn('Permission denied getting admin doc')
+      }
+    } else {
+      console.error('Error getting admin doc:', error)
+    }
     return null
   }
 }

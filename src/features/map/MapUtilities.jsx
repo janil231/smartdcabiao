@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMap, MapContainer } from 'react-leaflet'
 import L from 'leaflet'
-import { CABIAO_CENTER, CABIAO_BOUNDS, CABIAO_DEFAULT_ZOOM } from '../../constants/cabiaoGeo'
+import { CABIAO_CENTER, CABIAO_BOUNDS, CABIAO_DEFAULT_ZOOM, isWithinCabiaoBounds } from '../../constants/cabiaoGeo'
 
 // Component to handle fitting map bounds to filtered results
 export function FitBounds({ pois, enabled = false }) {
@@ -57,11 +57,32 @@ export function FitBounds({ pois, enabled = false }) {
 }
 
 // Component to handle resetting to Cabiao
-export function ResetToCabiao() {
+export function ResetToCabiao({ pois = [] }) {
   const map = useMap()
   
   const handleResetClick = () => {
-    map.flyTo(CABIAO_CENTER, CABIAO_DEFAULT_ZOOM, { duration: 1 })
+    // Filter places with valid positions within Cabiao bounds
+    const validPlaces = pois.filter(poi => 
+      poi.position && 
+      Array.isArray(poi.position) && 
+      poi.position.length >= 2 &&
+      isWithinCabiaoBounds(poi.position[0], poi.position[1])
+    )
+    
+    if (validPlaces.length > 0) {
+      try {
+        const bounds = L.latLngBounds(validPlaces.map(poi => poi.position))
+        map.fitBounds(bounds, { 
+          paddingTopLeft: [30, 120], 
+          paddingBottomRight: [30, 80], 
+          maxZoom: CABIAO_DEFAULT_ZOOM 
+        })
+      } catch {
+        map.flyTo(CABIAO_CENTER, CABIAO_DEFAULT_ZOOM, { duration: 1 })
+      }
+    } else {
+      map.flyTo(CABIAO_CENTER, CABIAO_DEFAULT_ZOOM, { duration: 1 })
+    }
   }
   
   // Create a control container
@@ -230,7 +251,7 @@ export default function MapUtilities({ pois, onLocationFound, onLocationError })
   
   return (
     <>
-      <ResetToCabiao />
+      <ResetToCabiao pois={pois} />
       <FitBounds pois={pois} enabled={fitToResultsEnabled} />
       <LocateMe onLocationFound={onLocationFound} onLocationError={onLocationError} />
     </>

@@ -3,8 +3,8 @@
  * Defines the geographic boundaries and defaults for Cabiao, Nueva Ecija
  */
 
-export const CABIAO_CENTER = [15.23450, 120.83965] // Central coordinates for Cabiao (from OpenStreetMap)
-export const CABIAO_DEFAULT_ZOOM = 13 // Default zoom level for Cabiao view (from OSM link)
+export const CABIAO_CENTER = [15.2522, 120.8596] // Verified Cabiao center coordinates
+export const CABIAO_DEFAULT_ZOOM = 13 // Default zoom level for Cabiao municipal view
 export const CABIAO_BOUNDS = {
   southWest: [15.157636471587702, 120.67794799804689], // Southwest corner of Cabiao (from OSM search bounds)
   northEast: [15.306041821392899, 121.00753784179689]  // Northeast corner of Cabiao (from OSM search bounds)

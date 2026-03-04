@@ -7,11 +7,13 @@ import FavoriteButton from '../components/FavoriteButton'
 import {
   BUSINESS_TYPES,
 } from '../data'
-import { CABIAO_CENTER, CABIAO_DEFAULT_ZOOM, CABIAO_BOUNDS, isWithinCabiaoBounds } from '../constants/cabiaoGeo'
+import { CABIAO_CENTER, CABIAO_DEFAULT_ZOOM } from '../constants/cabiaoGeo'
 import useMapFilters from '../features/map/useMapFilters'
 import MapFilterBar from '../features/map/MapFilterBar'
 import MapResults from '../features/map/MapResults'
 import MapUtilities from '../features/map/MapUtilities'
+import InvalidateMapSize from '../features/map/InvalidateMapSize'
+import MapInitialView from '../features/map/MapInitialView'
 import { getAllPlaces } from '../features/map/mapHelpers'
 import { getBusinessById } from '../services/businesses.service'
 import 'leaflet/dist/leaflet.css'
@@ -44,27 +46,6 @@ const TYPE_COLORS = {
 }
 
 const FOCUS_ZOOM = 17
-
-// Force map to stay at Cabiao center on mount
-function ForceCabiaoCenter() {
-  const map = useMap()
-  
-  useEffect(() => {
-    // Force map to Cabiao center on first mount, prevent auto-jumping
-    map.setView(CABIAO_CENTER, CABIAO_DEFAULT_ZOOM, { animate: false })
-    
-    if (import.meta.env.DEV) {
-      console.log('🗺️ Map initialized at:', {
-        center: CABIAO_CENTER,
-        zoom: CABIAO_DEFAULT_ZOOM
-      })
-    }
-  }, [map])
-  
-  return null
-}
-
-
 
 function getMarkerIcon(type) {
   const style = TYPE_STYLES[type] || TYPE_STYLES[BUSINESS_TYPES.shop]
@@ -113,40 +94,6 @@ export default function MapPage() {
       try {
         setLoading(true)
         const places = await getAllPlaces()
-        
-        if (import.meta.env.DEV) {
-          console.log('=== Cabiao Map Debug ===')
-          console.log('🗺️ Cabiao Center:', CABIAO_CENTER)
-          console.log('🎯 Cabiao Default Zoom:', CABIAO_DEFAULT_ZOOM)
-          console.log('📦 Cabiao Bounds:', CABIAO_BOUNDS)
-          console.log('')
-          
-          console.log('=== Validating POI Coordinates ===')
-          const outOfBounds = []
-          
-          if (places.length > 0) {
-            const firstBusiness = places[0]
-            console.log('🏪 First business position:', firstBusiness.position)
-            console.log(`📍 ${firstBusiness.name} in bounds?`, isWithinCabiaoBounds(firstBusiness.position[0], firstBusiness.position[1]))
-          }
-          
-          places.forEach((poi) => {
-            if (poi.position && poi.position.length >= 2) {
-              const [lat, lng] = poi.position
-              const withinBounds = isWithinCabiaoBounds(lat, lng)
-              console.log(`${withinBounds ? '✅' : '❌'} ${poi.name}: [${lat}, ${lng}]`)
-              if (!withinBounds) {
-                outOfBounds.push({ name: poi.name, position: poi.position })
-              }
-            }
-          })
-          if (outOfBounds.length > 0) {
-            console.warn(`⚠️ ${outOfBounds.length} POIs out of bounds:`, outOfBounds)
-          } else {
-            console.log('✅ All POIs are within Cabiao bounds')
-          }
-        }
-        
         setAllPlaces(places)
       } catch (error) {
         console.error('Error loading places:', error)
@@ -201,7 +148,7 @@ export default function MapPage() {
   }
 
   return (
-    <div className="flex flex-col min-h-screen md:min-h-0">
+    <div className="flex flex-col min-h-screen">
       <Navbar />
       
       {/* Filters */}
@@ -221,9 +168,9 @@ export default function MapPage() {
       )}
 
       {/* Main Content */}
-      <div className="flex flex-1 min-h-0 relative pb-16 md:pb-0">
+      <div className="flex-1 min-h-0 flex">
         {/* Map Container */}
-        <div className="flex-1 min-h-0 w-full relative z-0">
+        <div className="flex-1 min-h-0">
           <MapContainer
             center={CABIAO_CENTER}
             zoom={CABIAO_DEFAULT_ZOOM}
@@ -281,8 +228,9 @@ export default function MapPage() {
               </Marker>
             ))}
             
-            <ForceCabiaoCenter />
+            <MapInitialView places={filteredPlaces} />
             <FocusOnPlace />
+            <InvalidateMapSize />
             <MapUtilities 
               pois={selectedPOI ? [selectedPOI] : filteredPlaces}
               onLocationFound={handleLocationFound}
@@ -292,8 +240,8 @@ export default function MapPage() {
         </div>
 
         {/* Desktop Results List */}
-        <div className="hidden lg:block lg:w-96 border-l border-gray-200 bg-white">
-          <div className="h-full flex flex-col">
+        <aside className="hidden lg:flex lg:w-[380px] h-full border-l border-gray-200 bg-white">
+          <div className="h-full flex flex-col w-full">
             <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
               <h3 className="font-semibold text-gray-900">
                 <span className="text-emerald-600">{filteredPlaces.length}</span>
@@ -325,11 +273,15 @@ export default function MapPage() {
                 </div>
               ) : (
                 filteredPlaces.map((poi) => (
-                  <button
+                  <div
                     key={`${poi.poiType}-${poi.id}`}
-                    type="button"
+                    role="button"
+                    tabIndex={0}
                     onClick={() => handlePOISelect(poi)}
-                    className={`w-full rounded-lg border p-4 text-left transition ${
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") handlePOISelect(poi)
+                    }}
+                    className={`w-full rounded-lg border p-4 text-left transition cursor-pointer ${
                       selectedPOI?.id === poi.id && selectedPOI?.poiType === poi.poiType
                         ? 'border-emerald-500 bg-emerald-50'
                         : 'border-gray-200 bg-white hover:bg-gray-50'
@@ -344,11 +296,13 @@ export default function MapPage() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between">
                           <h4 className="truncate font-medium text-gray-900">{poi.name}</h4>
-                          <FavoriteButton 
-                            item={{ ...poi, type: poi.type }}
-                            size="sm"
-                            className="flex-shrink-0"
-                          />
+                          <div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                            <FavoriteButton 
+                              item={{ ...poi, type: poi.type }}
+                              size="sm"
+                              className="flex-shrink-0"
+                            />
+                          </div>
                         </div>
                         <p className="mt-1 text-sm text-gray-600 line-clamp-2">{poi.description}</p>
                         <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
@@ -361,12 +315,12 @@ export default function MapPage() {
                         </div>
                       </div>
                     </div>
-                  </button>
+                  </div>
                 ))
               )}
             </div>
           </div>
-        </div>
+        </aside>
       </div>
 
       {/* Mobile Results Drawer */}

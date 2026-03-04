@@ -90,11 +90,15 @@ export default function MapResults({
           ) : (
             <div className="space-y-2 p-4">
               {items.map((poi) => (
-                <button
+                <div
                   key={`${poi.poiType || 'destination'}-${poi.id}`}
-                  type="button"
+                  role="button"
+                  tabIndex={0}
                   onClick={() => handlePOIClick(poi)}
-                  className={`w-full rounded-lg border p-3 text-left transition ${
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") handlePOIClick(poi)
+                  }}
+                  className={`w-full rounded-lg border p-3 text-left transition cursor-pointer ${
                     selectedPOI?.id === poi.id && selectedPOI?.poiType === poi.poiType
                       ? 'border-emerald-500 bg-emerald-50'
                       : 'border-gray-200 bg-white hover:bg-gray-50'
@@ -114,11 +118,13 @@ export default function MapResults({
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between">
                         <h4 className="truncate font-medium text-gray-900">{poi.name}</h4>
-                        <FavoriteButton 
-                          item={{ ...poi, type: poi.poiType === 'business' ? poi.type : poi.destination }}
-                          size="sm"
-                          className="flex-shrink-0"
-                        />
+                        <div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                          <FavoriteButton 
+                            item={{ ...poi, type: poi.poiType === 'business' ? poi.type : poi.destination }}
+                            size="sm"
+                            className="flex-shrink-0"
+                          />
+                        </div>
                       </div>
                       <p className="mt-1 text-sm text-gray-600 line-clamp-2">{poi.description}</p>
                       <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
@@ -133,7 +139,7 @@ export default function MapResults({
                       </div>
                     </div>
                   </div>
-                </button>
+                </div>
               ))}
             </div>
           )}

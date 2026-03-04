@@ -7,28 +7,41 @@ import { listDestinations } from '../../services/destinations.service'
 
 let cachedPlaces = null
 
+function unwrapList(result) {
+  if (Array.isArray(result)) return result
+  if (result && Array.isArray(result.data)) return result.data
+  return []
+}
+
 export async function getAllPlaces() {
   if (cachedPlaces) {
     return cachedPlaces
   }
 
   try {
-    const [businesses, destinations] = await Promise.all([
+    const [businessesResult, destinationsResult] = await Promise.all([
       listBusinesses(),
       listDestinations()
     ])
 
-    const businessPlaces = businesses.map(place => ({
-      ...place,
-      poiType: 'business',
-      originalType: place.type
-    }))
+    const businesses = unwrapList(businessesResult)
+    const destinations = unwrapList(destinationsResult)
 
-    const destinationPlaces = destinations.map(place => ({
-      ...place,
-      poiType: 'destination',
-      originalType: place.type
-    }))
+    const businessPlaces = businesses
+      .filter(place => place.position && Array.isArray(place.position))
+      .map(place => ({
+        ...place,
+        poiType: 'business',
+        originalType: place.type
+      }))
+
+    const destinationPlaces = destinations
+      .filter(place => place.position && Array.isArray(place.position))
+      .map(place => ({
+        ...place,
+        poiType: 'destination',
+        originalType: place.type
+      }))
 
     cachedPlaces = [...businessPlaces, ...destinationPlaces]
     return cachedPlaces
