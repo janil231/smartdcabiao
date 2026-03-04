@@ -28,10 +28,12 @@ import {
   createQuest,
   updateQuest,
   activateQuest,
-  deactivateQuest
+  deactivateQuest,
+  seedSampleQuestsForActiveSeason
 } from '../services/quests.service'
 import { getQuestParticipations, adminMarkCompleted, expireAllStaleParticipations } from '../services/participations.service'
 import { isWithinCabiaoBounds, CABIAO_BOUNDS } from '../constants/cabiaoGeo'
+import { listSeasonImpact, sumImpactByUnit } from '../services/impactLedger.service'
 
 const TABS = {
   SUBMISSIONS: 'submissions',
@@ -468,6 +470,9 @@ function QuestFormModal({ quest, onClose, onSubmit, isLoading }) {
   const [endAt, setEndAt] = useState(quest?.endAt ? quest.endAt.split('T')[0] : '')
   const [gracePeriodHours, setGracePeriodHours] = useState(quest?.gracePeriodHours || 24)
   const [capacityError, setCapacityError] = useState('')
+  const [impactUnit, setImpactUnit] = useState(quest?.impact?.unit || '')
+  const [impactAmount, setImpactAmount] = useState(quest?.impact?.amountPerCompletion || '')
+  const [impactLabel, setImpactLabel] = useState(quest?.impact?.label || '')
 
   const reservedCount = quest?.reservedCount || 0
 
@@ -493,6 +498,14 @@ function QuestFormModal({ quest, onClose, onSubmit, isLoading }) {
     
     if (capacityError) return
     
+    const impact = impactUnit && impactAmount && impactLabel
+      ? {
+          unit: impactUnit,
+          amountPerCompletion: Number(impactAmount),
+          label: impactLabel,
+        }
+      : null
+
     onSubmit({
       title,
       description,
@@ -502,6 +515,7 @@ function QuestFormModal({ quest, onClose, onSubmit, isLoading }) {
       startAt: new Date(startAt).toISOString(),
       endAt: new Date(endAt).toISOString(),
       gracePeriodHours: parseInt(gracePeriodHours, 10),
+      impact,
     })
   }
 
@@ -608,6 +622,50 @@ function QuestFormModal({ quest, onClose, onSubmit, isLoading }) {
               min="1"
             />
           </div>
+          <div className="border-t border-gray-200 pt-4 mt-2">
+            <p className="text-sm font-medium text-gray-900 mb-1">Sustainability Impact (optional)</p>
+            <p className="text-xs text-gray-500 mb-3">
+              Define the environmental impact for each completed participation in this quest.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Unit</label>
+                <select
+                  value={impactUnit}
+                  onChange={(e) => setImpactUnit(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                >
+                  <option value="">Select unit</option>
+                  <option value="kg_trash">Kg of trash</option>
+                  <option value="trees">Trees</option>
+                  <option value="hours">Volunteer hours</option>
+                  <option value="kg_plastic">Kg of plastic</option>
+                  <option value="co2_kg">Kg CO₂</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Amount per completion</label>
+                <input
+                  type="number"
+                  value={impactAmount}
+                  onChange={(e) => setImpactAmount(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  min="0"
+                  step="0.1"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Label</label>
+                <input
+                  type="text"
+                  value={impactLabel}
+                  onChange={(e) => setImpactLabel(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  placeholder="e.g. Kg of waste collected"
+                />
+              </div>
+            </div>
+          </div>
           <div className="flex gap-3 pt-2">
             <button
               type="button"
@@ -704,6 +762,8 @@ export default function LGUDashboardPage() {
   const [toast, setToast] = useState(null)
   const [expandedQuestStats, setExpandedQuestStats] = useState({})
   const [loadingQuestStats, setLoadingQuestStats] = useState(null)
+  const [seasonImpactTotals, setSeasonImpactTotals] = useState({})
+  const [questImpactTotals, setQuestImpactTotals] = useState({})
 
   useEffect(() => {
     async function checkAdminStatus() {
@@ -748,8 +808,33 @@ export default function LGUDashboardPage() {
           if (filterId) {
             const questList = await listQuestsBySeason(filterId)
             setQuests(questList)
+
+            const impactEntries = await listSeasonImpact(filterId)
+            const seasonTotals = sumImpactByUnit(impactEntries)
+            const questTotals = {}
+
+            impactEntries.forEach(entry => {
+              if (!entry.questId || !entry.unit) return
+              if (!questTotals[entry.questId]) {
+                questTotals[entry.questId] = {
+                  totalCompletions: 0,
+                  byUnit: {},
+                }
+              }
+              questTotals[entry.questId].totalCompletions += 1
+              const amount = typeof entry.amount === 'number' ? entry.amount : 0
+              if (!questTotals[entry.questId].byUnit[entry.unit]) {
+                questTotals[entry.questId].byUnit[entry.unit] = 0
+              }
+              questTotals[entry.questId].byUnit[entry.unit] += amount
+            })
+
+            setSeasonImpactTotals(seasonTotals)
+            setQuestImpactTotals(questTotals)
           } else {
             setQuests([])
+            setSeasonImpactTotals({})
+            setQuestImpactTotals({})
           }
         } else if (activeTab === TABS.QUEST_VERIFICATIONS) {
           const season = await getActiveSeason()
@@ -812,8 +897,33 @@ export default function LGUDashboardPage() {
         if (filterId) {
           const questList = await listQuestsBySeason(filterId)
           setQuests(questList)
+
+          const impactEntries = await listSeasonImpact(filterId)
+          const seasonTotals = sumImpactByUnit(impactEntries)
+          const questTotals = {}
+
+          impactEntries.forEach(entry => {
+            if (!entry.questId || !entry.unit) return
+            if (!questTotals[entry.questId]) {
+              questTotals[entry.questId] = {
+                totalCompletions: 0,
+                byUnit: {},
+              }
+            }
+            questTotals[entry.questId].totalCompletions += 1
+            const amount = typeof entry.amount === 'number' ? entry.amount : 0
+            if (!questTotals[entry.questId].byUnit[entry.unit]) {
+              questTotals[entry.questId].byUnit[entry.unit] = 0
+            }
+            questTotals[entry.questId].byUnit[entry.unit] += amount
+          })
+
+          setSeasonImpactTotals(seasonTotals)
+          setQuestImpactTotals(questTotals)
         } else {
           setQuests([])
+          setSeasonImpactTotals({})
+          setQuestImpactTotals({})
         }
       } else if (activeTab === TABS.QUEST_VERIFICATIONS) {
         const season = await getActiveSeason()
@@ -1067,6 +1177,26 @@ export default function LGUDashboardPage() {
     }
   }
 
+  const [showSeedConfirm, setShowSeedConfirm] = useState(false)
+  const [seedLoading, setSeedLoading] = useState(false)
+
+  const handleSeedSampleQuests = async () => {
+    setSeedLoading(true)
+    try {
+      console.log('[UI] Starting seed...')
+      const result = await seedSampleQuestsForActiveSeason()
+      console.log('[UI] Seed result:', result)
+      showToast(`Seeded ${result.count} sample quests!`)
+      setShowSeedConfirm(false)
+      loadData()
+    } catch (error) {
+      console.error('[UI] Seed error:', error)
+      showToast(error.message, 'error')
+    } finally {
+      setSeedLoading(false)
+    }
+  }
+
   const handleToggleQuestStats = async (questId) => {
     if (expandedQuestStats[questId]) {
       const newStats = { ...expandedQuestStats }
@@ -1172,6 +1302,14 @@ export default function LGUDashboardPage() {
   const newSubmissions = submissions.filter(s => s.status === 'new').length
   const newReports = reports.filter(r => r.status === 'new').length
   const pendingQuests = questParticipations.filter(p => p.status === 'joined').length
+
+  const IMPACT_UNIT_CONFIG = {
+    kg_trash: { label: 'Kg of waste collected', short: 'kg trash' },
+    trees: { label: 'Trees planted', short: 'trees' },
+    hours: { label: 'Volunteer hours', short: 'hours' },
+    kg_plastic: { label: 'Kg of plastic avoided', short: 'kg plastic' },
+    co2_kg: { label: 'Kg of CO₂ avoided', short: 'kg CO₂' },
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -1351,6 +1489,22 @@ export default function LGUDashboardPage() {
                       ))}
                     </tbody>
                   </table>
+                  {Object.keys(seasonImpactTotals).length > 0 && activeSeason && activeSeason.id === (selectedSeasonFilter || activeSeason.id) && (
+                    <div className="border-t border-gray-200 px-4 py-4 bg-gray-50">
+                      <h4 className="text-sm font-semibold text-gray-900 mb-2">Season Impact Summary (selected season)</h4>
+                      <div className="flex flex-wrap gap-3">
+                        {Object.entries(seasonImpactTotals).map(([unit, amount]) => {
+                          const config = IMPACT_UNIT_CONFIG[unit] || { label: unit, short: unit }
+                          return (
+                            <div key={unit} className="bg-white rounded-lg px-3 py-2 shadow-sm text-sm">
+                              <p className="text-gray-500 text-xs uppercase">{config.label}</p>
+                              <p className="text-gray-900 font-semibold">{amount}</p>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1369,6 +1523,12 @@ export default function LGUDashboardPage() {
                       <option key={s.id} value={s.id}>{s.name}</option>
                     ))}
                   </select>
+                  <button
+                    onClick={() => setShowSeedConfirm(true)}
+                    className="px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium"
+                  >
+                    Seed 10 Sample Quests
+                  </button>
                   <button
                     onClick={() => setShowCleanupConfirm(true)}
                     className="px-3 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 text-sm font-medium"
@@ -1399,6 +1559,8 @@ export default function LGUDashboardPage() {
                         <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Capacity</th>
                         <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Reserved</th>
                         <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Slots Left</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Completions</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Total Impact</th>
                         <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
                         <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
                       </tr>
@@ -1411,6 +1573,7 @@ export default function LGUDashboardPage() {
                         const isExpanded = expandedQuestStats[quest.id]
                         const stats = expandedQuestStats[quest.id]
                         const isLoadingStats = loadingQuestStats === quest.id
+                        const impactForQuest = questImpactTotals[quest.id]
 
                         return (
                           <>
@@ -1430,6 +1593,17 @@ export default function LGUDashboardPage() {
                                     {slotsLeft}
                                   </span>
                                 )}
+                              </td>
+                              <td className="px-4 py-3 text-gray-600">
+                                {impactForQuest?.totalCompletions || 0}
+                              </td>
+                              <td className="px-4 py-3 text-gray-600 text-sm">
+                                {impactForQuest && impactForQuest.byUnit
+                                  ? Object.entries(impactForQuest.byUnit).map(([unit, amount]) => {
+                                      const config = IMPACT_UNIT_CONFIG[unit] || { short: unit }
+                                      return `${amount} ${config.short}`
+                                    }).join(', ')
+                                  : '—'}
                               </td>
                               <td className="px-4 py-3">
                                 <span className={`px-2 py-1 rounded-full text-xs font-medium ${
@@ -1628,6 +1802,37 @@ export default function LGUDashboardPage() {
           onSubmit={(data) => handleUpdateQuest(selectedQuest.id, data)}
           isLoading={actionLoading}
         />
+      )}
+
+      {showSeedConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Seed Sample Quests</h3>
+            <p className="text-gray-600 mb-4">
+              This will create 10 sample quests for the currently active season. 
+              If quests with IDs seed-q1 through seed-q10 already exist, they will be updated.
+            </p>
+            <p className="text-sm text-yellow-600 mb-6">
+              Running this again is safe - it will not create duplicates.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowSeedConfirm(false)}
+                disabled={seedLoading}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSeedSampleQuests}
+                disabled={seedLoading}
+                className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-300"
+              >
+                {seedLoading ? 'Seeding...' : 'Seed 10 Quests'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {showCleanupConfirm && (

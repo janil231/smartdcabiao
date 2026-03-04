@@ -7,6 +7,7 @@ import { getActiveSeason } from '../services/seasons.service'
 import { getQuestById } from '../services/quests.service'
 import { getUserParticipations, expireMyStaleParticipations } from '../services/participations.service'
 import { getUserSeasonPointsSummary } from '../services/pointsLedger.service'
+import { listUserImpact, listSeasonImpact, sumImpactByUnit } from '../services/impactLedger.service'
 import { participation as mockParticipation, rewardTotals as mockRewardTotals } from '../data'
 
 const STATUS_CONFIG = {
@@ -113,6 +114,8 @@ export default function RewardsPreviewPage() {
   const [loading, setLoading] = useState(false)
   const [activeSeason, setActiveSeason] = useState(null)
   const [useMockData, setUseMockData] = useState(false)
+  const [seasonImpactTotals, setSeasonImpactTotals] = useState({})
+  const [userImpactTotals, setUserImpactTotals] = useState({})
 
   useEffect(() => {
     async function loadData() {
@@ -152,6 +155,13 @@ export default function RewardsPreviewPage() {
           const titleResults = await Promise.all(titlePromises)
           const titles = Object.assign({}, ...titleResults)
           setQuestTitles(titles)
+
+          const [seasonImpactEntries, userImpactEntries] = await Promise.all([
+            listSeasonImpact(season.id),
+            listUserImpact({ uid: user.uid, seasonId: season.id })
+          ])
+          setSeasonImpactTotals(sumImpactByUnit(seasonImpactEntries))
+          setUserImpactTotals(sumImpactByUnit(userImpactEntries))
         } else {
           setUseMockData(true)
         }
@@ -190,6 +200,14 @@ export default function RewardsPreviewPage() {
     return `Ends in ${daysLeft} day${daysLeft > 1 ? 's' : ''}`
   }
 
+  const IMPACT_UNIT_CONFIG = {
+    kg_trash: { label: 'Kg of waste collected', icon: '🗑️' },
+    trees: { label: 'Trees planted', icon: '🌳' },
+    hours: { label: 'Volunteer hours', icon: '⏱️' },
+    kg_plastic: { label: 'Kg of plastic avoided', icon: '♻️' },
+    co2_kg: { label: 'Kg of CO₂ avoided', icon: '🌍' },
+  }
+
   const handleGoToQuest = (questId) => {
     window.location.href = `/events?focusQuestId=${questId}`
   }
@@ -224,6 +242,81 @@ export default function RewardsPreviewPage() {
                   {getSeasonCountdown()}
                 </span>
               </div>
+            </div>
+          )}
+
+          {activeSeason && !useMockData && (
+            <div className="mb-8 grid gap-6 lg:grid-cols-2">
+              <section>
+                <h2 className="text-lg font-semibold text-gray-900">This Season&apos;s Impact</h2>
+                <p className="mt-1 text-sm text-gray-600">
+                  Total environmental impact from all completed quests this season.
+                </p>
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  {Object.keys(seasonImpactTotals).length === 0 && (
+                    <p className="text-sm text-gray-500">No impact recorded yet. Approve completed quests to start tracking.</p>
+                  )}
+                  {Object.entries(seasonImpactTotals).map(([unit, amount]) => {
+                    const config = IMPACT_UNIT_CONFIG[unit] || { label: unit, icon: '🌱' }
+                    return (
+                      <div
+                        key={unit}
+                        className="rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-teal-50 p-4 flex items-center gap-3"
+                      >
+                        <div className="text-2xl" aria-hidden="true">{config.icon}</div>
+                        <div>
+                          <p className="text-xs font-medium uppercase tracking-wide text-emerald-700">
+                            {config.label}
+                          </p>
+                          <p className="mt-1 text-2xl font-bold text-emerald-900">
+                            {amount}
+                          </p>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </section>
+
+              <section>
+                <h2 className="text-lg font-semibold text-gray-900">Your Contribution</h2>
+                <p className="mt-1 text-sm text-gray-600">
+                  How your completed quests add up for this season.
+                </p>
+                {!user && (
+                  <p className="mt-3 text-sm text-gray-500">
+                    Login to track your personal contribution.
+                  </p>
+                )}
+                {user && (
+                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                    {Object.keys(userImpactTotals).length === 0 && (
+                      <p className="text-sm text-gray-500 col-span-full">
+                        Complete quests and have them verified by an LGU admin to see your impact here.
+                      </p>
+                    )}
+                    {Object.entries(userImpactTotals).map(([unit, amount]) => {
+                      const config = IMPACT_UNIT_CONFIG[unit] || { label: unit, icon: '🌱' }
+                      return (
+                        <div
+                          key={unit}
+                          className="rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50 p-4 flex items-center gap-3"
+                        >
+                          <div className="text-2xl" aria-hidden="true">{config.icon}</div>
+                          <div>
+                            <p className="text-xs font-medium uppercase tracking-wide text-blue-700">
+                              {config.label}
+                            </p>
+                            <p className="mt-1 text-2xl font-bold text-blue-900">
+                              {amount}
+                            </p>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </section>
             </div>
           )}
 

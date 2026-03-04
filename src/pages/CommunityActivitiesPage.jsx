@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, useSearchParams } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
@@ -132,6 +133,11 @@ function QuestCard({ quest, participation, onJoin, onCancel, isLoading, focused 
     }
   }
 
+  const impact = quest.impact
+  const impactText = impact && impact.unit && impact.amountPerCompletion && impact.label
+    ? `+${impact.amountPerCompletion} ${impact.label}`
+    : null
+
   return (
     <article 
       ref={focused ? (el) => el?.scrollIntoView({ behavior: 'smooth', block: 'center' }) : undefined}
@@ -170,6 +176,14 @@ function QuestCard({ quest, participation, onJoin, onCancel, isLoading, focused 
               )}
             </dd>
           </div>
+          {impactText && (
+            <div className="flex items-center gap-2">
+              <dt className="shrink-0 font-medium">🌱</dt>
+              <dd className="text-emerald-700 font-medium">
+                Impact: {impactText}
+              </dd>
+            </div>
+          )}
         </dl>
         
         {getDeadlineInfo()}
@@ -260,9 +274,15 @@ function MockQuestCard({ activity }) {
 function CancelConfirmModal({ isOpen, onClose, onConfirm, isLoading, questTitle }) {
   if (!isOpen) return null
   
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
+  return createPortal(
+    <div 
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 px-4"
+      onClick={onClose}
+    >
+      <div 
+        className="bg-white rounded-xl max-w-md w-full max-h-[90vh] overflow-y-auto p-6"
+        onClick={e => e.stopPropagation()}
+      >
         <h3 className="text-lg font-bold text-gray-900">Cancel Joining?</h3>
         <p className="mt-2 text-gray-600">
           Are you sure you want to cancel your joining for "{questTitle}"? Your slot will be freed and you won't receive the points.
@@ -284,7 +304,8 @@ function CancelConfirmModal({ isOpen, onClose, onConfirm, isLoading, questTitle 
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
@@ -396,7 +417,7 @@ export default function CommunityActivitiesPage() {
 
   const handleCancel = async () => {
     if (!user || !cancelConfirm) return
-    const questId = cancelConfirm
+    const questId = cancelConfirm.questId
     
     setActionLoading(questId)
     setError(null)

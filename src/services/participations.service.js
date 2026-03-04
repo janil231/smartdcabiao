@@ -13,6 +13,7 @@ import { db } from '../lib/firebase'
 import { getQuestById, decrementReservedCount } from './quests.service'
 import { addPointsEntry } from './pointsLedger.service'
 import { logAudit } from './audit.service'
+import { addImpactEntry } from './impactLedger.service'
 
 const PARTICIPATIONS_COLLECTION = 'participations'
 const QUESTS_COLLECTION = 'quests'
@@ -223,6 +224,19 @@ export async function adminMarkCompleted({ uid, questId, adminUser }) {
     points: quest.points || 0,
     reason: `Completed quest: ${quest.title}`,
   })
+
+  if (quest.impact && quest.impact.unit && quest.impact.amountPerCompletion) {
+    await addImpactEntry({
+      uid,
+      userEmail: participation.userEmail,
+      seasonId: quest.seasonId,
+      questId,
+      questTitle: quest.title,
+      unit: quest.impact.unit,
+      amount: quest.impact.amountPerCompletion,
+      adminUser,
+    })
+  }
 
   await decrementReservedCount(questId)
 
