@@ -7,7 +7,9 @@ import { getActiveSeason } from '../services/seasons.service'
 import { getQuestById } from '../services/quests.service'
 import { getUserParticipations, expireMyStaleParticipations } from '../services/participations.service'
 import { getUserSeasonPointsSummary } from '../services/pointsLedger.service'
+import { getMySeasonBalance } from '../services/seasonBalances.service'
 import { listUserImpact, listSeasonImpact, sumImpactByUnit } from '../services/impactLedger.service'
+import { listTopByPoints, listTopByImpact, IMPACT_UNITS } from '../services/leaderboard.service'
 import { participation as mockParticipation, rewardTotals as mockRewardTotals } from '../data'
 
 const STATUS_CONFIG = {
@@ -116,6 +118,11 @@ export default function RewardsPreviewPage() {
   const [useMockData, setUseMockData] = useState(false)
   const [seasonImpactTotals, setSeasonImpactTotals] = useState({})
   const [userImpactTotals, setUserImpactTotals] = useState({})
+  const [leaderboardTab, setLeaderboardTab] = useState('points')
+  const [leaderboardUnit, setLeaderboardUnit] = useState('trees')
+  const [leaderboardData, setLeaderboardData] = useState([])
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false)
+  const [seasonBalance, setSeasonBalance] = useState(null)
 
   useEffect(() => {
     async function loadData() {
@@ -156,12 +163,14 @@ export default function RewardsPreviewPage() {
           const titles = Object.assign({}, ...titleResults)
           setQuestTitles(titles)
 
-          const [seasonImpactEntries, userImpactEntries] = await Promise.all([
+          const [seasonImpactEntries, userImpactEntries, balance] = await Promise.all([
             listSeasonImpact(season.id),
-            listUserImpact({ uid: user.uid, seasonId: season.id })
+            listUserImpact({ uid: user.uid, seasonId: season.id }),
+            getMySeasonBalance(season.id, user.uid)
           ])
           setSeasonImpactTotals(sumImpactByUnit(seasonImpactEntries))
           setUserImpactTotals(sumImpactByUnit(userImpactEntries))
+          setSeasonBalance(balance)
         } else {
           setUseMockData(true)
         }
@@ -174,6 +183,33 @@ export default function RewardsPreviewPage() {
     
     loadData()
   }, [user])
+
+  useEffect(() => {
+    async function loadLeaderboard() {
+      if (!activeSeason) {
+        setLeaderboardData([])
+        return
+      }
+
+      setLeaderboardLoading(true)
+      try {
+        let data
+        if (leaderboardTab === 'points') {
+          data = await listTopByPoints(activeSeason.id, 10)
+        } else {
+          data = await listTopByImpact(activeSeason.id, leaderboardUnit, 10)
+        }
+        setLeaderboardData(data || [])
+      } catch (error) {
+        console.error('Error loading leaderboard:', error)
+        setLeaderboardData([])
+      } finally {
+        setLeaderboardLoading(false)
+      }
+    }
+
+    loadLeaderboard()
+  }, [activeSeason, leaderboardTab, leaderboardUnit])
 
   const sortedParticipations = useMemo(() => {
     return [...participations].sort((a, b) => {
@@ -356,12 +392,22 @@ export default function RewardsPreviewPage() {
               </p>
               <p className="mt-1 text-xs text-blue-700">Finished</p>
             </div>
-            <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-yellow-50 to-amber-50 p-5">
-              <p className="text-sm font-medium text-yellow-800">Pending</p>
+            <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-yellow-50 to-amber-50 p-5 flex flex-col">
+              <p className="text-sm font-medium text-yellow-800">Available Points</p>
               <p className="mt-1 text-3xl font-bold text-yellow-900">
-                {loading && user ? '...' : stats.pending}
+                {seasonBalance ? seasonBalance.pointsBalance || 0 : 0}
               </p>
-              <p className="mt-1 text-xs text-yellow-700">Awaiting completion</p>
+              <p className="mt-1 text-xs text-yellow-700">
+                Earned: {seasonBalance ? seasonBalance.pointsEarned || 0 : 0} • Spent: {seasonBalance ? seasonBalance.pointsSpent || 0 : 0}
+              </p>
+              {activeSeason && (
+                <Link
+                  to="/vouchers"
+                  className="mt-3 inline-flex items-center justify-center px-3 py-2 text-sm font-medium rounded-lg bg-amber-600 text-white hover:bg-amber-700"
+                >
+                  Go to Voucher Store
+                </Link>
+              )}
             </div>
           </div>
 
@@ -422,6 +468,103 @@ export default function RewardsPreviewPage() {
               </div>
             )}
           </div>
+
+          {activeSeason && (
+            <div className="mt-12">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="border-b border-gray-200 px-6 py-4">
+                  <h2 className="text-xl font-semibold text-gray-900">Community Leaderboard</h2>
+                  <p className="mt-1 text-sm text-gray-600">
+                    Top contributors this season
+                  </p>
+                </div>
+
+                <div className="border-b border-gray-200 px-4 py-3">
+                  <div className="flex gap-2 flex-wrap">
+                    <button
+                      onClick={() => setLeaderboardTab('points')}
+                      className={`px-4 py-2 rounded-lg font-medium text-sm transition ${
+                        leaderboardTab === 'points'
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      Top by Points
+                    </button>
+                    {IMPACT_UNITS.map(unit => (
+                      <button
+                        key={unit.value}
+                        onClick={() => {
+                          setLeaderboardTab('impact')
+                          setLeaderboardUnit(unit.value)
+                        }}
+                        className={`px-4 py-2 rounded-lg font-medium text-sm transition ${
+                          leaderboardTab === 'impact' && leaderboardUnit === unit.value
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }`}
+                      >
+                        {unit.icon} {unit.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="p-6">
+                  {leaderboardLoading ? (
+                    <div className="text-center py-8">
+                      <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-600 border-t-transparent"></div>
+                      <p className="text-gray-500 mt-2">Loading leaderboard...</p>
+                    </div>
+                  ) : leaderboardData.length === 0 ? (
+                    <div className="text-center py-8">
+                      <p className="text-gray-500">No leaderboard data yet. Complete quests to appear here!</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {leaderboardData.map(entry => (
+                        <div
+                          key={entry.uid}
+                          className={`flex items-center gap-4 p-3 rounded-lg ${
+                            entry.uid === user?.uid ? 'bg-emerald-50 border border-emerald-200' : 'bg-gray-50'
+                          }`}
+                        >
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${
+                            entry.rank <= 3
+                              ? 'bg-yellow-100 text-yellow-800'
+                              : 'bg-gray-200 text-gray-600'
+                          }`}>
+                            {entry.rank}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-gray-900 truncate">
+                              {entry.name}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {entry.completedQuestsCount} quest{entry.completedQuestsCount !== 1 ? 's' : ''} completed
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-bold text-gray-900">
+                              {leaderboardTab === 'points'
+                                ? `${entry.pointsTotal} pts`
+                                : `${entry.impact || 0}`
+                              }
+                            </p>
+                            {leaderboardTab === 'impact' && (
+                              <p className="text-xs text-gray-500">
+                                {IMPACT_UNITS.find(u => u.value === leaderboardUnit)?.label || leaderboardUnit}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </main>
       <Footer />

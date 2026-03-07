@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import FavoriteButton from './FavoriteButton'
 import AppImage from './ui/AppImage'
 import { getBusinessImage } from '../utils/placeImages'
+import RatingSummary from './reviews/RatingSummary'
 
 const TYPE_STYLES = {
   restaurant: 'bg-amber-500/10 text-amber-700 border-amber-200',
@@ -39,6 +40,11 @@ export default function BusinessCard({ business, className = '' }) {
           {business.category}
         </span>
         <h3 className="mt-2 text-lg font-semibold text-gray-900">{business.name}</h3>
+        {(business.ratingAvg || business.ratingCount) && (
+          <div className="mt-1">
+            <RatingSummary ratingAvg={business.ratingAvg} ratingCount={business.ratingCount} />
+          </div>
+        )}
         <p className="mt-2 flex-1 text-sm text-gray-600 line-clamp-2">
           {business.description}
         </p>

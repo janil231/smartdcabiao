@@ -6,6 +6,7 @@ import SearchBar from '../components/SearchBar'
 import FavoriteButton from '../components/FavoriteButton'
 import AppImage from '../components/ui/AppImage'
 import DataStatusBadge from '../components/DataStatusBadge'
+import RatingSummary from '../components/reviews/RatingSummary'
 import { getDestinationImage } from '../utils/placeImages'
 import { getDestinationsLastSynced } from '../services/destinations.service'
 
@@ -51,6 +52,11 @@ function DestinationCard({ destination }) {
           </svg>
           {destination.barangay || destination.address?.split(',')[0] || 'Cabiao'}
         </p>
+        {(destination.ratingAvg || destination.ratingCount) && (
+          <div className="mt-1">
+            <RatingSummary ratingAvg={destination.ratingAvg} ratingCount={destination.ratingCount} />
+          </div>
+        )}
         <p className="mt-2 flex-1 text-sm text-gray-600 line-clamp-2 sm:line-clamp-3">
           {destination.description}
         </p>

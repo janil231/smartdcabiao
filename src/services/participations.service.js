@@ -8,15 +8,18 @@ import {
   setDoc,
   updateDoc,
   increment,
+  serverTimestamp,
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { getQuestById, decrementReservedCount } from './quests.service'
 import { addPointsEntry } from './pointsLedger.service'
 import { logAudit } from './audit.service'
 import { addImpactEntry } from './impactLedger.service'
+import { incrementEarnedPoints } from './seasonBalances.service'
 
 const PARTICIPATIONS_COLLECTION = 'participations'
 const QUESTS_COLLECTION = 'quests'
+const SEASON_USER_STATS_COLLECTION = 'seasonUserStats'
 
 function getParticipationId(questId, uid) {
   return `${questId}_${uid}`
@@ -189,6 +192,46 @@ export async function expireAllStaleParticipations() {
   return { expiredCount, freedSlots: expiredCount }
 }
 
+async function updateSeasonUserStats({ uid, userEmail, seasonId, points, impactUnit, impactAmount }) {
+  if (!uid || !seasonId) return
+
+  const statsDocId = `${seasonId}_${uid}`
+  const statsRef = doc(db, SEASON_USER_STATS_COLLECTION, statsDocId)
+  const statsSnapshot = await getDoc(statsRef)
+
+  const displayName = userEmail ? userEmail.split('@')[0] : 'Anonymous'
+
+  if (!statsSnapshot.exists()) {
+    const initialData = {
+      seasonId,
+      uid,
+      userEmail,
+      displayName,
+      publicName: displayName,
+      showOnLeaderboard: true,
+      pointsTotal: points,
+      completedQuestsCount: 1,
+      impactTotalsByUnit: impactUnit ? { [impactUnit]: impactAmount } : {},
+      updatedAt: serverTimestamp(),
+    }
+    await setDoc(statsRef, initialData)
+  } else {
+    const updateData = {
+      pointsTotal: increment(points),
+      completedQuestsCount: increment(1),
+      userEmail,
+      displayName,
+      updatedAt: serverTimestamp(),
+    }
+
+    if (impactUnit) {
+      updateData[`impactTotalsByUnit.${impactUnit}`] = increment(impactAmount)
+    }
+
+    await updateDoc(statsRef, updateData)
+  }
+}
+
 export async function adminMarkCompleted({ uid, questId, adminUser }) {
   const participationId = getParticipationId(questId, uid)
   const participationRef = doc(db, PARTICIPATIONS_COLLECTION, participationId)
@@ -239,6 +282,17 @@ export async function adminMarkCompleted({ uid, questId, adminUser }) {
   }
 
   await decrementReservedCount(questId)
+
+  await incrementEarnedPoints(quest.seasonId, { uid, email: participation.userEmail }, quest.points || 0)
+
+  await updateSeasonUserStats({
+    uid,
+    userEmail: participation.userEmail,
+    seasonId: quest.seasonId,
+    points: quest.points || 0,
+    impactUnit: quest.impact?.unit || null,
+    impactAmount: quest.impact?.amountPerCompletion || 0,
+  })
 
   await logAudit({
     action: 'QUEST_COMPLETED_BY_ADMIN',

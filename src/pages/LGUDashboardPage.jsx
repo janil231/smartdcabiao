@@ -32,15 +32,21 @@ import {
   seedSampleQuestsForActiveSeason
 } from '../services/quests.service'
 import { getQuestParticipations, adminMarkCompleted, expireAllStaleParticipations } from '../services/participations.service'
+import { listPendingReviews, setReviewStatus } from '../services/reviews.service'
+import { listTopByPoints, listTopByImpact, IMPACT_UNITS } from '../services/leaderboard.service'
 import { isWithinCabiaoBounds, CABIAO_BOUNDS } from '../constants/cabiaoGeo'
 import { listSeasonImpact, sumImpactByUnit } from '../services/impactLedger.service'
+import { seedSampleVouchersForActiveSeason } from '../services/vouchers.service'
+import { listSeasonRedemptions, adminMarkVoucherUsed } from '../services/voucherRedemptions.service'
 
 const TABS = {
   SUBMISSIONS: 'submissions',
   REPORTS: 'reports',
+  REVIEWS: 'reviews',
   SEASONS: 'seasons',
   QUESTS: 'quests',
   QUEST_VERIFICATIONS: 'quest_verifications',
+  VOUCHERS: 'vouchers',
   PLACES: 'places'
 }
 
@@ -291,6 +297,97 @@ function ReportModal({ report, onClose, onMarkInProgress, onMarkResolved, isLoad
               Mark Resolved
             </button>
           )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ReviewModal({ review, onClose, onApprove, onReject, isLoading }) {
+  if (!review) return null
+
+  const targetLink = review.targetType === 'business' 
+    ? `/businesses/${review.targetId}` 
+    : `/destinations/${review.targetId}`
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="p-6 border-b border-gray-200">
+          <div className="flex justify-between items-start">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">Review Details</h2>
+              <div className="flex gap-2 mt-2">
+                <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-medium">
+                  {review.targetType?.toUpperCase() || 'BUSINESS'}
+                </span>
+                <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-xs font-medium flex items-center gap-1">
+                  <span>★</span> {review.rating}/5
+                </span>
+              </div>
+            </div>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <div>
+            <p className="text-sm font-medium text-gray-500">Reviewer</p>
+            <p className="text-gray-900">{review.userDisplayName || review.userEmail || 'Anonymous'}</p>
+          </div>
+          {review.title && (
+            <div>
+              <p className="text-sm font-medium text-gray-500">Title</p>
+              <p className="text-gray-900 font-medium">{review.title}</p>
+            </div>
+          )}
+          <div>
+            <p className="text-sm font-medium text-gray-500">Review</p>
+            <p className="text-gray-900">{review.text}</p>
+          </div>
+          {review.sustainabilityNote && (
+            <div>
+              <p className="text-sm font-medium text-gray-500">Sustainability Note</p>
+              <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-lg">
+                <p className="text-emerald-800">{review.sustainabilityNote}</p>
+              </div>
+            </div>
+          )}
+          {review.targetId && (
+            <div>
+              <p className="text-sm font-medium text-gray-500">Target</p>
+              <Link to={targetLink} className="text-emerald-600 hover:underline">
+                View {review.targetType}: {review.targetId}
+              </Link>
+            </div>
+          )}
+          <div>
+            <p className="text-sm font-medium text-gray-500">Submitted</p>
+            <p className="text-gray-900">
+              {review.createdAt ? new Date(review.createdAt).toLocaleString() : 'Unknown'}
+            </p>
+          </div>
+        </div>
+
+        <div className="p-6 border-t border-gray-200 bg-gray-50 flex flex-wrap gap-3">
+          <button
+            onClick={onApprove}
+            disabled={isLoading}
+            className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 font-medium"
+          >
+            {isLoading ? 'Processing...' : 'Approve'}
+          </button>
+          <button
+            onClick={onReject}
+            disabled={isLoading}
+            className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-gray-300 font-medium"
+          >
+            {isLoading ? 'Processing...' : 'Reject'}
+          </button>
         </div>
       </div>
     </div>
@@ -754,6 +851,7 @@ export default function LGUDashboardPage() {
   const [isUserAdmin, setIsUserAdmin] = useState(false)
   const [selectedSubmission, setSelectedSubmission] = useState(null)
   const [selectedReport, setSelectedReport] = useState(null)
+  const [selectedReview, setSelectedReview] = useState(null)
   const [selectedParticipation, setSelectedParticipation] = useState(null)
   const [selectedQuest, setSelectedQuest] = useState(null)
   const [showSeasonModal, setShowSeasonModal] = useState(false)
@@ -764,6 +862,13 @@ export default function LGUDashboardPage() {
   const [loadingQuestStats, setLoadingQuestStats] = useState(null)
   const [seasonImpactTotals, setSeasonImpactTotals] = useState({})
   const [questImpactTotals, setQuestImpactTotals] = useState({})
+  const [leaderboardTab, setLeaderboardTab] = useState('points')
+  const [leaderboardUnit, setLeaderboardUnit] = useState('trees')
+  const [leaderboardData, setLeaderboardData] = useState([])
+  const [pendingReviews, setPendingReviews] = useState([])
+  const [seasonRedemptions, setSeasonRedemptions] = useState([])
+  const [redemptionStatusFilter, setRedemptionStatusFilter] = useState('all')
+  const [markingVoucherUsedId, setMarkingVoucherUsedId] = useState(null)
 
   useEffect(() => {
     async function checkAdminStatus() {
@@ -791,6 +896,9 @@ export default function LGUDashboardPage() {
         } else if (activeTab === TABS.REPORTS) {
           const data = await listReports({ status: null })
           setReports(data)
+        } else if (activeTab === TABS.REVIEWS) {
+          const data = await listPendingReviews({ limit: 50 })
+          setPendingReviews(data)
         } else if (activeTab === TABS.SEASONS) {
           const seasonList = await listSeasons()
           setSeasons(seasonList)
@@ -855,6 +963,15 @@ export default function LGUDashboardPage() {
           } else {
             setQuestParticipations([])
           }
+        } else if (activeTab === TABS.VOUCHERS) {
+          const active = await getActiveSeason()
+          setActiveSeason(active)
+          if (active) {
+            const list = await listSeasonRedemptions(active.id, 50)
+            setSeasonRedemptions(list)
+          } else {
+            setSeasonRedemptions([])
+          }
         }
       } catch {
         // Error loading data - handled silently
@@ -880,6 +997,9 @@ export default function LGUDashboardPage() {
       } else if (activeTab === TABS.REPORTS) {
         const data = await listReports({ status: null })
         setReports(data)
+      } else if (activeTab === TABS.REVIEWS) {
+        const data = await listPendingReviews({ limit: 50 })
+        setPendingReviews(data)
       } else if (activeTab === TABS.SEASONS) {
         const seasonList = await listSeasons()
         setSeasons(seasonList)
@@ -887,6 +1007,10 @@ export default function LGUDashboardPage() {
         setActiveSeason(active)
         if (active && !selectedSeasonFilter) {
           setSelectedSeasonFilter(active.id)
+        }
+        if (active) {
+          const lbData = await listTopByPoints(active.id, 10)
+          setLeaderboardData(lbData)
         }
       } else if (activeTab === TABS.QUESTS) {
         const seasonList = await listSeasons()
@@ -943,6 +1067,15 @@ export default function LGUDashboardPage() {
           setQuestParticipations(allParticipations)
         } else {
           setQuestParticipations([])
+        }
+      } else if (activeTab === TABS.VOUCHERS) {
+        const active = await getActiveSeason()
+        setActiveSeason(active)
+        if (active) {
+          const list = await listSeasonRedemptions(active.id, 50)
+          setSeasonRedemptions(list)
+        } else {
+          setSeasonRedemptions([])
         }
       }
     } catch {
@@ -1056,6 +1189,52 @@ export default function LGUDashboardPage() {
         loadData()
       } else {
         showToast(result.error || 'Failed', 'error')
+      }
+    } catch (error) {
+      showToast(error.message, 'error')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleApproveReview = async () => {
+    if (!selectedReview) return
+    setActionLoading(true)
+    try {
+      const result = await setReviewStatus({
+        reviewId: selectedReview.id,
+        status: 'approved',
+        adminUser: { uid: user.uid, email: user.email }
+      })
+      if (result.success) {
+        showToast('Review approved!')
+        setSelectedReview(null)
+        loadData()
+      } else {
+        showToast(result.error || 'Failed to approve', 'error')
+      }
+    } catch (error) {
+      showToast(error.message, 'error')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleRejectReview = async () => {
+    if (!selectedReview) return
+    setActionLoading(true)
+    try {
+      const result = await setReviewStatus({
+        reviewId: selectedReview.id,
+        status: 'rejected',
+        adminUser: { uid: user.uid, email: user.email }
+      })
+      if (result.success) {
+        showToast('Review rejected')
+        setSelectedReview(null)
+        loadData()
+      } else {
+        showToast(result.error || 'Failed to reject', 'error')
       }
     } catch (error) {
       showToast(error.message, 'error')
@@ -1179,21 +1358,52 @@ export default function LGUDashboardPage() {
 
   const [showSeedConfirm, setShowSeedConfirm] = useState(false)
   const [seedLoading, setSeedLoading] = useState(false)
+  const [showSeedVouchersConfirm, setShowSeedVouchersConfirm] = useState(false)
+  const [seedVouchersLoading, setSeedVouchersLoading] = useState(false)
 
   const handleSeedSampleQuests = async () => {
     setSeedLoading(true)
     try {
-      console.log('[UI] Starting seed...')
       const result = await seedSampleQuestsForActiveSeason()
-      console.log('[UI] Seed result:', result)
       showToast(`Seeded ${result.count} sample quests!`)
       setShowSeedConfirm(false)
       loadData()
     } catch (error) {
-      console.error('[UI] Seed error:', error)
       showToast(error.message, 'error')
     } finally {
       setSeedLoading(false)
+    }
+  }
+
+  const handleSeedSampleVouchers = async () => {
+    setSeedVouchersLoading(true)
+    try {
+      const result = await seedSampleVouchersForActiveSeason({ uid: user?.uid, email: user?.email })
+      showToast(`Seeded ${result.count} vouchers.`)
+      setShowSeedVouchersConfirm(false)
+      loadData()
+    } catch (error) {
+      showToast(error.message, 'error')
+    } finally {
+      setSeedVouchersLoading(false)
+    }
+  }
+
+  const handleMarkVoucherUsed = async (redemptionId) => {
+    if (!activeSeason?.id || !user) return
+    setMarkingVoucherUsedId(redemptionId)
+    try {
+      await adminMarkVoucherUsed({
+        seasonId: activeSeason.id,
+        redemptionId,
+        adminUser: { uid: user.uid, email: user.email },
+      })
+      showToast('Voucher marked as used.')
+      loadData()
+    } catch (error) {
+      showToast(error.message, 'error')
+    } finally {
+      setMarkingVoucherUsedId(null)
     }
   }
 
@@ -1339,6 +1549,13 @@ export default function LGUDashboardPage() {
               Reports
             </TabButton>
             <TabButton 
+              active={activeTab === TABS.REVIEWS} 
+              onClick={() => setActiveTab(TABS.REVIEWS)}
+              count={pendingReviews.length}
+            >
+              Reviews
+            </TabButton>
+            <TabButton 
               active={activeTab === TABS.SEASONS} 
               onClick={() => setActiveTab(TABS.SEASONS)}
             >
@@ -1356,6 +1573,12 @@ export default function LGUDashboardPage() {
               count={pendingQuests}
             >
               Verifications
+            </TabButton>
+            <TabButton 
+              active={activeTab === TABS.VOUCHERS} 
+              onClick={() => setActiveTab(TABS.VOUCHERS)}
+            >
+              Vouchers
             </TabButton>
             <Link
               to="/lgu/places"
@@ -1411,6 +1634,56 @@ export default function LGUDashboardPage() {
                           </td>
                           <td className="px-4 py-3">
                             <StatusBadge status={sub.status} />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ) : activeTab === TABS.REVIEWS ? (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              {pendingReviews.length === 0 ? (
+                <div className="text-center py-12 text-gray-500">
+                  No pending reviews to review
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                      <tr>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Place</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Type</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">User</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Rating</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Review</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Date</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {pendingReviews.map(review => (
+                        <tr 
+                          key={review.id} 
+                          onClick={() => setSelectedReview(review)}
+                          className="hover:bg-gray-50 cursor-pointer"
+                        >
+                          <td className="px-4 py-3 font-medium text-gray-900">{review.targetId}</td>
+                          <td className="px-4 py-3 text-gray-600 capitalize">{review.targetType}</td>
+                          <td className="px-4 py-3 text-gray-600 text-sm">
+                            {review.userDisplayName || review.userEmail || 'Anonymous'}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="flex items-center gap-1">
+                              <span className="text-yellow-400">★</span>
+                              <span className="font-medium">{review.rating}</span>
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-gray-600 text-sm max-w-xs truncate">
+                            {review.text}
+                          </td>
+                          <td className="px-4 py-3 text-gray-600 text-sm">
+                            {review.createdAt ? new Date(review.createdAt).toLocaleDateString() : '-'}
                           </td>
                         </tr>
                       ))}
@@ -1505,6 +1778,73 @@ export default function LGUDashboardPage() {
                       </div>
                     </div>
                   )}
+                </div>
+              )}
+
+              {activeSeason && (
+                <div className="mt-6 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                  <div className="border-b border-gray-200 px-6 py-4">
+                    <h3 className="text-lg font-semibold">Leaderboard - {activeSeason.name}</h3>
+                    <p className="text-sm text-gray-500">Top performers this season</p>
+                  </div>
+
+                  <div className="border-b border-gray-200 px-4 py-3">
+                    <div className="flex gap-2 flex-wrap">
+                      <button
+                        onClick={() => setLeaderboardTab('points')}
+                        className={`px-3 py-1.5 rounded font-medium text-sm transition ${
+                          leaderboardTab === 'points'
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }`}
+                      >
+                        Points
+                      </button>
+                      {IMPACT_UNITS.slice(0, 3).map(unit => (
+                        <button
+                          key={unit.value}
+                          onClick={() => {
+                            setLeaderboardTab('impact')
+                            setLeaderboardUnit(unit.value)
+                          }}
+                          className={`px-3 py-1.5 rounded font-medium text-sm transition ${
+                            leaderboardTab === 'impact' && leaderboardUnit === unit.value
+                              ? 'bg-emerald-600 text-white'
+                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          }`}
+                        >
+                          {unit.icon} {unit.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="p-4">
+                    {leaderboardData.length === 0 ? (
+                      <p className="text-center text-gray-500 py-4">No leaderboard data yet</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {leaderboardData.slice(0, 5).map(entry => (
+                          <div key={entry.uid} className="flex items-center gap-3 p-2 rounded hover:bg-gray-50">
+                            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                              entry.rank <= 3 ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-600'
+                            }`}>
+                              {entry.rank}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium text-gray-900 truncate">{entry.name}</p>
+                              <p className="text-xs text-gray-500">{entry.completedQuestsCount} quests</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-bold text-gray-900">
+                                {leaderboardTab === 'points' ? `${entry.pointsTotal} pts` : entry.impact}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -1742,6 +2082,101 @@ export default function LGUDashboardPage() {
                 </div>
               )}
             </div>
+          ) : activeTab === TABS.VOUCHERS ? (
+            <div className="space-y-6">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden p-6">
+                <h2 className="text-lg font-semibold text-gray-900 mb-2">Voucher Store (Active Season)</h2>
+                <p className="text-gray-600 text-sm mb-6">
+                  Seed 12 sample vouchers for the active season so the Voucher Store page shows available vouchers.
+                </p>
+                {isUserAdmin ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowSeedVouchersConfirm(true)}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium"
+                  >
+                    Seed Sample Vouchers
+                  </button>
+                ) : (
+                  <p className="text-gray-500 text-sm">Admin access required to seed vouchers.</p>
+                )}
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="border-b border-gray-200 px-6 py-4 flex flex-wrap items-center justify-between gap-3">
+                  <h2 className="text-lg font-semibold text-gray-900">Redemptions</h2>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600">Filter:</span>
+                    <select
+                      value={redemptionStatusFilter}
+                      onChange={(e) => setRedemptionStatusFilter(e.target.value)}
+                      className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+                    >
+                      <option value="all">All</option>
+                      <option value="unused">Unused</option>
+                      <option value="used">Used</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  {!activeSeason ? (
+                    <div className="p-6 text-center text-gray-500">No active season.</div>
+                  ) : seasonRedemptions.length === 0 ? (
+                    <div className="p-6 text-center text-gray-500">No redemptions for this season yet.</div>
+                  ) : (
+                    <table className="w-full">
+                      <thead className="bg-gray-50 border-b border-gray-200">
+                        <tr>
+                          <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Code</th>
+                          <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">User</th>
+                          <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Voucher</th>
+                          <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Redeemed</th>
+                          <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
+                          <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {seasonRedemptions
+                          .filter((r) => redemptionStatusFilter === 'all' || r.status === redemptionStatusFilter)
+                          .map((r) => (
+                            <tr key={r.id} className="hover:bg-gray-50">
+                              <td className="px-4 py-3 font-mono text-sm">{r.code}</td>
+                              <td className="px-4 py-3 text-sm text-gray-600">{r.userEmail || r.uid || '—'}</td>
+                              <td className="px-4 py-3 text-sm">
+                                {r.voucherSnapshot?.title || r.voucherId || '—'}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-gray-600">
+                                {r.redeemedAt?.toDate ? r.redeemedAt.toDate().toLocaleString() : '—'}
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                                  r.status === 'used' ? 'bg-gray-100 text-gray-700' : 'bg-emerald-100 text-emerald-700'
+                                }`}>
+                                  {r.status === 'used' ? 'Used' : 'Unused'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3">
+                                {r.status === 'unused' ? (
+                                  <button
+                                    type="button"
+                                    disabled={markingVoucherUsedId === r.id}
+                                    onClick={() => handleMarkVoucherUsed(r.id)}
+                                    className="text-sm font-medium text-indigo-600 hover:text-indigo-700 disabled:opacity-50"
+                                  >
+                                    {markingVoucherUsedId === r.id ? '…' : 'Mark Used'}
+                                  </button>
+                                ) : (
+                                  '—'
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+            </div>
           ) : null}
         </div>
       </main>
@@ -1765,6 +2200,16 @@ export default function LGUDashboardPage() {
           onClose={() => setSelectedReport(null)}
           onMarkInProgress={handleMarkInProgress}
           onMarkResolved={handleMarkResolved}
+          isLoading={actionLoading}
+        />
+      )}
+
+      {selectedReview && (
+        <ReviewModal
+          review={selectedReview}
+          onClose={() => setSelectedReview(null)}
+          onApprove={handleApproveReview}
+          onReject={handleRejectReview}
           isLoading={actionLoading}
         />
       )}
@@ -1802,6 +2247,37 @@ export default function LGUDashboardPage() {
           onSubmit={(data) => handleUpdateQuest(selectedQuest.id, data)}
           isLoading={actionLoading}
         />
+      )}
+
+      {showSeedVouchersConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Seed Sample Vouchers</h3>
+            <p className="text-gray-600 mb-4">
+              This will create 12 sample vouchers for the currently active season (seed_v1 … seed_v12).
+              Existing vouchers will be updated without resetting stock remaining.
+            </p>
+            <p className="text-sm text-yellow-600 mb-6">
+              Running this again is safe and will not create duplicates.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowSeedVouchersConfirm(false)}
+                disabled={seedVouchersLoading}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSeedSampleVouchers}
+                disabled={seedVouchersLoading}
+                className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-300"
+              >
+                {seedVouchersLoading ? 'Seeding...' : 'Seed 12 Vouchers'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {showSeedConfirm && (

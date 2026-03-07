@@ -14,6 +14,7 @@ import DestinationDetails from './pages/DestinationDetails'
 import FavoritesPage from './pages/FavoritesPage'
 import CommunityActivitiesPage from './pages/CommunityActivitiesPage'
 import RewardsPreviewPage from './pages/RewardsPreviewPage'
+import VoucherStorePage from './pages/VoucherStorePage'
 import PrivacyPolicyPage from './pages/PrivacyPolicyPage'
 import TermsPage from './pages/TermsPage'
 import DataDeletionPage from './pages/DataDeletionPage'
@@ -43,6 +44,7 @@ function App() {
                 <Route path="/favorites" element={<FavoritesPage />} />
                 <Route path="/events" element={<CommunityActivitiesPage />} />
                 <Route path="/rewards" element={<RewardsPreviewPage />} />
+                <Route path="/vouchers" element={<VoucherStorePage />} />
                 <Route path="/privacy" element={<PrivacyPolicyPage />} />
                 <Route path="/terms" element={<TermsPage />} />
                 <Route path="/data-deletion" element={<DataDeletionPage />} />

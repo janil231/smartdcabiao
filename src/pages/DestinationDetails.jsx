@@ -5,8 +5,13 @@ import Footer from '../components/Footer'
 import FavoriteButton from '../components/FavoriteButton'
 import ReportIssueModal from '../components/ReportIssueModal'
 import AppImage from '../components/ui/AppImage'
+import RatingSummary from '../components/reviews/RatingSummary'
+import ReviewsList from '../components/reviews/ReviewsList'
+import ReviewForm from '../components/reviews/ReviewForm'
+import { useAuth } from '../contexts/AuthContext'
 import { getDestinationImage } from '../utils/placeImages'
 import { getDestinationById } from '../services/destinations.service'
+import { listApprovedReviews, getMyReview } from '../services/reviews.service'
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -31,11 +36,31 @@ function getDestinationIcon(type = 'destination') {
 export default function DestinationDetails() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [destination, setDestination] = useState(null)
   const [loading, setLoading] = useState(true)
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [shareMessage, setShareMessage] = useState('')
   const [isReportModalOpen, setIsReportModalOpen] = useState(false)
+  const [reviews, setReviews] = useState([])
+  const [reviewsLoading, setReviewsLoading] = useState(true)
+  const [myReview, setMyReview] = useState(null)
+
+  const loadReviews = useMemo(() => async () => {
+    setReviewsLoading(true)
+    try {
+      const [approvedReviews, myReviewData] = await Promise.all([
+        listApprovedReviews({ targetType: 'destination', targetId: id }),
+        user ? getMyReview({ targetType: 'destination', targetId: id, uid: user.uid }) : Promise.resolve(null)
+      ])
+      setReviews(approvedReviews)
+      setMyReview(myReviewData)
+    } catch (error) {
+      console.error('Error loading reviews:', error)
+    } finally {
+      setReviewsLoading(false)
+    }
+  }, [id, user])
 
   useEffect(() => {
     async function loadDestination() {
@@ -57,6 +82,10 @@ export default function DestinationDetails() {
 
     loadDestination()
   }, [id, navigate])
+
+  useEffect(() => {
+    loadReviews()
+  }, [loadReviews])
 
   const handleShare = async () => {
     const url = window.location.href
@@ -351,6 +380,42 @@ export default function DestinationDetails() {
                   </div>
                 </div>
               )}
+
+              {/* Reviews Section */}
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900 mb-6">Reviews</h2>
+                <div className="grid md:grid-cols-2 gap-8">
+                  {/* Rating Summary & List */}
+                  <div>
+                    <div className="bg-gray-50 rounded-xl p-6 mb-6">
+                      <div className="flex items-center gap-4">
+                        <div className="text-4xl font-bold text-gray-900">
+                          {destination.ratingAvg ? destination.ratingAvg.toFixed(1) : '0.0'}
+                        </div>
+                        <div>
+                          <RatingSummary ratingAvg={destination.ratingAvg} ratingCount={destination.ratingCount} />
+                          <p className="text-sm text-gray-500 mt-1">
+                            {destination.ratingCount || 0} {destination.ratingCount === 1 ? 'review' : 'reviews'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    <ReviewsList reviews={reviews} loading={reviewsLoading} />
+                  </div>
+
+                  {/* Review Form */}
+                  <div>
+                    <ReviewForm
+                      targetType="destination"
+                      targetId={id}
+                      user={user}
+                      existingReview={myReview}
+                      placeName={destination.name}
+                      onReviewSubmitted={loadReviews}
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Sidebar */}

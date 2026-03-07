@@ -7,8 +7,13 @@ import Footer from '../components/Footer'
 import FavoriteButton from '../components/FavoriteButton'
 import ReportIssueModal from '../components/ReportIssueModal'
 import AppImage from '../components/ui/AppImage'
+import RatingSummary from '../components/reviews/RatingSummary'
+import ReviewsList from '../components/reviews/ReviewsList'
+import ReviewForm from '../components/reviews/ReviewForm'
+import { useAuth } from '../contexts/AuthContext'
 import { getBusinessImage } from '../utils/placeImages'
 import { getBusinessById } from '../services/businesses.service'
+import { listApprovedReviews, getMyReview } from '../services/reviews.service'
 import { BUSINESS_TYPES } from '../data'
 import 'leaflet/dist/leaflet.css'
 
@@ -46,10 +51,30 @@ function getMarkerIcon(type) {
 export default function BusinessDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [selectedImage, setSelectedImage] = useState(0)
   const [isReportModalOpen, setIsReportModalOpen] = useState(false)
   const [business, setBusiness] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [reviews, setReviews] = useState([])
+  const [reviewsLoading, setReviewsLoading] = useState(true)
+  const [myReview, setMyReview] = useState(null)
+
+  const loadReviews = useMemo(() => async () => {
+    setReviewsLoading(true)
+    try {
+      const [approvedReviews, myReviewData] = await Promise.all([
+        listApprovedReviews({ targetType: 'business', targetId: id }),
+        user ? getMyReview({ targetType: 'business', targetId: id, uid: user.uid }) : Promise.resolve(null)
+      ])
+      setReviews(approvedReviews)
+      setMyReview(myReviewData)
+    } catch (error) {
+      console.error('Error loading reviews:', error)
+    } finally {
+      setReviewsLoading(false)
+    }
+  }, [id, user])
 
   useEffect(() => {
     async function loadBusiness() {
@@ -69,6 +94,10 @@ export default function BusinessDetailPage() {
     }
     loadBusiness()
   }, [id, navigate])
+
+  useEffect(() => {
+    loadReviews()
+  }, [loadReviews])
 
   // Create an images array for gallery - must be called before early returns
   const businessImage = getBusinessImage(business)
@@ -441,6 +470,42 @@ export default function BusinessDetailPage() {
                   </Popup>
                 </Marker>
               </MapContainer>
+            </div>
+          </div>
+
+          {/* Reviews Section */}
+          <div className="mt-12">
+            <h2 className="text-xl font-semibold text-gray-900 mb-6">Reviews</h2>
+            <div className="grid md:grid-cols-2 gap-8">
+              {/* Rating Summary & List */}
+              <div>
+                <div className="bg-gray-50 rounded-xl p-6 mb-6">
+                  <div className="flex items-center gap-4">
+                    <div className="text-4xl font-bold text-gray-900">
+                      {business.ratingAvg ? business.ratingAvg.toFixed(1) : '0.0'}
+                    </div>
+                    <div>
+                      <RatingSummary ratingAvg={business.ratingAvg} ratingCount={business.ratingCount} />
+                      <p className="text-sm text-gray-500 mt-1">
+                        {business.ratingCount || 0} {business.ratingCount === 1 ? 'review' : 'reviews'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <ReviewsList reviews={reviews} loading={reviewsLoading} />
+              </div>
+
+              {/* Review Form */}
+              <div>
+                <ReviewForm
+                  targetType="business"
+                  targetId={id}
+                  user={user}
+                  existingReview={myReview}
+                  placeName={business.name}
+                  onReviewSubmitted={loadReviews}
+                />
+              </div>
             </div>
           </div>
 
