@@ -26,6 +26,7 @@ import LGUPlacesPage from './pages/lgu/LGUPlacesPage'
 import LGUPlaceFormPage from './pages/lgu/LGUPlaceFormPage'
 import LGUCheckinPage from './pages/lgu/LGUCheckinPage'
 import LGUVoucherVerifyPage from './pages/lgu/LGUVoucherVerifyPage'
+import LGUMerchantInsightsPage from './pages/lgu/LGUMerchantInsightsPage'
 import ProfilePage from './pages/ProfilePage'
 
 function App() {
@@ -60,6 +61,7 @@ function App() {
                   <Route path="/lgu/places/:type/:id/edit" element={<LGUPlaceFormPage />} />
                   <Route path="/lgu/checkin" element={<LGUCheckinPage />} />
                   <Route path="/lgu/voucher-verify" element={<LGUVoucherVerifyPage />} />
+                  <Route path="/lgu/merchant/:businessId" element={<LGUMerchantInsightsPage />} />
                 </Routes>
               </PageTransition>
               <BottomNav />

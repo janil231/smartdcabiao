@@ -133,6 +133,8 @@ export async function redeemVoucher({ seasonId, voucherId, user }) {
       voucherSnapshot: {
         title: voucher.title || '',
         partnerName: voucher.partnerName || '',
+        partnerBusinessId: voucher.partnerBusinessId || null,
+        pointsCost,
         expiresAt: voucher.expiresAt || null,
       },
     }

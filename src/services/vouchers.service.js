@@ -31,6 +31,7 @@ export async function createVoucher(seasonId, payload, adminUser) {
   const data = {
     title: payload.title,
     description: payload.description || '',
+    partnerBusinessId: payload.partnerBusinessId || null,
     partnerName: payload.partnerName || '',
     terms: payload.terms || '',
     pointsCost: Number(payload.pointsCost || 0),
@@ -77,6 +78,10 @@ export async function updateVoucher(seasonId, voucherId, payload, adminUser) {
       payload.stockRemaining != null
         ? Number(payload.stockRemaining)
         : current.stockRemaining,
+    partnerBusinessId:
+      payload.partnerBusinessId !== undefined
+        ? payload.partnerBusinessId
+        : current.partnerBusinessId || null,
     updatedAt: serverTimestamp(),
   }
 
@@ -131,6 +136,7 @@ export async function seedSampleVouchersForActiveSeason(adminUser) {
         title: sample.title,
         description: sample.description,
         pointsCost: sample.pointsCost,
+        partnerBusinessId: snapshot.data().partnerBusinessId || null,
         partnerName: sample.partnerName,
         terms: sample.terms,
         expiresAt: expiresAtTimestamp,
@@ -143,6 +149,7 @@ export async function seedSampleVouchersForActiveSeason(adminUser) {
         title: sample.title,
         description: sample.description,
         pointsCost: sample.pointsCost,
+        partnerBusinessId: null,
         partnerName: sample.partnerName,
         terms: sample.terms,
         expiresAt: expiresAtTimestamp,

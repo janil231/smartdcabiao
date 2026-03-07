@@ -506,6 +506,14 @@ export default function LGUPlacesPage() {
                             >
                               Edit
                             </Link>
+                            {activeTab === TABS.BUSINESSES && (
+                              <Link
+                                to={`/lgu/merchant/${place.id}`}
+                                className="text-blue-600 hover:text-blue-800 font-medium text-sm"
+                              >
+                                Insights
+                              </Link>
+                            )}
                             <button
                               onClick={() => setDeleteModal(place)}
                               className="text-red-600 hover:text-red-800 font-medium text-sm"
