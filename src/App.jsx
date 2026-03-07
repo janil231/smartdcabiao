@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { FavoritesProvider } from './contexts/FavoritesContext'
 import { AuthProvider } from './contexts/AuthContext'
+import { LanguageProvider } from './contexts/LanguageContext'
 import ScrollManager from './components/ScrollManager'
 import PageTransition from './components/PageTransition'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -24,6 +25,7 @@ import LGUDashboardPage from './pages/LGUDashboardPage'
 import LGUPlacesPage from './pages/lgu/LGUPlacesPage'
 import LGUPlaceFormPage from './pages/lgu/LGUPlaceFormPage'
 import LGUCheckinPage from './pages/lgu/LGUCheckinPage'
+import LGUVoucherVerifyPage from './pages/lgu/LGUVoucherVerifyPage'
 import ProfilePage from './pages/ProfilePage'
 
 function App() {
@@ -31,35 +33,38 @@ function App() {
     <ErrorBoundary>
       <AuthProvider>
         <FavoritesProvider>
-          <BrowserRouter>
-            <ScrollManager />
-            <PageTransition>
-              <Routes>
-                <Route path="/" element={<HomePage />} />
-                <Route path="/map" element={<MapPage />} />
-                <Route path="/businesses" element={<BusinessesPage />} />
-                <Route path="/businesses/:id" element={<BusinessDetailPage />} />
-                <Route path="/destinations" element={<DestinationsPage />} />
-                <Route path="/destinations/:id" element={<DestinationDetails />} />
-                <Route path="/favorites" element={<FavoritesPage />} />
-                <Route path="/events" element={<CommunityActivitiesPage />} />
-                <Route path="/rewards" element={<RewardsPreviewPage />} />
-                <Route path="/vouchers" element={<VoucherStorePage />} />
-                <Route path="/privacy" element={<PrivacyPolicyPage />} />
-                <Route path="/terms" element={<TermsPage />} />
-                <Route path="/data-deletion" element={<DataDeletionPage />} />
-                <Route path="/about" element={<AboutPage />} />
-                <Route path="/suggest" element={<SuggestPlacePage />} />
-                <Route path="/profile" element={<ProfilePage />} />
-                <Route path="/lgu" element={<LGUDashboardPage />} />
-                <Route path="/lgu/places" element={<LGUPlacesPage />} />
-                <Route path="/lgu/places/:type/new" element={<LGUPlaceFormPage />} />
-                <Route path="/lgu/places/:type/:id/edit" element={<LGUPlaceFormPage />} />
-                <Route path="/lgu/checkin" element={<LGUCheckinPage />} />
-              </Routes>
-            </PageTransition>
-            <BottomNav />
-          </BrowserRouter>
+          <LanguageProvider>
+            <BrowserRouter>
+              <ScrollManager />
+              <PageTransition>
+                <Routes>
+                  <Route path="/" element={<HomePage />} />
+                  <Route path="/map" element={<MapPage />} />
+                  <Route path="/businesses" element={<BusinessesPage />} />
+                  <Route path="/businesses/:id" element={<BusinessDetailPage />} />
+                  <Route path="/destinations" element={<DestinationsPage />} />
+                  <Route path="/destinations/:id" element={<DestinationDetails />} />
+                  <Route path="/favorites" element={<FavoritesPage />} />
+                  <Route path="/events" element={<CommunityActivitiesPage />} />
+                  <Route path="/rewards" element={<RewardsPreviewPage />} />
+                  <Route path="/vouchers" element={<VoucherStorePage />} />
+                  <Route path="/privacy" element={<PrivacyPolicyPage />} />
+                  <Route path="/terms" element={<TermsPage />} />
+                  <Route path="/data-deletion" element={<DataDeletionPage />} />
+                  <Route path="/about" element={<AboutPage />} />
+                  <Route path="/suggest" element={<SuggestPlacePage />} />
+                  <Route path="/profile" element={<ProfilePage />} />
+                  <Route path="/lgu" element={<LGUDashboardPage />} />
+                  <Route path="/lgu/places" element={<LGUPlacesPage />} />
+                  <Route path="/lgu/places/:type/new" element={<LGUPlaceFormPage />} />
+                  <Route path="/lgu/places/:type/:id/edit" element={<LGUPlaceFormPage />} />
+                  <Route path="/lgu/checkin" element={<LGUCheckinPage />} />
+                  <Route path="/lgu/voucher-verify" element={<LGUVoucherVerifyPage />} />
+                </Routes>
+              </PageTransition>
+              <BottomNav />
+            </BrowserRouter>
+          </LanguageProvider>
         </FavoritesProvider>
       </AuthProvider>
     </ErrorBoundary>

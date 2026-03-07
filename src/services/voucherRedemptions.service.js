@@ -6,11 +6,14 @@ import {
   runTransaction,
   serverTimestamp,
   updateDoc,
+  query,
+  where,
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { logAudit } from './audit.service'
 import { ensureBalanceDoc } from './seasonBalances.service'
 import { generateVoucherCode } from '../utils/voucherCode'
+import { addPointsEntry } from './pointsLedger.service'
 
 export async function listMyRedemptions(seasonId, uid) {
   if (!seasonId || !uid) return []
@@ -39,6 +42,23 @@ export async function listSeasonRedemptions(seasonId, limitCount = 50) {
     return bt - at
   })
   return list.slice(0, limitCount)
+}
+
+export async function findRedemptionByCode({ seasonId, code }) {
+  if (!seasonId || !code) {
+    throw new Error('Missing seasonId or code')
+  }
+
+  const redemptionsRef = collection(db, 'seasons', seasonId, 'voucherRedemptions')
+  const q = query(redemptionsRef, where('code', '==', code))
+  const snapshot = await getDocs(q)
+
+  if (snapshot.empty) {
+    return null
+  }
+
+  const docSnap = snapshot.docs[0]
+  return { id: docSnap.id, ...docSnap.data() }
 }
 
 export async function redeemVoucher({ seasonId, voucherId, user }) {
@@ -136,6 +156,15 @@ export async function redeemVoucher({ seasonId, voucherId, user }) {
       code: result.code,
       pointsCost: result.redemptionData?.pointsCost ?? 0,
     },
+  })
+
+  await addPointsEntry({
+    uid: user.uid,
+    seasonId,
+    questId: null,
+    points: -result.redemptionData.pointsCost,
+    reason: `voucher_redeemed: ${result.redemptionData.voucherSnapshot.title || voucherId}`,
+    voucherId,
   })
 
   return { success: true, code: result.code }

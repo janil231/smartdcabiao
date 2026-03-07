@@ -2,14 +2,61 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
   setDoc,
   updateDoc,
   increment,
   serverTimestamp,
+  query,
+  where,
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 
 const SEASON_BALANCES_COLLECTION = 'seasonBalances'
+const POINTS_LEDGER_COLLECTION = 'pointsLedger'
+
+export async function rebuildSeasonBalanceFromLedger({ seasonId, uid, userEmail }) {
+  if (!seasonId || !uid) {
+    console.warn('[rebuildSeasonBalanceFromLedger] Missing seasonId or uid')
+    return null
+  }
+
+  const ledgerRef = collection(db, POINTS_LEDGER_COLLECTION)
+  const q = query(ledgerRef, where('uid', '==', uid), where('seasonId', '==', seasonId))
+  const snapshot = await getDocs(q)
+
+  let earned = 0
+  let spent = 0
+
+  snapshot.docs.forEach((docSnap) => {
+    const entry = docSnap.data()
+    const points = entry.points || 0
+    if (points > 0) {
+      earned += points
+    } else if (points < 0) {
+      spent += Math.abs(points)
+    }
+  })
+
+  const balance = earned - spent
+  const balanceId = `${seasonId}_${uid}`
+  const balanceRef = doc(db, SEASON_BALANCES_COLLECTION, balanceId)
+
+  await setDoc(balanceRef, {
+    seasonId,
+    uid,
+    userEmail: userEmail || null,
+    pointsEarned: earned,
+    pointsSpent: spent,
+    pointsBalance: balance,
+    updatedAt: serverTimestamp(),
+    _rebuiltFromLedger: true,
+  }, { merge: true })
+
+  console.log(`[rebuildSeasonBalanceFromLedger] Rebuilt balance for ${seasonId}_${uid}: earned=${earned}, spent=${spent}, balance=${balance}`)
+
+  return { pointsEarned: earned, pointsSpent: spent, pointsBalance: balance }
+}
 
 export async function getMySeasonBalance(seasonId, uid) {
   if (!seasonId || !uid) return null

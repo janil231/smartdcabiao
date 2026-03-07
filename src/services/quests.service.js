@@ -9,12 +9,29 @@ import {
   updateDoc,
   orderBy,
   increment,
+  writeBatch,
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { logAudit } from './audit.service'
 import { getActiveSeason } from './seasons.service'
+import { generateCabiaoCoordinates } from '../constants/cabiaoGeo'
 
 const QUESTS_COLLECTION = 'quests'
+
+const QUEST_BARANGAY_ROTATION = [
+  'San Jose',
+  'San Isidro',
+  'San Juan',
+  'Santa Rita',
+  'Santa Isabel',
+  'San Vicente',
+  'San Fernando',
+  'San Roque',
+  'Niño Jesus',
+  'Concepcion',
+  'San Gregorio',
+  'Santa Cruz',
+]
 
 export async function listActiveQuests(seasonId) {
   const questsRef = collection(db, QUESTS_COLLECTION)
@@ -33,6 +50,8 @@ export async function listActiveQuests(seasonId) {
     .filter(quest => {
       const startAt = quest.startAt ? new Date(quest.startAt) : null
       const endAt = quest.endAt ? new Date(quest.endAt) : null
+      
+      if (startAt && startAt > now) return false
       
       if (endAt && endAt < now) return false
       
@@ -192,9 +211,7 @@ export async function incrementReservedCount(questId) {
 }
 
 export async function seedSampleQuestsForActiveSeason() {
-  console.log('[Seed] Starting seed...')
   const activeSeason = await getActiveSeason()
-  console.log('[Seed] Active season:', activeSeason)
   
   if (!activeSeason) {
     throw new Error('No active season found. Please create and activate a season first.')
@@ -210,7 +227,6 @@ export async function seedSampleQuestsForActiveSeason() {
       category: 'cleanup',
       points: 50,
       capacity: 50,
-      startOffsetDays: 1,
       durationDays: 14,
       gracePeriodHours: 24,
       impact: {
@@ -225,7 +241,6 @@ export async function seedSampleQuestsForActiveSeason() {
       category: 'treePlanting',
       points: 75,
       capacity: 30,
-      startOffsetDays: 3,
       durationDays: 21,
       gracePeriodHours: 48,
       impact: {
@@ -240,7 +255,6 @@ export async function seedSampleQuestsForActiveSeason() {
       category: 'event',
       points: 40,
       capacity: 100,
-      startOffsetDays: 7,
       durationDays: 7,
       gracePeriodHours: 24,
       impact: {
@@ -255,7 +269,6 @@ export async function seedSampleQuestsForActiveSeason() {
       category: 'event',
       points: 60,
       capacity: 25,
-      startOffsetDays: 10,
       durationDays: 7,
       gracePeriodHours: 36,
       impact: {
@@ -270,7 +283,6 @@ export async function seedSampleQuestsForActiveSeason() {
       category: 'event',
       points: 35,
       capacity: 20,
-      startOffsetDays: 14,
       durationDays: 7,
       gracePeriodHours: 24,
       impact: {
@@ -285,7 +297,6 @@ export async function seedSampleQuestsForActiveSeason() {
       category: 'event',
       points: 45,
       capacity: 40,
-      startOffsetDays: 5,
       durationDays: 14,
       gracePeriodHours: 24,
       impact: {
@@ -300,7 +311,6 @@ export async function seedSampleQuestsForActiveSeason() {
       category: 'event',
       points: 30,
       capacity: 80,
-      startOffsetDays: 8,
       durationDays: 30,
       gracePeriodHours: 48,
       impact: {
@@ -315,7 +325,6 @@ export async function seedSampleQuestsForActiveSeason() {
       category: 'cleanup',
       points: 55,
       capacity: 35,
-      startOffsetDays: 12,
       durationDays: 21,
       gracePeriodHours: 48,
       impact: {
@@ -330,7 +339,6 @@ export async function seedSampleQuestsForActiveSeason() {
       category: 'event',
       points: 25,
       capacity: 100,
-      startOffsetDays: 15,
       durationDays: 7,
       gracePeriodHours: 24,
       impact: {
@@ -345,7 +353,6 @@ export async function seedSampleQuestsForActiveSeason() {
       category: 'treePlanting',
       points: 80,
       capacity: 50,
-      startOffsetDays: 18,
       durationDays: 30,
       gracePeriodHours: 72,
       impact: {
@@ -356,12 +363,17 @@ export async function seedSampleQuestsForActiveSeason() {
     }
   ]
   
-  const questsToCreate = sampleQuests.map((q) => {
+  const questsToCreate = sampleQuests.map((q, index) => {
     const startDate = new Date(now)
-    startDate.setDate(startDate.getDate() + q.startOffsetDays)
+    // Stagger quests into the future so they are not expired
+    startDate.setDate(startDate.getDate() + index * 3)
     
     const endDate = new Date(startDate)
-    endDate.setDate(endDate.getDate() + q.durationDays)
+    const durationDays = q.durationDays || 7
+    endDate.setDate(endDate.getDate() + durationDays)
+
+    const [lat, lng] = generateCabiaoCoordinates(index, sampleQuests.length)
+    const barangay = QUEST_BARANGAY_ROTATION[index % QUEST_BARANGAY_ROTATION.length]
     
     return {
       seasonId,
@@ -373,20 +385,20 @@ export async function seedSampleQuestsForActiveSeason() {
       reservedCount: 0,
       startAt: startDate.toISOString(),
       endAt: endDate.toISOString(),
+      durationDays,
       gracePeriodHours: q.gracePeriodHours,
       status: 'active',
-      impact: q.impact || null
+      impact: q.impact || null,
+      position: [lat, lng],
+      barangay,
     }
   })
   
   for (let i = 0; i < questsToCreate.length; i++) {
     const questId = `seed-q${i + 1}`
     const questRef = doc(db, QUESTS_COLLECTION, questId)
-    console.log('[Seed] Creating quest:', questId, questsToCreate[i].title)
     await setDoc(questRef, questsToCreate[i], { merge: true })
   }
-  
-  console.log('[Seed] All quests created successfully')
   
   await logAudit({
     action: 'SEED_SAMPLE_QUESTS',
@@ -399,6 +411,196 @@ export async function seedSampleQuestsForActiveSeason() {
       questIds: questsToCreate.map((_, i) => `seed-q${i + 1}`)
     },
   })
-  
+
   return { success: true, count: questsToCreate.length }
+}
+
+export async function backfillQuestLocationsForSeason(seasonId, adminUser) {
+  if (!seasonId) {
+    throw new Error('Season ID is required')
+  }
+
+  const questsRef = collection(db, QUESTS_COLLECTION)
+  const qRef = query(questsRef, where('seasonId', '==', seasonId))
+  const snapshot = await getDocs(qRef)
+
+  if (snapshot.empty) {
+    return { success: true, updated: 0 }
+  }
+
+  const docs = snapshot.docs
+
+  const questsMissingLocation = docs.filter((docSnap) => {
+    const data = docSnap.data()
+    const pos = data.position
+    if (!pos) return true
+    if (Array.isArray(pos)) {
+      return pos.length !== 2
+    }
+    if (typeof pos === 'object') {
+      return typeof pos.lat !== 'number' || typeof pos.lng !== 'number'
+    }
+    return true
+  })
+
+  if (questsMissingLocation.length === 0) {
+    return { success: true, updated: 0 }
+  }
+
+  const batch = writeBatch(db)
+  const total = questsMissingLocation.length
+
+  questsMissingLocation.forEach((docSnap, index) => {
+    const [lat, lng] = generateCabiaoCoordinates(index, total)
+    const data = docSnap.data()
+    const barangayFallback = QUEST_BARANGAY_ROTATION[index % QUEST_BARANGAY_ROTATION.length]
+
+    batch.update(docSnap.ref, {
+      position: [lat, lng],
+      barangay: data.barangay || barangayFallback,
+    })
+  })
+
+  await batch.commit()
+
+  await logAudit({
+    action: 'quest_locations_backfilled',
+    targetType: 'season',
+    targetId: seasonId,
+    details: {
+      seasonId,
+      updated: questsMissingLocation.length,
+      adminUid: adminUser?.uid ?? null,
+      adminEmail: adminUser?.email ?? null,
+    },
+  })
+
+  return { success: true, updated: questsMissingLocation.length }
+}
+
+export async function rescheduleDemoQuestsForSeason(seasonId, adminUser) {
+  if (!seasonId) {
+    throw new Error('Season ID is required')
+  }
+
+  const questsRef = collection(db, QUESTS_COLLECTION)
+  const qRef = query(questsRef, where('seasonId', '==', seasonId))
+  const snapshot = await getDocs(qRef)
+
+  if (snapshot.empty) {
+    return { success: true, updated: 0 }
+  }
+
+  const allDocs = snapshot.docs
+  const seedDocs = allDocs.filter((docSnap) => docSnap.id.startsWith('seed-q'))
+
+  if (seedDocs.length === 0) {
+    return { success: true, updated: 0 }
+  }
+
+  const batch = writeBatch(db)
+  const now = new Date()
+
+  seedDocs.forEach((docSnap, index) => {
+    const data = docSnap.data()
+    const startDate = new Date(now)
+    startDate.setDate(startDate.getDate() + index * 3)
+
+    const endDate = new Date(startDate)
+    const durationDays = typeof data.durationDays === 'number' ? data.durationDays : 10
+    endDate.setDate(endDate.getDate() + durationDays)
+
+    batch.update(docSnap.ref, {
+      startAt: startDate.toISOString(),
+      endAt: endDate.toISOString(),
+      status: 'active',
+    })
+  })
+
+  await batch.commit()
+
+  await logAudit({
+    action: 'quest_dates_rescheduled',
+    targetType: 'season',
+    targetId: seasonId,
+    details: {
+      seasonId,
+      updated: seedDocs.length,
+      questIds: seedDocs.map((d) => d.id),
+      adminUid: adminUser?.uid ?? null,
+      adminEmail: adminUser?.email ?? null,
+    },
+  })
+
+  return { success: true, updated: seedDocs.length }
+}
+
+export function recommendQuests({ quests, participations, limit = 2 }) {
+  if (!quests || quests.length === 0) return []
+  
+  const now = new Date()
+  
+  const completedQuestIds = new Set(
+    participations
+      .filter(p => p.status === 'completed')
+      .map(p => p.questId)
+  )
+  
+  const joinedQuestIds = new Set(
+    participations
+      .filter(p => p.status === 'joined')
+      .map(p => p.questId)
+  )
+  
+  const activeQuests = quests.filter(quest => {
+    if (quest.status !== 'active') return false
+    
+    const startAt = quest.startAt ? new Date(quest.startAt) : null
+    if (startAt && startAt > now) return false
+    
+    const endAt = quest.endAt ? new Date(quest.endAt) : null
+    if (endAt && endAt < now) return false
+    
+    if (completedQuestIds.has(quest.id)) return false
+    
+    const slotsRemaining = (quest.capacity || 0) - (quest.reservedCount || 0)
+    if (slotsRemaining <= 0) return false
+    
+    return true
+  })
+  
+  const scoredQuests = activeQuests.map(quest => {
+    let score = 0
+    
+    score += (quest.points || 0) * 0.5
+    
+    if (quest.impact?.unit) {
+      score += 20
+    }
+    
+    if (joinedQuestIds.has(quest.id)) {
+      score -= 100
+    }
+    
+    const endAt = quest.endAt ? new Date(quest.endAt) : null
+    if (endAt) {
+      const daysLeft = Math.ceil((endAt - now) / (1000 * 60 * 60 * 24))
+      if (daysLeft <= 3) {
+        score += 15
+      } else if (daysLeft <= 7) {
+        score += 10
+      }
+    }
+    
+    const slotsRemaining = (quest.capacity || 0) - (quest.reservedCount || 0)
+    if (slotsRemaining <= 10) {
+      score += 10
+    }
+    
+    return { quest, score }
+  })
+  
+  scoredQuests.sort((a, b) => b.score - a.score)
+  
+  return scoredQuests.slice(0, limit).map(s => s.quest)
 }

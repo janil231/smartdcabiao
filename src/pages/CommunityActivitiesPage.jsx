@@ -5,13 +5,16 @@ import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
 import { useAuth } from '../contexts/AuthContext'
 import { getActiveSeason } from '../services/seasons.service'
-import { listActiveQuests } from '../services/quests.service'
+import { listQuestsBySeason } from '../services/quests.service'
 import { 
   getUserParticipations, 
   joinQuest, 
   cancelQuest, 
   expireMyStaleParticipations 
 } from '../services/participations.service'
+import { hasUserSeenOnboarding, setSeenOnboarding, getUserLocation, setUserLocation as saveUserLocation } from '../services/userSettings.service'
+import { CABIAO_CENTER } from '../constants/cabiaoGeo'
+import QuestOnboardingModal from '../components/QuestOnboardingModal'
 import { activities, ACTIVITY_TYPES } from '../data'
 
 const TYPE_STYLES = {
@@ -26,7 +29,15 @@ const TYPE_LABELS = {
   [ACTIVITY_TYPES.event]: 'Event',
 }
 
-function QuestCard({ quest, participation, onJoin, onCancel, isLoading, focused }) {
+const IMPACT_UNIT_CONFIG = {
+  kg_trash: { label: 'Kg waste', icon: '🗑️' },
+  trees: { label: 'Trees', icon: '🌳' },
+  hours: { label: 'Hours', icon: '⏱️' },
+  kg_plastic: { label: 'Kg plastic', icon: '♻️' },
+  co2_kg: { label: 'Kg CO₂', icon: '🌍' },
+}
+
+function QuestCard({ quest, participation, onJoin, onCancel, isLoading, focused, distanceKm, extraBadge }) {
   const typeStyle = TYPE_STYLES[quest.category] || 'bg-gray-100 text-gray-700 border-gray-200'
   const typeLabel = TYPE_LABELS[quest.category] || 'Quest'
 
@@ -152,6 +163,11 @@ function QuestCard({ quest, participation, onJoin, onCancel, isLoading, focused 
           </span>
           {getStatusBadge()}
           {getRewardBadge()}
+          {extraBadge && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 border border-blue-200 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+              {extraBadge}
+            </span>
+          )}
         </div>
         
         <h2 className="mt-3 text-lg font-semibold text-gray-900">{quest.title}</h2>
@@ -166,6 +182,14 @@ function QuestCard({ quest, participation, onJoin, onCancel, isLoading, focused 
             <dt className="shrink-0 font-medium">⭐</dt>
             <dd className="text-amber-600 font-semibold">{quest.points} points</dd>
           </div>
+          {typeof distanceKm === 'number' && (
+            <div className="flex items-center gap-2">
+              <dt className="shrink-0 font-medium">📍</dt>
+              <dd className="text-gray-600">
+                ~{distanceKm.toFixed(1)} km away
+              </dd>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <dt className="shrink-0 font-medium">🎯</dt>
             <dd className={isFull ? 'text-red-600 font-semibold' : slotsLeft <= 3 ? 'text-orange-600 font-medium' : ''}>
@@ -324,6 +348,11 @@ export default function CommunityActivitiesPage() {
   const [activeTab, setActiveTab] = useState('all')
   const [toast, setToast] = useState(null)
   const [cancelConfirm, setCancelConfirm] = useState(null)
+  
+  const [showOnboarding, setShowOnboarding] = useState(false)
+  const [userLocation, setUserLocation] = useState(null)
+  const [locationLoading, setLocationLoading] = useState(false)
+  const [locationError, setLocationError] = useState(null)
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type })
@@ -336,7 +365,7 @@ export default function CommunityActivitiesPage() {
       
       if (season) {
         setActiveSeason(season)
-        const questList = await listActiveQuests(season.id)
+        const questList = await listQuestsBySeason(season.id)
         
         if (questList.length > 0) {
           setQuests(questList)
@@ -356,6 +385,16 @@ export default function CommunityActivitiesPage() {
               refreshedMap[p.questId] = p
             })
             setParticipations(refreshedMap)
+
+            const seenOnboarding = await hasUserSeenOnboarding(user.uid, season.id)
+            if (!seenOnboarding) {
+              setShowOnboarding(true)
+            }
+
+            const savedLocation = await getUserLocation(user.uid)
+            if (savedLocation) {
+              setUserLocation(savedLocation)
+            }
           }
         } else {
           setUseMockData(true)
@@ -374,9 +413,71 @@ export default function CommunityActivitiesPage() {
     loadQuests()
   }, [loadQuests])
 
+  const handleLocationRequest = async () => {
+    if (!navigator.geolocation) {
+      setLocationError('Geolocation is not supported by your browser')
+      return
+    }
+
+    setLocationLoading(true)
+    setLocationError(null)
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const location = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude
+        }
+        setUserLocation(location)
+        
+        if (user && activeSeason) {
+          await saveUserLocation(user.uid, location)
+        }
+        setLocationLoading(false)
+      },
+      (err) => {
+        console.warn('Geolocation error:', err)
+        setLocationError('Unable to get your location. Please enable location access.')
+        setLocationLoading(false)
+      }
+    )
+  }
+
   const myQuestIds = useMemo(() => {
     return new Set(Object.keys(participations))
   }, [participations])
+
+  const isQuestActiveNow = useCallback((quest) => {
+    if (!quest) return false
+    if (quest.status !== 'active') return false
+
+    const now = new Date()
+    const startAt = quest.startAt ? new Date(quest.startAt) : null
+    const endAt = quest.endAt ? new Date(quest.endAt) : null
+    const graceHours = typeof quest.gracePeriodHours === 'number' ? quest.gracePeriodHours : 24
+
+    if (startAt && startAt > now) return false
+    if (endAt) {
+      const graceMs = graceHours * 60 * 60 * 1000
+      if (now > new Date(endAt.getTime() + graceMs)) return false
+    }
+
+    return true
+  }, [])
+
+  const haversineDistanceKm = (lat1, lon1, lat2, lon2) => {
+    const R = 6371 // km
+    const dLat = ((lat2 - lat1) * Math.PI) / 180
+    const dLon = ((lon2 - lon1) * Math.PI) / 180
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2)
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+    return R * c
+  }
 
   const filteredQuests = useMemo(() => {
     if (activeTab === 'my') {
@@ -384,6 +485,95 @@ export default function CommunityActivitiesPage() {
     }
     return quests
   }, [quests, activeTab, myQuestIds])
+
+  const finishingSoonQuests = useMemo(() => {
+    return quests
+      .filter((q) => q.endAt && isQuestActiveNow(q))
+      .sort((a, b) => new Date(a.endAt) - new Date(b.endAt))
+      .slice(0, 5)
+  }, [quests, isQuestActiveNow])
+
+  const highImpactQuests = useMemo(() => {
+    return quests
+      .filter(
+        (q) =>
+          isQuestActiveNow(q) &&
+          q.impact &&
+          q.impact.amountPerCompletion &&
+          q.impact.amountPerCompletion >= 2
+      )
+      .sort((a, b) => (b.impact?.amountPerCompletion || 0) - (a.impact?.amountPerCompletion || 0))
+      .slice(0, 6)
+  }, [quests, isQuestActiveNow])
+
+  const nearbyQuests = useMemo(() => {
+    const base =
+      userLocation && typeof userLocation.lat === 'number' && typeof userLocation.lng === 'number'
+        ? { lat: userLocation.lat, lng: userLocation.lng, isUser: true }
+        : { lat: CABIAO_CENTER[0], lng: CABIAO_CENTER[1], isUser: false }
+
+    const withLocation = quests.filter((q) => {
+      if (!q.position) return false
+      if (Array.isArray(q.position)) {
+        return q.position.length === 2
+      }
+      if (typeof q.position === 'object') {
+        return typeof q.position.lat === 'number' && typeof q.position.lng === 'number'
+      }
+      return false
+    })
+
+    const activeWithLocation = withLocation.filter((q) => isQuestActiveNow(q))
+
+    if (activeWithLocation.length === 0) {
+      return { baseIsUserLocation: base.isUser, quests: [] }
+    }
+
+    const questsWithDistance = activeWithLocation.map((q) => {
+      let lat
+      let lng
+      if (Array.isArray(q.position)) {
+        ;[lat, lng] = q.position
+      } else {
+        lat = q.position.lat
+        lng = q.position.lng
+      }
+      const distanceKm = haversineDistanceKm(base.lat, base.lng, lat, lng)
+      return { ...q, distanceKm }
+    })
+
+    questsWithDistance.sort((a, b) => a.distanceKm - b.distanceKm)
+
+    return {
+      baseIsUserLocation: base.isUser,
+      quests: questsWithDistance.slice(0, 5),
+    }
+  }, [quests, userLocation, isQuestActiveNow])
+
+  const beginnerQuests = useMemo(() => {
+    return quests
+      .filter(q => {
+        const slotsLeft = (q.capacity || 0) - (q.reservedCount || 0)
+        return slotsLeft > 0 && isQuestActiveNow(q)
+      })
+      .sort((a, b) => (a.points || 0) - (b.points || 0))
+      .slice(0, 3)
+  }, [quests, isQuestActiveNow])
+
+  const handleCloseOnboarding = async () => {
+    setShowOnboarding(false)
+    if (user && activeSeason) {
+      await setSeenOnboarding(user.uid, activeSeason.id)
+    }
+  }
+
+  const handleJoinFromOnboarding = async (questId) => {
+    setShowOnboarding(false)
+    if (user && activeSeason) {
+      await setSeenOnboarding(user.uid, activeSeason.id)
+    }
+    handleJoin(questId)
+  }
 
   const handleJoin = async (questId) => {
     if (!user) return
@@ -551,7 +741,148 @@ export default function CommunityActivitiesPage() {
             </div>
           )}
 
-          <div className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {!loading && !useMockData && quests.length > 0 && activeTab === 'all' && (
+            <>
+              {finishingSoonQuests.length > 0 && (
+                <section className="mt-6">
+                  <div className="flex items-center justify-between mb-3">
+                    <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                      ⏰ Finishing Soon
+                    </h2>
+                    <button
+                      onClick={() => document.getElementById('all-quests')?.scrollIntoView({ behavior: 'smooth' })}
+                      className="text-sm text-emerald-600 hover:text-emerald-700"
+                    >
+                      See all →
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                    {finishingSoonQuests.map(quest => {
+                      const endAt = quest.endAt ? new Date(quest.endAt) : null
+                      let daysLabel = null
+                      if (endAt) {
+                        const now = new Date()
+                        const daysLeft = Math.max(
+                          0,
+                          Math.ceil((endAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+                        )
+                        daysLabel =
+                          daysLeft <= 0
+                            ? 'Ends today'
+                            : `Ends in ${daysLeft} day${daysLeft > 1 ? 's' : ''}`
+                      }
+                      return (
+                        <QuestCard
+                          key={quest.id}
+                          quest={quest}
+                          participation={participations[quest.id]}
+                          onJoin={handleJoin}
+                          onCancel={(id) => {
+                            const q = quests.find(qu => qu.id === id)
+                            setCancelConfirm({ questId: id, title: q?.title })
+                          }}
+                          isLoading={actionLoading === quest.id}
+                          focused={focusQuestId === quest.id}
+                          extraBadge={daysLabel}
+                        />
+                      )
+                    })}
+                  </div>
+                </section>
+              )}
+
+              {highImpactQuests.length > 0 && (
+                <section className="mt-8">
+                  <div className="flex items-center justify-between mb-3">
+                    <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                      🌱 High Impact
+                    </h2>
+                    <button
+                      onClick={() => document.getElementById('all-quests')?.scrollIntoView({ behavior: 'smooth' })}
+                      className="text-sm text-emerald-600 hover:text-emerald-700"
+                    >
+                      See all →
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                    {highImpactQuests.map(quest => (
+                      <QuestCard
+                        key={quest.id}
+                        quest={quest}
+                        participation={participations[quest.id]}
+                        onJoin={handleJoin}
+                        onCancel={(id) => {
+                          const q = quests.find(qu => qu.id === id)
+                          setCancelConfirm({ questId: id, title: q?.title })
+                        }}
+                        isLoading={actionLoading === quest.id}
+                        focused={focusQuestId === quest.id}
+                        extraBadge={quest.impact?.label ? `Impact: ${quest.impact.label}` : 'High impact'}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              <section className="mt-8">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                    📍 Near You
+                  </h2>
+                  <button
+                    onClick={handleLocationRequest}
+                    disabled={locationLoading}
+                    className="text-sm text-emerald-600 hover:text-emerald-700 disabled:opacity-50"
+                  >
+                    {locationLoading ? 'Getting location...' : 'Use my location'}
+                  </button>
+                </div>
+                
+                {locationError && (
+                  <p className="text-sm text-amber-600 mb-3">{locationError}</p>
+                )}
+
+                {nearbyQuests && nearbyQuests.quests.length === 0 && (
+                  <p className="text-sm text-gray-600">
+                    No quests with location data yet. Browse all quests below.
+                  </p>
+                )}
+
+                {nearbyQuests && nearbyQuests.quests.length > 0 && (
+                  <>
+                    {!nearbyQuests.baseIsUserLocation && (
+                      <p className="text-sm text-gray-600 mb-3">
+                        Showing quests near Cabiao center. Enable location for more accurate results.
+                      </p>
+                    )}
+                    <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                      {nearbyQuests.quests.map(quest => (
+                        <QuestCard
+                          key={quest.id}
+                          quest={quest}
+                          participation={participations[quest.id]}
+                          onJoin={handleJoin}
+                          onCancel={(id) => {
+                            const q = quests.find(qu => qu.id === id)
+                            setCancelConfirm({ questId: id, title: q?.title })
+                          }}
+                          isLoading={actionLoading === quest.id}
+                          focused={focusQuestId === quest.id}
+                          distanceKm={quest.distanceKm}
+                        />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </section>
+            </>
+          )}
+
+          <div id="all-quests" className="mt-8">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">
+              {activeTab === 'my' ? 'My Quests' : 'All Quests'}
+            </h2>
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {loading ? (
               <p className="col-span-full text-center text-gray-500">Loading quests...</p>
             ) : useMockData ? (
@@ -578,10 +909,24 @@ export default function CommunityActivitiesPage() {
                 />
               ))
             )}
+            </div>
           </div>
         </div>
       </main>
       <Footer />
+
+      <QuestOnboardingModal
+        isOpen={showOnboarding}
+        onClose={handleCloseOnboarding}
+        featuredQuests={beginnerQuests}
+        onJoinQuest={handleJoinFromOnboarding}
+        onViewAllQuests={() => {
+          setShowOnboarding(false)
+          if (user && activeSeason) {
+            setSeenOnboarding(user.uid, activeSeason.id)
+          }
+        }}
+      />
 
       <CancelConfirmModal
         isOpen={!!cancelConfirm}

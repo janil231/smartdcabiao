@@ -29,7 +29,9 @@ import {
   updateQuest,
   activateQuest,
   deactivateQuest,
-  seedSampleQuestsForActiveSeason
+  seedSampleQuestsForActiveSeason,
+  backfillQuestLocationsForSeason,
+  rescheduleDemoQuestsForSeason,
 } from '../services/quests.service'
 import { getQuestParticipations, adminMarkCompleted, expireAllStaleParticipations } from '../services/participations.service'
 import { listPendingReviews, setReviewStatus } from '../services/reviews.service'
@@ -869,6 +871,8 @@ export default function LGUDashboardPage() {
   const [seasonRedemptions, setSeasonRedemptions] = useState([])
   const [redemptionStatusFilter, setRedemptionStatusFilter] = useState('all')
   const [markingVoucherUsedId, setMarkingVoucherUsedId] = useState(null)
+  const [backfillLocationsLoading, setBackfillLocationsLoading] = useState(false)
+  const [rescheduleDemoLoading, setRescheduleDemoLoading] = useState(false)
 
   useEffect(() => {
     async function checkAdminStatus() {
@@ -1389,6 +1393,42 @@ export default function LGUDashboardPage() {
     }
   }
 
+  const handleBackfillQuestLocations = async () => {
+    const seasonId = selectedSeasonFilter || activeSeason?.id
+    if (!seasonId) {
+      showToast('Please select a season first.', 'error')
+      return
+    }
+    setBackfillLocationsLoading(true)
+    try {
+      const result = await backfillQuestLocationsForSeason(seasonId, { uid: user?.uid, email: user?.email })
+      showToast(`Backfilled locations for ${result.updated} quest${result.updated === 1 ? '' : 's'}.`)
+      loadData()
+    } catch (error) {
+      showToast(error.message, 'error')
+    } finally {
+      setBackfillLocationsLoading(false)
+    }
+  }
+
+  const handleRescheduleDemoQuests = async () => {
+    const seasonId = selectedSeasonFilter || activeSeason?.id
+    if (!seasonId) {
+      showToast('Please select a season first.', 'error')
+      return
+    }
+    setRescheduleDemoLoading(true)
+    try {
+      const result = await rescheduleDemoQuestsForSeason(seasonId, { uid: user?.uid, email: user?.email })
+      showToast(`Rescheduled ${result.updated} demo quest${result.updated === 1 ? '' : 's'}.`)
+      loadData()
+    } catch (error) {
+      showToast(error.message, 'error')
+    } finally {
+      setRescheduleDemoLoading(false)
+    }
+  }
+
   const handleMarkVoucherUsed = async (redemptionId) => {
     if (!activeSeason?.id || !user) return
     setMarkingVoucherUsedId(redemptionId)
@@ -1591,6 +1631,12 @@ export default function LGUDashboardPage() {
               className="flex-1 py-3 px-4 font-medium text-sm rounded-lg transition-colors bg-emerald-600 text-white hover:bg-emerald-700 text-center"
             >
               Check-in
+            </Link>
+            <Link
+              to="/lgu/voucher-verify"
+              className="flex-1 py-3 px-4 font-medium text-sm rounded-lg transition-colors bg-blue-600 text-white hover:bg-blue-700 text-center"
+            >
+              Verify Voucher
             </Link>
           </div>
 
@@ -1874,6 +1920,20 @@ export default function LGUDashboardPage() {
                     className="px-3 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 text-sm font-medium"
                   >
                     Run Cleanup
+                  </button>
+                  <button
+                    onClick={handleBackfillQuestLocations}
+                    disabled={backfillLocationsLoading || (!selectedSeasonFilter && !activeSeason)}
+                    className="px-3 py-2 bg-sky-600 text-white rounded-lg hover:bg-sky-700 text-sm font-medium disabled:bg-gray-300"
+                  >
+                    {backfillLocationsLoading ? 'Backfilling…' : 'Backfill Quest Locations'}
+                  </button>
+                  <button
+                    onClick={handleRescheduleDemoQuests}
+                    disabled={rescheduleDemoLoading || (!selectedSeasonFilter && !activeSeason)}
+                    className="px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm font-medium disabled:bg-gray-300"
+                  >
+                    {rescheduleDemoLoading ? 'Rescheduling…' : 'Reschedule Demo Quests'}
                   </button>
                   <button
                     onClick={() => setShowQuestModal(true)}

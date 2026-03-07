@@ -2,8 +2,11 @@ import { Link } from 'react-router-dom'
 import Reveal from './animations/Reveal'
 import HeroBackgroundCarousel from './HeroBackgroundCarousel'
 import { heroImages } from '../data/heroImages'
+import { useLanguage } from '../contexts/LanguageContext'
 
 export default function Hero() {
+  const { t } = useLanguage()
+  
   return (
     <section
       id="home"
@@ -20,15 +23,12 @@ export default function Hero() {
         <div className="mx-auto max-w-3xl text-center">
           <Reveal delay={0}>
             <h1 className="text-4xl font-bold tracking-tight text-white sm:text-5xl lg:text-6xl drop-shadow-lg">
-              Discover{' '}
-              <span className="text-emerald-300">Cabiao</span>
-              {' '}with SMARTDCABIAO
+              {t('home.headline')}
             </h1>
           </Reveal>
           <Reveal delay={80}>
             <p className="mt-6 text-lg text-white/90 sm:text-xl drop-shadow-md">
-              Your digital gateway to local tourism. Explore businesses, events, and attractions
-              across the Municipality of Cabiao — all in one place. Join with Facebook for instant access!
+              {t('home.subtitle')}
             </p>
           </Reveal>
           <Reveal delay={160}>
@@ -37,13 +37,13 @@ export default function Hero() {
                 to="/businesses"
                 className="rounded-lg bg-emerald-600 px-6 py-3 text-base font-medium text-white shadow-lg transition-all duration-200 ease-out hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 active:scale-[0.98] backdrop-blur-sm"
               >
-                Explore Businesses
+                {t('home.ctaExplore')}
               </Link>
               <Link
                 to="/map"
                 className="rounded-lg border border-white/20 bg-white/10 px-6 py-3 text-base font-medium text-white backdrop-blur-sm transition-all duration-200 ease-out hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 active:scale-[0.98]"
               >
-                View Map
+                {t('home.ctaMap')}
               </Link>
             </div>
           </Reveal>

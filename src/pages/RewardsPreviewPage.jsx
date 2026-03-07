@@ -4,183 +4,253 @@ import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
 import { useAuth } from '../contexts/AuthContext'
 import { getActiveSeason } from '../services/seasons.service'
-import { getQuestById } from '../services/quests.service'
+import { listActiveQuests, recommendQuests } from '../services/quests.service'
 import { getUserParticipations, expireMyStaleParticipations } from '../services/participations.service'
-import { getUserSeasonPointsSummary } from '../services/pointsLedger.service'
 import { getMySeasonBalance } from '../services/seasonBalances.service'
 import { listUserImpact, listSeasonImpact, sumImpactByUnit } from '../services/impactLedger.service'
 import { listTopByPoints, listTopByImpact, IMPACT_UNITS } from '../services/leaderboard.service'
-import { participation as mockParticipation, rewardTotals as mockRewardTotals } from '../data'
+import { listSeasonVouchers } from '../services/vouchers.service'
+import { listMyRedemptions } from '../services/voucherRedemptions.service'
+import { computeBadges, getBadgePercentage } from '../features/badges/badgesEngine'
+import BadgeCard from '../components/badges/BadgeCard'
 
-const STATUS_CONFIG = {
-  joined: { style: 'bg-amber-100 text-amber-800 border-amber-200', label: 'Pending', icon: '⏳' },
-  completed: { style: 'bg-emerald-100 text-emerald-800 border-emerald-200', label: 'Completed', icon: '✅' },
-  expired: { style: 'bg-red-100 text-red-800 border-red-200', label: 'Expired', icon: '❌' },
-  cancelled: { style: 'bg-gray-100 text-gray-800 border-gray-200', label: 'Cancelled', icon: '🚫' },
+const IMPACT_UNIT_CONFIG = {
+  kg_trash: { label: 'Kg waste collected', icon: '🗑️' },
+  trees: { label: 'Trees planted', icon: '🌳' },
+  hours: { label: 'Volunteer hours', icon: '⏱️' },
+  kg_plastic: { label: 'Kg plastic avoided', icon: '♻️' },
+  co2_kg: { label: 'Kg CO₂ avoided', icon: '🌍' },
 }
 
-function ParticipationCard({ participation, questTitle, points, onGoToQuest }) {
-  const statusConfig = STATUS_CONFIG[participation.status] || STATUS_CONFIG.cancelled
-
-  const formatDate = (dateStr) => {
-    if (!dateStr) return ''
-    const date = new Date(dateStr)
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-  }
-
-  const joinedDate = participation.joinedAt ? formatDate(participation.joinedAt) : ''
-  const completedDate = participation.completedAt ? formatDate(participation.completedAt) : ''
-  const expiresDate = participation.expiresAt ? formatDate(participation.expiresAt) : ''
-
-  const isPending = participation.status === 'joined'
-  const isReleased = participation.rewardStatus === 'released'
-
+function SkeletonCard({ className = '' }) {
   return (
-    <article className="flex flex-col rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition hover:shadow-md">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex-1">
-          <h3 className="text-lg font-semibold text-gray-900">{questTitle || 'Unknown Quest'}</h3>
-          <p className="mt-1 text-sm text-gray-500">
-            {joinedDate && `Joined: ${joinedDate}`}
-            {completedDate && ` • Completed: ${completedDate}`}
-            {!completedDate && expiresDate && isPending && ` • Expires: ${expiresDate}`}
-          </p>
-        </div>
-        <span className={`shrink-0 inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium ${statusConfig.style}`}>
-          {statusConfig.icon} {statusConfig.label}
-        </span>
-      </div>
-
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        {isReleased ? (
-          <div className="flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2">
-            <span className="text-emerald-700 font-bold text-lg">+{points || 0}</span>
-            <span className="text-emerald-600 text-sm">points released</span>
-          </div>
-        ) : isPending ? (
-          <div className="flex items-center gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
-            <span className="text-amber-700 font-medium">Pending</span>
-            <span className="text-amber-600 text-sm">{points || 0} points</span>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2">
-            <span className="text-gray-500 text-sm">
-              {participation.status === 'expired' ? 'No points (expired)' : 'No points'}
-            </span>
-          </div>
-        )}
-      </div>
-
-      {isPending && (
-        <div className="mt-4">
-          <button
-            onClick={() => onGoToQuest(participation.questId)}
-            className="text-sm font-medium text-emerald-600 hover:text-emerald-700"
-          >
-            → Go to quest
-          </button>
-        </div>
-      )}
-    </article>
+    <div className={`animate-pulse rounded-xl border border-gray-200 bg-gray-50 p-4 ${className}`}>
+      <div className="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
+      <div className="h-8 bg-gray-200 rounded w-3/4"></div>
+    </div>
   )
 }
 
-function MockRewardCard({ entry }) {
-  const statusConfig = STATUS_CONFIG[entry.status] || STATUS_CONFIG.cancelled
+function RecommendedQuestCard({ quest, onJoin }) {
+  const now = new Date()
+  const endAt = quest.endAt ? new Date(quest.endAt) : null
+  const slotsLeft = (quest.capacity || 0) - (quest.reservedCount || 0)
+
+  const formatDeadline = () => {
+    if (!endAt) return 'No deadline'
+    const days = Math.ceil((endAt - now) / (1000 * 60 * 60 * 24))
+    if (days <= 0) return 'Ended'
+    if (days === 1) return 'Ends tomorrow'
+    if (days <= 7) return `Ends in ${days} days`
+    return `Ends ${endAt.toLocaleDateString()}`
+  }
 
   return (
-    <article className="flex flex-col rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+    <div className="rounded-xl border border-emerald-200 bg-white p-4 shadow-sm hover:shadow-md transition-shadow">
       <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <h3 className="font-semibold text-gray-900 truncate">{quest.title}</h3>
+          <p className="text-xs text-gray-500 mt-1 line-clamp-2">{quest.description}</p>
+        </div>
+        <div className="shrink-0 text-right">
+          <span className="text-lg font-bold text-emerald-600">+{quest.points}</span>
+          <span className="text-xs text-gray-500 block">points</span>
+        </div>
+      </div>
+      <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
+        <span>{formatDeadline()}</span>
+        <span className={slotsLeft <= 5 ? 'text-amber-600' : ''}>{slotsLeft} slots left</span>
+      </div>
+      {quest.impact && (
+        <div className="mt-2 inline-flex items-center gap-1 text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded-full">
+          <span>{IMPACT_UNIT_CONFIG[quest.impact.unit]?.icon || '🌱'}</span>
+          <span>{quest.impact.label || quest.impact.unit}</span>
+        </div>
+      )}
+      <button
+        onClick={() => onJoin(quest.id)}
+        className="mt-3 w-full py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors"
+      >
+        Join Quest
+      </button>
+    </div>
+  )
+}
+
+function BadgeProgressCard({ badge, progress, onViewProfile }) {
+  const percentage = getBadgePercentage(badge.id, { [badge.id]: progress })
+  const isComplete = percentage >= 100
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-4">
+      <div className="flex items-center gap-3">
+        <div className="text-3xl">{badge.icon}</div>
+        <div className="flex-1 min-w-0">
+          <h4 className="font-semibold text-gray-900">{badge.title}</h4>
+          <p className="text-xs text-gray-500">{badge.description}</p>
+        </div>
+      </div>
+      <div className="mt-3">
+        <div className="flex justify-between text-xs text-gray-500 mb-1">
+          <span>{progress.current} / {progress.target}</span>
+          <span>{percentage}%</span>
+        </div>
+        <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+          <div 
+            className={`h-full rounded-full transition-all duration-500 ${isComplete ? 'bg-emerald-500' : 'bg-amber-500'}`}
+            style={{ width: `${percentage}%` }}
+          />
+        </div>
+      </div>
+      {!isComplete && (
+        <button
+          onClick={onViewProfile}
+          className="mt-3 w-full py-2 border border-gray-200 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50"
+        >
+          View Profile
+        </button>
+      )}
+    </div>
+  )
+}
+
+function VoucherNudgeBanner({ eligibleVouchers, pointsBalance, onGoToStore }) {
+  if (eligibleVouchers.length === 0) return null
+
+  const cheapest = eligibleVouchers.reduce((min, v) => 
+    v.pointsCost < min.pointsCost ? v : min
+  )
+
+  return (
+    <div className="rounded-xl border border-amber-300 bg-gradient-to-r from-amber-50 to-yellow-50 p-4 shadow-sm">
+      <div className="flex items-start gap-3">
+        <div className="text-2xl">🎟️</div>
         <div className="flex-1">
-          <h3 className="text-lg font-semibold text-gray-900">{entry.activityName}</h3>
-          <p className="mt-1 text-sm text-gray-500">{entry.date}</p>
+          <h3 className="font-semibold text-amber-900">
+            You can redeem {eligibleVouchers.length} voucher{eligibleVouchers.length > 1 ? 's' : ''} now!
+          </h3>
+          <p className="text-sm text-amber-700 mt-1">
+            Your {pointsBalance} points can get you <strong>{cheapest.title}</strong> for just {cheapest.pointsCost} points.
+          </p>
+          <button
+            onClick={onGoToStore}
+            className="mt-3 inline-flex items-center px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700"
+          >
+            Go to Voucher Store →
+          </button>
         </div>
-        <span className={`shrink-0 inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium ${statusConfig.style}`}>
-          {statusConfig.icon} {statusConfig.label}
-        </span>
       </div>
-      <div className="mt-4">
-        <div className="rounded-lg bg-gray-50 border border-gray-200 px-3 py-2">
-          <span className="text-gray-600 text-sm">{entry.rewardLabel || 'Sample reward'}</span>
-        </div>
-      </div>
-    </article>
+    </div>
   )
 }
 
 export default function RewardsPreviewPage() {
   const { user } = useAuth()
-  const [participations, setParticipations] = useState([])
-  const [questTitles, setQuestTitles] = useState({})
-  const [totalPoints, setTotalPoints] = useState(0)
-  const [loading, setLoading] = useState(false)
+  
+  const [loading, setLoading] = useState(true)
   const [activeSeason, setActiveSeason] = useState(null)
-  const [useMockData, setUseMockData] = useState(false)
+  const [seasonBalance, setSeasonBalance] = useState(null)
+  const [participations, setParticipations] = useState([])
+  const [recommendedQuests, setRecommendedQuests] = useState([])
   const [seasonImpactTotals, setSeasonImpactTotals] = useState({})
   const [userImpactTotals, setUserImpactTotals] = useState({})
+  const [redemptions, setRedemptions] = useState([])
+  const [eligibleVouchers, setEligibleVouchers] = useState([])
+  const [badgeData, setBadgeData] = useState({ earnedBadges: [], lockedBadges: [], progress: {} })
+  
   const [leaderboardTab, setLeaderboardTab] = useState('points')
   const [leaderboardUnit, setLeaderboardUnit] = useState('trees')
   const [leaderboardData, setLeaderboardData] = useState([])
   const [leaderboardLoading, setLeaderboardLoading] = useState(false)
-  const [seasonBalance, setSeasonBalance] = useState(null)
+  const [showFullLeaderboard, setShowFullLeaderboard] = useState(false)
+
+  const completedCount = useMemo(() => 
+    participations.filter(p => p.status === 'completed').length
+  , [participations])
 
   useEffect(() => {
     async function loadData() {
-      if (!user) {
-        setUseMockData(true)
-        return
-      }
-      
       setLoading(true)
       try {
         const season = await getActiveSeason()
         
-        if (season) {
-          setActiveSeason(season)
-          const summary = await getUserSeasonPointsSummary(user.uid, season.id)
-          setTotalPoints(summary.totalPoints)
-
-          const userParts = await getUserParticipations(user.uid)
-          setParticipations(userParts)
-
-          await expireMyStaleParticipations(user.uid)
-          const refreshedParts = await getUserParticipations(user.uid)
-          setParticipations(refreshedParts)
-
-          const titlePromises = userParts.map(async (p) => {
-            if (p.questId) {
-              try {
-                const quest = await getQuestById(p.questId)
-                return { [p.questId]: quest?.title || 'Quest' }
-              } catch {
-                return { [p.questId]: 'Quest' }
-              }
-            }
-            return {}
-          })
-          
-          const titleResults = await Promise.all(titlePromises)
-          const titles = Object.assign({}, ...titleResults)
-          setQuestTitles(titles)
-
-          const [seasonImpactEntries, userImpactEntries, balance] = await Promise.all([
-            listSeasonImpact(season.id),
-            listUserImpact({ uid: user.uid, seasonId: season.id }),
-            getMySeasonBalance(season.id, user.uid)
-          ])
-          setSeasonImpactTotals(sumImpactByUnit(seasonImpactEntries))
-          setUserImpactTotals(sumImpactByUnit(userImpactEntries))
-          setSeasonBalance(balance)
-        } else {
-          setUseMockData(true)
+        if (!season) {
+          setActiveSeason(null)
+          setLoading(false)
+          return
         }
-      } catch {
-        setUseMockData(true)
+
+        setActiveSeason(season)
+
+        if (!user) {
+          setLoading(false)
+          return
+        }
+
+        await expireMyStaleParticipations(user.uid)
+
+        const [
+          balance,
+          userParts,
+          seasonImpactEntries,
+          userImpactEntries,
+          seasonVouchers,
+          userRedemptions,
+        ] = await Promise.all([
+          getMySeasonBalance(season.id, user.uid),
+          getUserParticipations(user.uid),
+          listSeasonImpact(season.id),
+          listUserImpact({ uid: user.uid, seasonId: season.id }),
+          listSeasonVouchers(season.id),
+          listMyRedemptions(season.id, user.uid),
+        ])
+
+        setSeasonBalance(balance)
+        setParticipations(userParts)
+        setSeasonImpactTotals(sumImpactByUnit(seasonImpactEntries))
+        setUserImpactTotals(sumImpactByUnit(userImpactEntries))
+        setRedemptions(userRedemptions)
+
+        const quests = await listActiveQuests(season.id)
+
+        const recommended = recommendQuests({ quests, participations: userParts, limit: 2 })
+        setRecommendedQuests(recommended)
+
+        const points = balance?.pointsEarned || 0
+        const impactTotals = sumImpactByUnit(userImpactEntries)
+        
+        const computed = computeBadges({
+          pointsTotal: points,
+          completedCount: userParts.filter(p => p.status === 'completed').length,
+          impactTotalsByUnit: impactTotals,
+          reviewsCount: 0,
+          favoritesCount: 0,
+        })
+        setBadgeData(computed)
+
+        if (balance?.pointsBalance > 0) {
+          const now = new Date()
+          const eligible = seasonVouchers.filter(v => {
+            if (!v.isActive) return false
+            if (v.stockRemaining <= 0) return false
+            if (v.pointsCost > balance.pointsBalance) return false
+            
+            if (v.expiresAt) {
+              const expiry = v.expiresAt.toDate ? v.expiresAt.toDate() : new Date(v.expiresAt)
+              if (expiry < now) return false
+            }
+            return true
+          })
+          setEligibleVouchers(eligible)
+        }
+
+      } catch (error) {
+        console.error('Error loading rewards data:', error)
       } finally {
         setLoading(false)
       }
     }
-    
+
     loadData()
   }, [user])
 
@@ -193,11 +263,12 @@ export default function RewardsPreviewPage() {
 
       setLeaderboardLoading(true)
       try {
+        const limit = showFullLeaderboard ? 10 : 5
         let data
         if (leaderboardTab === 'points') {
-          data = await listTopByPoints(activeSeason.id, 10)
+          data = await listTopByPoints(activeSeason.id, limit)
         } else {
-          data = await listTopByImpact(activeSeason.id, leaderboardUnit, 10)
+          data = await listTopByImpact(activeSeason.id, leaderboardUnit, limit)
         }
         setLeaderboardData(data || [])
       } catch (error) {
@@ -209,23 +280,7 @@ export default function RewardsPreviewPage() {
     }
 
     loadLeaderboard()
-  }, [activeSeason, leaderboardTab, leaderboardUnit])
-
-  const sortedParticipations = useMemo(() => {
-    return [...participations].sort((a, b) => {
-      const dateA = new Date(b.joinedAt || 0)
-      const dateB = new Date(a.joinedAt || 0)
-      return dateA - dateB
-    })
-  }, [participations])
-
-  const stats = useMemo(() => {
-    const pending = participations.filter(p => p.status === 'joined').length
-    const completed = participations.filter(p => p.status === 'completed').length
-    const released = participations.filter(p => p.rewardStatus === 'released').length
-    const expired = participations.filter(p => p.status === 'expired' || p.status === 'cancelled').length
-    return { pending, completed, released, expired }
-  }, [participations])
+  }, [activeSeason, leaderboardTab, leaderboardUnit, showFullLeaderboard])
 
   const getSeasonCountdown = () => {
     if (!activeSeason?.endAt) return ''
@@ -233,20 +288,21 @@ export default function RewardsPreviewPage() {
     const now = new Date()
     const daysLeft = Math.ceil((endDate - now) / (1000 * 60 * 60 * 24))
     if (daysLeft <= 0) return 'Season ended'
-    return `Ends in ${daysLeft} day${daysLeft > 1 ? 's' : ''}`
+    return `${daysLeft} day${daysLeft > 1 ? 's' : ''} left`
   }
 
-  const IMPACT_UNIT_CONFIG = {
-    kg_trash: { label: 'Kg of waste collected', icon: '🗑️' },
-    trees: { label: 'Trees planted', icon: '🌳' },
-    hours: { label: 'Volunteer hours', icon: '⏱️' },
-    kg_plastic: { label: 'Kg of plastic avoided', icon: '♻️' },
-    co2_kg: { label: 'Kg of CO₂ avoided', icon: '🌍' },
-  }
-
-  const handleGoToQuest = (questId) => {
+  const handleJoinQuest = (questId) => {
     window.location.href = `/events?focusQuestId=${questId}`
   }
+
+  const unusedVouchersCount = useMemo(() => 
+    redemptions.filter(r => r.status === 'unused').length
+  , [redemptions])
+
+  const redeemedVouchersCount = redemptions.length
+
+  const topEarnedBadges = badgeData.earnedBadges.slice(0, 3)
+  const nextLockedBadge = badgeData.lockedBadges[0]
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -255,12 +311,22 @@ export default function RewardsPreviewPage() {
         <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
           <div className="mb-8">
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl">
-              Rewards & Participation
+              Rewards Home
             </h1>
             <p className="mt-3 max-w-2xl text-lg text-gray-600">
-              Track your quest participation and rewards. Complete quests to earn points!
+              Track your progress, earn points, and redeem rewards!
             </p>
           </div>
+
+          {!user && (
+            <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-5 text-amber-800">
+              <p className="font-medium">Preview Mode</p>
+              <p className="mt-1 text-sm">Log in to track your personal rewards, points, and progress.</p>
+              <Link to="/login" className="mt-3 inline-block px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm font-medium">
+                Log In
+              </Link>
+            </div>
+          )}
 
           {activeSeason && (
             <div className="mb-6 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3">
@@ -268,11 +334,6 @@ export default function RewardsPreviewPage() {
                 <div>
                   <span className="text-emerald-800 font-medium">Season: </span>
                   <strong className="text-emerald-900">{activeSeason.name}</strong>
-                  {activeSeason.startAt && activeSeason.endAt && (
-                    <span className="text-emerald-600 ml-2">
-                      ({new Date(activeSeason.startAt).toLocaleDateString()} - {new Date(activeSeason.endAt).toLocaleDateString()})
-                    </span>
-                  )}
                 </div>
                 <span className="text-sm font-medium text-emerald-700">
                   {getSeasonCountdown()}
@@ -281,224 +342,179 @@ export default function RewardsPreviewPage() {
             </div>
           )}
 
-          {activeSeason && !useMockData && (
-            <div className="mb-8 grid gap-6 lg:grid-cols-2">
-              <section>
-                <h2 className="text-lg font-semibold text-gray-900">This Season&apos;s Impact</h2>
-                <p className="mt-1 text-sm text-gray-600">
-                  Total environmental impact from all completed quests this season.
-                </p>
-                <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                  {Object.keys(seasonImpactTotals).length === 0 && (
-                    <p className="text-sm text-gray-500">No impact recorded yet. Approve completed quests to start tracking.</p>
-                  )}
-                  {Object.entries(seasonImpactTotals).map(([unit, amount]) => {
-                    const config = IMPACT_UNIT_CONFIG[unit] || { label: unit, icon: '🌱' }
-                    return (
-                      <div
-                        key={unit}
-                        className="rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-teal-50 p-4 flex items-center gap-3"
-                      >
-                        <div className="text-2xl" aria-hidden="true">{config.icon}</div>
-                        <div>
-                          <p className="text-xs font-medium uppercase tracking-wide text-emerald-700">
-                            {config.label}
-                          </p>
-                          <p className="mt-1 text-2xl font-bold text-emerald-900">
-                            {amount}
-                          </p>
-                        </div>
-                      </div>
-                    )
-                  })}
+          {loading && user ? (
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+              <SkeletonCard />
+              <SkeletonCard />
+              <SkeletonCard />
+              <SkeletonCard />
+            </div>
+          ) : (
+            <>
+              <section className="mb-8">
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Season Overview</h2>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 p-4">
+                    <p className="text-sm font-medium text-amber-800">Available Points</p>
+                    <p className="mt-1 text-3xl font-bold text-amber-900">
+                      {seasonBalance?.pointsBalance ?? 0}
+                    </p>
+                    <p className="mt-1 text-xs text-amber-700">
+                      Earned: {seasonBalance?.pointsEarned ?? 0} • Spent: {seasonBalance?.pointsSpent ?? 0}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-teal-50 p-4">
+                    <p className="text-sm font-medium text-emerald-800">My Vouchers</p>
+                    <p className="mt-1 text-3xl font-bold text-emerald-900">
+                      {redeemedVouchersCount}
+                    </p>
+                    <p className="mt-1 text-xs text-emerald-700">
+                      {unusedVouchersCount} unused
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50 p-4">
+                    <p className="text-sm font-medium text-blue-800">Quests Completed</p>
+                    <p className="mt-1 text-3xl font-bold text-blue-900">
+                      {completedCount}
+                    </p>
+                    <p className="mt-1 text-xs text-blue-700">This season</p>
+                  </div>
+                  <div className="rounded-xl border border-purple-200 bg-gradient-to-br from-purple-50 to-fuchsia-50 p-4">
+                    <p className="text-sm font-medium text-purple-800">Badges Earned</p>
+                    <p className="mt-1 text-3xl font-bold text-purple-900">
+                      {badgeData.earnedBadges.length}
+                    </p>
+                    <p className="mt-1 text-xs text-purple-700">
+                      {badgeData.lockedBadges.length} more available
+                    </p>
+                  </div>
                 </div>
               </section>
 
-              <section>
-                <h2 className="text-lg font-semibold text-gray-900">Your Contribution</h2>
-                <p className="mt-1 text-sm text-gray-600">
-                  How your completed quests add up for this season.
-                </p>
-                {!user && (
-                  <p className="mt-3 text-sm text-gray-500">
-                    Login to track your personal contribution.
-                  </p>
-                )}
-                {user && (
-                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                    {Object.keys(userImpactTotals).length === 0 && (
-                      <p className="text-sm text-gray-500 col-span-full">
-                        Complete quests and have them verified by an LGU admin to see your impact here.
-                      </p>
-                    )}
-                    {Object.entries(userImpactTotals).map(([unit, amount]) => {
+              <section className="mb-8">
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Your Impact</h2>
+                {user && Object.keys(userImpactTotals).length > 0 ? (
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    {Object.entries(userImpactTotals).slice(0, 4).map(([unit, amount]) => {
                       const config = IMPACT_UNIT_CONFIG[unit] || { label: unit, icon: '🌱' }
                       return (
-                        <div
-                          key={unit}
-                          className="rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50 p-4 flex items-center gap-3"
-                        >
-                          <div className="text-2xl" aria-hidden="true">{config.icon}</div>
+                        <div key={unit} className="rounded-lg border border-gray-200 bg-white p-3 flex items-center gap-3">
+                          <span className="text-xl">{config.icon}</span>
                           <div>
-                            <p className="text-xs font-medium uppercase tracking-wide text-blue-700">
-                              {config.label}
-                            </p>
-                            <p className="mt-1 text-2xl font-bold text-blue-900">
-                              {amount}
-                            </p>
+                            <p className="text-xs text-gray-500">{config.label}</p>
+                            <p className="font-bold text-gray-900">{amount}</p>
                           </div>
                         </div>
                       )
                     })}
                   </div>
+                ) : (
+                  <p className="text-sm text-gray-500">
+                    Complete quests to see your environmental impact.
+                  </p>
                 )}
               </section>
-            </div>
-          )}
 
-          {!user && (
-            <div className="mb-8 rounded-xl border border-amber-200 bg-amber-50 p-5 text-amber-800">
-              <p className="font-medium">Preview mode</p>
-              <p className="mt-1 text-sm">Below is sample data. Log in to see your real points and rewards from completed quests.</p>
-            </div>
-          )}
-
-          {user && useMockData && !loading && (
-            <div className="mb-8 rounded-xl border border-amber-200 bg-amber-50 p-5 text-amber-800">
-              <p className="font-medium">No active season</p>
-              <p className="mt-1 text-sm">There are no active quests at the moment. Check back soon!</p>
-            </div>
-          )}
-
-          <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 p-5">
-              <p className="text-sm font-medium text-amber-800">Total Points</p>
-              <p className="mt-1 text-3xl font-bold text-amber-900">
-                {loading && user ? '...' : (useMockData ? mockRewardTotals.totalPoints : totalPoints)}
-              </p>
-              <p className="mt-1 text-xs text-amber-700">This season</p>
-            </div>
-            <div className="rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-teal-50 p-5">
-              <p className="text-sm font-medium text-emerald-800">Rewards Released</p>
-              <p className="mt-1 text-3xl font-bold text-emerald-900">
-                {loading && user ? '...' : (useMockData ? mockRewardTotals.voucherCount : stats.released)}
-              </p>
-              <p className="mt-1 text-xs text-emerald-700">Points unlocked</p>
-            </div>
-            <div className="rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50 p-5">
-              <p className="text-sm font-medium text-blue-800">Quests Completed</p>
-              <p className="mt-1 text-3xl font-bold text-blue-900">
-                {loading && user ? '...' : (useMockData ? mockParticipation.filter(p => p.status === 'completed').length : stats.completed)}
-              </p>
-              <p className="mt-1 text-xs text-blue-700">Finished</p>
-            </div>
-            <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-yellow-50 to-amber-50 p-5 flex flex-col">
-              <p className="text-sm font-medium text-yellow-800">Available Points</p>
-              <p className="mt-1 text-3xl font-bold text-yellow-900">
-                {seasonBalance ? seasonBalance.pointsBalance || 0 : 0}
-              </p>
-              <p className="mt-1 text-xs text-yellow-700">
-                Earned: {seasonBalance ? seasonBalance.pointsEarned || 0 : 0} • Spent: {seasonBalance ? seasonBalance.pointsSpent || 0 : 0}
-              </p>
-              {activeSeason && (
-                <Link
-                  to="/vouchers"
-                  className="mt-3 inline-flex items-center justify-center px-3 py-2 text-sm font-medium rounded-lg bg-amber-600 text-white hover:bg-amber-700"
-                >
-                  Go to Voucher Store
-                </Link>
+              {user && eligibleVouchers.length > 0 && (
+                <section className="mb-8">
+                  <VoucherNudgeBanner
+                    eligibleVouchers={eligibleVouchers}
+                    pointsBalance={seasonBalance?.pointsBalance ?? 0}
+                    onGoToStore={() => window.location.href = '/vouchers'}
+                  />
+                </section>
               )}
-            </div>
-          </div>
 
-          <div>
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-semibold text-gray-900">Your Quest History</h2>
-                <p className="mt-1 text-sm text-gray-600">
-                  {participations.length > 0 
-                    ? `Showing ${participations.length} quest${participations.length !== 1 ? 's' : ''} - most recent first`
-                    : 'Join quests on the Events page to start earning rewards!'
-                  }
-                </p>
-              </div>
-              {participations.length > 0 && (
-                <Link
-                  to="/events"
-                  className="text-sm font-medium text-emerald-600 hover:text-emerald-700"
-                >
-                  Browse quests →
-                </Link>
-              )}
-            </div>
-
-            {loading && user ? (
-              <p className="mt-6 text-gray-500">Loading…</p>
-            ) : (
-              <div className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-                {useMockData ? (
-                  mockParticipation.length === 0 ? (
-                    <p className="text-gray-500 col-span-full">No participation yet. Join quests on the Events page.</p>
-                  ) : (
-                    mockParticipation.map((entry, index) => (
-                      <MockRewardCard key={`${entry.activityId ?? index}-${entry.activityName}`} entry={entry} />
-                    ))
-                  )
-                ) : participations.length === 0 ? (
-                  <div className="col-span-full rounded-xl border border-gray-200 bg-gray-50 p-8 text-center">
-                    <p className="text-gray-500 mb-4">You haven't joined any quests yet.</p>
-                    <Link
-                      to="/events"
-                      className="inline-flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium"
-                    >
-                      Browse Available Quests
+              {user && recommendedQuests.length > 0 && (
+                <section className="mb-8">
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-semibold text-gray-900">Next Best Actions</h2>
+                    <Link to="/events" className="text-sm text-emerald-600 hover:text-emerald-700">
+                      View all →
                     </Link>
                   </div>
-                ) : (
-                  sortedParticipations.map((entry, index) => (
-                    <ParticipationCard 
-                      key={`${entry.questId ?? index}-${entry.id}`} 
-                      participation={entry} 
-                      questTitle={questTitles[entry.questId]}
-                      points={entry.pointsAwarded || entry.status === 'completed' ? (entry.pointsAwarded || 0) : 0}
-                      onGoToQuest={handleGoToQuest}
-                    />
-                  ))
-                )}
-              </div>
-            )}
-          </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {recommendedQuests.map(quest => (
+                      <RecommendedQuestCard
+                        key={quest.id}
+                        quest={quest}
+                        onJoin={handleJoinQuest}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
 
-          {activeSeason && (
-            <div className="mt-12">
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                <div className="border-b border-gray-200 px-6 py-4">
-                  <h2 className="text-xl font-semibold text-gray-900">Community Leaderboard</h2>
-                  <p className="mt-1 text-sm text-gray-600">
-                    Top contributors this season
-                  </p>
-                </div>
+              {user && (
+                <section className="mb-8">
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-semibold text-gray-900">Badge Progress</h2>
+                    <Link to="/profile" className="text-sm text-emerald-600 hover:text-emerald-700">
+                      View all →
+                    </Link>
+                  </div>
+                  
+                  {topEarnedBadges.length > 0 && (
+                    <div className="mb-4">
+                      <p className="text-sm text-gray-500 mb-2">Your Badges</p>
+                      <div className="flex gap-3">
+                        {topEarnedBadges.map(badge => (
+                          <div key={badge.id} className="flex items-center gap-2 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2">
+                            <span className="text-xl">{badge.icon}</span>
+                            <span className="text-sm font-medium text-yellow-900">{badge.title}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
-                <div className="border-b border-gray-200 px-4 py-3">
-                  <div className="flex gap-2 flex-wrap">
+                  {nextLockedBadge && badgeData.progress[nextLockedBadge.id] && (
+                    <div>
+                      <p className="text-sm text-gray-500 mb-2">Next Badge</p>
+                      <div className="max-w-md">
+                        <BadgeProgressCard
+                          badge={nextLockedBadge}
+                          progress={badgeData.progress[nextLockedBadge.id]}
+                          onViewProfile={() => window.location.href = '/profile'}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {badgeData.earnedBadges.length === 0 && badgeData.lockedBadges.length === 0 && (
+                    <p className="text-sm text-gray-500">Complete quests to earn badges!</p>
+                  )}
+                </section>
+              )}
+
+              {activeSeason && (
+                <section className="mb-8">
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-semibold text-gray-900">Community Leaderboard</h2>
+                    <button
+                      onClick={() => setShowFullLeaderboard(!showFullLeaderboard)}
+                      className="text-sm text-emerald-600 hover:text-emerald-700"
+                    >
+                      {showFullLeaderboard ? 'Show less' : 'View more'}
+                    </button>
+                  </div>
+
+                  <div className="mb-3 flex gap-2 flex-wrap">
                     <button
                       onClick={() => setLeaderboardTab('points')}
-                      className={`px-4 py-2 rounded-lg font-medium text-sm transition ${
+                      className={`px-3 py-1.5 rounded-lg font-medium text-sm transition ${
                         leaderboardTab === 'points'
                           ? 'bg-emerald-600 text-white'
                           : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                       }`}
                     >
-                      Top by Points
+                      Points
                     </button>
-                    {IMPACT_UNITS.map(unit => (
+                    {IMPACT_UNITS.slice(0, 3).map(unit => (
                       <button
                         key={unit.value}
-                        onClick={() => {
-                          setLeaderboardTab('impact')
-                          setLeaderboardUnit(unit.value)
-                        }}
-                        className={`px-4 py-2 rounded-lg font-medium text-sm transition ${
+                        onClick={() => { setLeaderboardTab('impact'); setLeaderboardUnit(unit.value) }}
+                        className={`px-3 py-1.5 rounded-lg font-medium text-sm transition ${
                           leaderboardTab === 'impact' && leaderboardUnit === unit.value
                             ? 'bg-emerald-600 text-white'
                             : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -508,31 +524,24 @@ export default function RewardsPreviewPage() {
                       </button>
                     ))}
                   </div>
-                </div>
 
-                <div className="p-6">
                   {leaderboardLoading ? (
-                    <div className="text-center py-8">
-                      <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-600 border-t-transparent"></div>
-                      <p className="text-gray-500 mt-2">Loading leaderboard...</p>
+                    <div className="space-y-2">
+                      {[...Array(5)].map((_, i) => <SkeletonCard key={i} className="h-14" />)}
                     </div>
                   ) : leaderboardData.length === 0 ? (
-                    <div className="text-center py-8">
-                      <p className="text-gray-500">No leaderboard data yet. Complete quests to appear here!</p>
-                    </div>
+                    <p className="text-gray-500 text-sm">No leaderboard data yet. Complete quests to appear here!</p>
                   ) : (
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       {leaderboardData.map(entry => (
                         <div
                           key={entry.uid}
-                          className={`flex items-center gap-4 p-3 rounded-lg ${
+                          className={`flex items-center gap-3 p-3 rounded-lg ${
                             entry.uid === user?.uid ? 'bg-emerald-50 border border-emerald-200' : 'bg-gray-50'
                           }`}
                         >
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${
-                            entry.rank <= 3
-                              ? 'bg-yellow-100 text-yellow-800'
-                              : 'bg-gray-200 text-gray-600'
+                          <div className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold ${
+                            entry.rank <= 3 ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-200 text-gray-600'
                           }`}>
                             {entry.rank}
                           </div>
@@ -541,29 +550,41 @@ export default function RewardsPreviewPage() {
                               {entry.name}
                             </p>
                             <p className="text-xs text-gray-500">
-                              {entry.completedQuestsCount} quest{entry.completedQuestsCount !== 1 ? 's' : ''} completed
+                              {entry.completedQuestsCount} quest{entry.completedQuestsCount !== 1 ? 's' : ''}
                             </p>
                           </div>
                           <div className="text-right">
                             <p className="font-bold text-gray-900">
-                              {leaderboardTab === 'points'
-                                ? `${entry.pointsTotal} pts`
-                                : `${entry.impact || 0}`
-                              }
+                              {leaderboardTab === 'points' ? `${entry.pointsTotal} pts` : entry.impact}
                             </p>
-                            {leaderboardTab === 'impact' && (
-                              <p className="text-xs text-gray-500">
-                                {IMPACT_UNITS.find(u => u.value === leaderboardUnit)?.label || leaderboardUnit}
-                              </p>
-                            )}
                           </div>
                         </div>
                       ))}
                     </div>
                   )}
-                </div>
-              </div>
-            </div>
+                </section>
+              )}
+
+              {activeSeason && Object.keys(seasonImpactTotals).length > 0 && (
+                <section className="mb-8">
+                  <h2 className="text-lg font-semibold text-gray-900 mb-4">Season Impact</h2>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    {Object.entries(seasonImpactTotals).slice(0, 4).map(([unit, amount]) => {
+                      const config = IMPACT_UNIT_CONFIG[unit] || { label: unit, icon: '🌱' }
+                      return (
+                        <div key={unit} className="rounded-lg border border-gray-200 bg-white p-3 flex items-center gap-3">
+                          <span className="text-xl">{config.icon}</span>
+                          <div>
+                            <p className="text-xs text-gray-500">{config.label}</p>
+                            <p className="font-bold text-gray-900">{amount}</p>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </section>
+              )}
+            </>
           )}
         </div>
       </main>

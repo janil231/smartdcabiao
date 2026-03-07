@@ -8,6 +8,7 @@ export function computeBadges({
   favoritesCount = 0 
 }) {
   const earnedBadges = []
+  const lockedBadges = []
   const progress = {}
 
   for (const badge of BADGE_CATALOG) {
@@ -50,10 +51,12 @@ export function computeBadges({
 
     if (earned) {
       earnedBadges.push(badge)
+    } else {
+      lockedBadges.push(badge)
     }
   }
 
-  return { earnedBadges, progress }
+  return { earnedBadges, lockedBadges, progress }
 }
 
 export function getBadgeProgress(badgeId, progress) {

@@ -4,8 +4,107 @@ import Footer from '../components/Footer'
 import { useAuth } from '../contexts/AuthContext'
 import { getActiveSeason } from '../services/seasons.service'
 import { listSeasonVouchers } from '../services/vouchers.service'
-import { getOrCreateSeasonBalance } from '../services/seasonBalances.service'
+import { getOrCreateSeasonBalance, rebuildSeasonBalanceFromLedger } from '../services/seasonBalances.service'
 import { listMyRedemptions, redeemVoucher } from '../services/voucherRedemptions.service'
+
+function VoucherDetailsModal({ redemption, seasonId, onClose, onCopyCode }) {
+  const status = redemption.status || 'unused'
+  const expiryDate = redemption.voucherSnapshot?.expiresAt
+  const isExpired = expiryDate && (expiryDate.toDate ? expiryDate.toDate() : new Date(expiryDate)) < new Date()
+  const displayStatus = status === 'used' ? 'used' : (isExpired ? 'expired' : 'unused')
+  
+  const qrData = `SMARTDCABIAO|VOUCHER|${seasonId}|${redemption.code}`
+  const encodedQrData = encodeURIComponent(qrData)
+  const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodedQrData}`
+  
+  const expiryStr = expiryDate
+    ? (expiryDate.toDate ? expiryDate.toDate().toLocaleDateString() : new Date(expiryDate).toLocaleDateString())
+    : 'No expiry'
+  
+  const redeemedAtStr = redemption.redeemedAt?.toDate
+    ? redemption.redeemedAt.toDate().toLocaleString()
+    : '—'
+  
+  const usedAtStr = redemption.usedAt?.toDate
+    ? redemption.usedAt.toDate().toLocaleString()
+    : null
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h3 className="text-lg font-bold text-gray-900">
+              {redemption.voucherSnapshot?.title || 'Voucher'}
+            </h3>
+            {redemption.voucherSnapshot?.partnerName && (
+              <p className="text-sm text-gray-500">{redemption.voucherSnapshot.partnerName}</p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="flex justify-center mb-4">
+          <img src={qrImageUrl} alt="QR Code" className="rounded-lg border border-gray-200" />
+        </div>
+
+        <div className="text-center mb-4">
+          <p className="text-xs text-gray-500 mb-1">Voucher Code</p>
+          <div className="font-mono text-xl bg-gray-100 px-4 py-3 rounded-lg border border-gray-200 font-bold tracking-wider">
+            {redemption.code}
+          </div>
+        </div>
+
+        <div className="flex justify-center gap-2 mb-4">
+          <button
+            type="button"
+            onClick={() => onCopyCode(redemption.code)}
+            className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium text-sm"
+          >
+            Copy Code
+          </button>
+        </div>
+
+        <div className="space-y-2 text-sm">
+          <div className="flex justify-between">
+            <span className="text-gray-500">Status</span>
+            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+              displayStatus === 'used' ? 'bg-gray-100 text-gray-700' :
+              displayStatus === 'expired' ? 'bg-red-100 text-red-700' :
+              'bg-emerald-100 text-emerald-700'
+            }`}>
+              {displayStatus === 'expired' ? 'EXPIRED' : displayStatus.toUpperCase()}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-500">Redeemed</span>
+            <span className="text-gray-900">{redeemedAtStr}</span>
+          </div>
+          {usedAtStr && (
+            <div className="flex justify-between">
+              <span className="text-gray-500">Used</span>
+              <span className="text-gray-900">{usedAtStr}</span>
+            </div>
+          )}
+          <div className="flex justify-between">
+            <span className="text-gray-500">Expires</span>
+            <span className="text-gray-900">{expiryStr}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-500">Points Cost</span>
+            <span className="text-gray-900">{redemption.pointsCost ?? 0} pts</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function VoucherStorePage() {
   const { user } = useAuth()
@@ -17,6 +116,7 @@ export default function VoucherStorePage() {
   const [redeemingId, setRedeemingId] = useState(null)
   const [toast, setToast] = useState(null)
   const [redeemSuccessCode, setRedeemSuccessCode] = useState(null)
+  const [selectedRedemption, setSelectedRedemption] = useState(null)
 
   useEffect(() => {
     async function load() {
@@ -31,9 +131,27 @@ export default function VoucherStorePage() {
           return
         }
         setSeason(active)
-        const [voucherList, userBalance, userRedemptions] = await Promise.all([
+        
+        let userBalance = null
+        if (user) {
+          userBalance = await getOrCreateSeasonBalance(active.id, user)
+          
+          const needsRebuild = !userBalance || 
+            (userBalance.pointsEarned === 0 && userBalance.pointsSpent === 0 && userBalance.pointsBalance === 0)
+          
+          if (needsRebuild) {
+            console.log('[VoucherStore] Balance missing or zero, rebuilding from ledger...')
+            await rebuildSeasonBalanceFromLedger({ 
+              seasonId: active.id, 
+              uid: user.uid, 
+              userEmail: user.email 
+            })
+            userBalance = await getOrCreateSeasonBalance(active.id, user)
+          }
+        }
+        
+        const [voucherList, userRedemptions] = await Promise.all([
           listSeasonVouchers(active.id),
-          user ? getOrCreateSeasonBalance(active.id, user) : Promise.resolve(null),
           user ? listMyRedemptions(active.id, user.uid) : Promise.resolve([]),
         ])
         setVouchers(voucherList)
@@ -313,13 +431,22 @@ export default function VoucherStorePage() {
                                 <div className="font-mono text-xs bg-gray-50 px-2 py-1 rounded border border-dashed border-gray-300">
                                   {r.code}
                                 </div>
-                                <button
-                                  type="button"
-                                  onClick={() => handleCopyCode(r.code)}
-                                  className="text-xs font-medium text-emerald-600 hover:text-emerald-700"
-                                >
-                                  Copy code
-                                </button>
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedRedemption(r)}
+                                    className="text-xs font-medium text-emerald-600 hover:text-emerald-700"
+                                  >
+                                    View
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopyCode(r.code)}
+                                    className="text-xs font-medium text-emerald-600 hover:text-emerald-700"
+                                  >
+                                    Copy
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           )
@@ -371,6 +498,18 @@ export default function VoucherStorePage() {
         }`}>
           {toast.message}
         </div>
+      )}
+
+      {selectedRedemption && season && (
+        <VoucherDetailsModal
+          redemption={selectedRedemption}
+          seasonId={season.id}
+          onClose={() => setSelectedRedemption(null)}
+          onCopyCode={(code) => {
+            handleCopyCode(code)
+            showToast('Code copied!')
+          }}
+        />
       )}
     </div>
   )
