@@ -11,6 +11,7 @@ import {
 import { db } from '../lib/firebase'
 import { logAudit } from './audit.service'
 import { getActiveSeason } from './seasons.service'
+import { listBusinesses } from './businesses.service'
 
 export async function listSeasonVouchers(seasonId) {
   if (!seasonId) return []
@@ -172,4 +173,99 @@ export async function seedSampleVouchersForActiveSeason(adminUser) {
     meta: { seasonId, count: 12 }
   })
   return { seasonId, count: 12 }
+}
+
+const PERCENT_OFF_CONFIG = [
+  { percent: 5, points: 30 },
+  { percent: 10, points: 50 },
+  { percent: 15, points: 70 },
+  { percent: 20, points: 90 },
+]
+
+const STOCK_TOTAL_OPTIONS = [50, 75, 100, 150, 200]
+
+export async function seedPercentOffVouchersForActiveSeason(adminUser) {
+  const season = await getActiveSeason()
+  if (!season?.id) {
+    throw new Error('No active season found. Please create and activate a season first.')
+  }
+
+  const seasonId = season.id
+
+  let seasonEndDate
+  if (season.endAt) {
+    seasonEndDate = new Date(season.endAt)
+  } else {
+    seasonEndDate = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)
+  }
+
+  const expiryDate = new Date(seasonEndDate.getTime() - 3 * 24 * 60 * 60 * 1000)
+  const expiresAtTimestamp = Timestamp.fromDate(expiryDate)
+  const now = serverTimestamp()
+  const createdByEmail = adminUser?.email || ''
+
+  const { data: businesses } = await listBusinesses()
+  if (!businesses || businesses.length === 0) {
+    throw new Error('No businesses found. Please add businesses first.')
+  }
+
+  const selectedBusinesses = businesses.slice(0, 10)
+  let createdOrUpdated = 0
+
+  for (let i = 0; i < selectedBusinesses.length; i++) {
+    const business = selectedBusinesses[i]
+    const voucherId = `seed_pct_${String(i + 1).padStart(2, '0')}`
+    const config = PERCENT_OFF_CONFIG[i % PERCENT_OFF_CONFIG.length]
+    const stockTotal = STOCK_TOTAL_OPTIONS[i % STOCK_TOTAL_OPTIONS.length]
+
+    const title = `${config.percent}% OFF at ${business.name}`
+    const description = `Get ${config.percent}% discount at ${business.name} when you redeem this voucher.`
+    const terms = 'Valid for one transaction only. Present voucher code at checkout. Non-transferable. Subject to store policy.'
+
+    const voucherRef = doc(db, 'seasons', seasonId, 'vouchers', voucherId)
+    const snapshot = await getDoc(voucherRef)
+
+    if (snapshot.exists()) {
+      await updateDoc(voucherRef, {
+        title,
+        description,
+        partnerName: business.name,
+        partnerBusinessId: String(business.id),
+        terms,
+        pointsCost: config.points,
+        expiresAt: expiresAtTimestamp,
+        stockTotal,
+        isActive: true,
+        updatedAt: now
+      })
+    } else {
+      await setDoc(voucherRef, {
+        title,
+        description,
+        partnerName: business.name,
+        partnerBusinessId: String(business.id),
+        terms,
+        pointsCost: config.points,
+        expiresAt: expiresAtTimestamp,
+        stockTotal,
+        stockRemaining: stockTotal,
+        isActive: true,
+        createdAt: now,
+        updatedAt: now,
+        createdByEmail
+      })
+    }
+    createdOrUpdated++
+  }
+
+  await logAudit({
+    action: 'seed_percent_off_vouchers',
+    targetType: 'season',
+    targetId: seasonId,
+    adminUid: adminUser?.uid,
+    adminEmail: adminUser?.email,
+    meta: { seasonId, count: createdOrUpdated }
+  })
+
+  return { seasonId, count: createdOrUpdated }
 }

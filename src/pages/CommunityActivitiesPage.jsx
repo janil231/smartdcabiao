@@ -29,6 +29,18 @@ const TYPE_LABELS = {
   [ACTIVITY_TYPES.event]: 'Event',
 }
 
+const QUEST_TYPE_STYLES = {
+  visit: 'bg-blue-500/10 text-blue-700 border-blue-200',
+  buy: 'bg-purple-500/10 text-purple-700 border-purple-200',
+  participate: 'bg-emerald-500/10 text-emerald-700 border-emerald-200',
+}
+
+const QUEST_TYPE_LABELS = {
+  visit: 'VISIT',
+  buy: 'BUY',
+  participate: 'PARTICIPATE',
+}
+
 const IMPACT_UNIT_CONFIG = {
   kg_trash: { label: 'Kg waste', icon: '🗑️' },
   trees: { label: 'Trees', icon: '🌳' },
@@ -40,6 +52,10 @@ const IMPACT_UNIT_CONFIG = {
 function QuestCard({ quest, participation, onJoin, onCancel, isLoading, focused, distanceKm, extraBadge }) {
   const typeStyle = TYPE_STYLES[quest.category] || 'bg-gray-100 text-gray-700 border-gray-200'
   const typeLabel = TYPE_LABELS[quest.category] || 'Quest'
+  
+  const questType = quest.questType || 'participate'
+  const questTypeStyle = QUEST_TYPE_STYLES[questType] || QUEST_TYPE_STYLES.participate
+  const questTypeLabel = QUEST_TYPE_LABELS[questType] || 'PARTICIPATE'
 
   const slotsLeft = quest.capacity - (quest.reservedCount || 0)
   const isFull = slotsLeft <= 0
@@ -148,6 +164,24 @@ function QuestCard({ quest, participation, onJoin, onCancel, isLoading, focused,
   const impactText = impact && impact.unit && impact.amountPerCompletion && impact.label
     ? `+${impact.amountPerCompletion} ${impact.label}`
     : null
+  
+  const getRequirementText = () => {
+    if (questType === 'visit' && quest.visit) {
+      const { requiredMinutes, targetName } = quest.visit
+      return `Stay for ${requiredMinutes} minutes at ${targetName}`
+    }
+    if (questType === 'buy' && quest.buy) {
+      const { productName, businessName, minSpend } = quest.buy
+      let text = `Buy ${productName} at ${businessName}`
+      if (minSpend) {
+        text += ` (min ₱${minSpend})`
+      }
+      return text
+    }
+    return null
+  }
+  
+  const requirementText = getRequirementText()
 
   return (
     <article 
@@ -160,6 +194,9 @@ function QuestCard({ quest, participation, onJoin, onCancel, isLoading, focused,
         <div className="flex flex-wrap items-center gap-2">
           <span className={`inline-block w-fit rounded border px-2 py-0.5 text-xs font-medium uppercase tracking-wider ${typeStyle}`}>
             {typeLabel}
+          </span>
+          <span className={`inline-block w-fit rounded border px-2 py-0.5 text-xs font-medium uppercase tracking-wider ${questTypeStyle}`}>
+            {questTypeLabel}
           </span>
           {getStatusBadge()}
           {getRewardBadge()}
@@ -205,6 +242,14 @@ function QuestCard({ quest, participation, onJoin, onCancel, isLoading, focused,
               <dt className="shrink-0 font-medium">🌱</dt>
               <dd className="text-emerald-700 font-medium">
                 Impact: {impactText}
+              </dd>
+            </div>
+          )}
+          {requirementText && (
+            <div className="flex items-center gap-2">
+              <dt className="shrink-0 font-medium">📋</dt>
+              <dd className="text-blue-700 font-medium">
+                Requirement: {requirementText}
               </dd>
             </div>
           )}

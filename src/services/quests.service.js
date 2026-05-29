@@ -14,6 +14,8 @@ import {
 import { db } from '../lib/firebase'
 import { logAudit } from './audit.service'
 import { getActiveSeason } from './seasons.service'
+import { listBusinesses } from './businesses.service'
+import { listDestinations } from './destinations.service'
 import { generateCabiaoCoordinates } from '../constants/cabiaoGeo'
 
 const QUESTS_COLLECTION = 'quests'
@@ -603,4 +605,162 @@ export function recommendQuests({ quests, participations, limit = 2 }) {
   scoredQuests.sort((a, b) => b.score - a.score)
   
   return scoredQuests.slice(0, limit).map(s => s.quest)
+}
+
+const VISIT_REQUIRED_MINUTES = [10, 15, 20, 30, 45, 60]
+const BUY_PRODUCTS = [
+  'Local meal',
+  'Fresh produce',
+  'Pasalubong',
+  'Handicraft',
+  'Local snack',
+  'Fresh fruits',
+  'Vegetables',
+  'Coconut products',
+  'Rice products',
+  'Local beverage',
+]
+
+export async function seedVisitAndBuyQuestsForActiveSeason(adminUser) {
+  const activeSeason = await getActiveSeason()
+  
+  if (!activeSeason) {
+    throw new Error('No active season found. Please create and activate a season first.')
+  }
+  
+  const seasonId = activeSeason.id
+  const now = new Date()
+  
+  const { data: businesses } = await listBusinesses()
+  const { data: destinations } = await listDestinations()
+  
+  const allPlaces = [
+    ...businesses.map(b => ({ ...b, placeType: 'business' })),
+    ...destinations.map(d => ({ ...d, placeType: 'destination' })),
+  ]
+  
+  const visitQuests = []
+  const buyQuests = []
+  
+  for (let i = 0; i < 10; i++) {
+    const placeIndex = i % allPlaces.length
+    const place = allPlaces[placeIndex]
+    
+    const requiredMinutes = VISIT_REQUIRED_MINUTES[i % VISIT_REQUIRED_MINUTES.length]
+    const startDate = new Date(now)
+    startDate.setDate(startDate.getDate() + i * 2)
+    
+    const endDate = new Date(startDate)
+    endDate.setDate(endDate.getDate() + 10)
+    
+    const position = place.position && Array.isArray(place.position) && place.position.length === 2
+      ? place.position
+      : generateCabiaoCoordinates(i, 20)
+    
+    const questId = `seed_visit_${String(i + 1).padStart(2, '0')}`
+    
+    visitQuests.push({
+      seasonId,
+      questType: 'visit',
+      title: `Visit ${place.name || 'Local Place'} for ${requiredMinutes} minutes`,
+      description: `Stay at the location for at least ${requiredMinutes} minutes to complete this quest and earn QP.`,
+      category: 'visit',
+      points: 30 + (i * 5),
+      capacity: 100,
+      reservedCount: 0,
+      startAt: startDate.toISOString(),
+      endAt: endDate.toISOString(),
+      gracePeriodHours: 24,
+      status: 'active',
+      verification: 'lgu',
+      position,
+      barangay: place.barangay || null,
+      visit: {
+        targetType: place.placeType,
+        targetId: String(place.id),
+        targetName: place.name || 'Local Place',
+        requiredMinutes,
+      },
+      impact: {
+        unit: 'hours',
+        amountPerCompletion: requiredMinutes / 60,
+        label: `${requiredMinutes} minutes of exploration`,
+      },
+      createdAt: now.toISOString(),
+    })
+    
+    const questRef = doc(db, QUESTS_COLLECTION, questId)
+    await setDoc(questRef, visitQuests[i], { merge: true })
+  }
+  
+  for (let i = 0; i < 10; i++) {
+    const businessIndex = i % Math.max(businesses.length, 1)
+    const business = businesses[businessIndex] || { name: 'Local Business', id: i + 1 }
+    
+    const productName = BUY_PRODUCTS[i % BUY_PRODUCTS.length]
+    const minSpend = [50, 100, 150, null, null][i % 5]
+    
+    const startDate = new Date(now)
+    startDate.setDate(startDate.getDate() + i * 2 + 1)
+    
+    const endDate = new Date(startDate)
+    endDate.setDate(endDate.getDate() + 10)
+    
+    const position = business.position && Array.isArray(business.position) && business.position.length === 2
+      ? business.position
+      : generateCabiaoCoordinates(i + 10, 20)
+    
+    const questId = `seed_buy_${String(i + 1).padStart(2, '0')}`
+    
+    const questData = {
+      seasonId,
+      questType: 'buy',
+      title: `Buy ${productName} at ${business.name || 'Local Business'}`,
+      description: `Support local businesses. Purchase ${productName.toLowerCase()} to complete the quest and earn QP.${minSpend ? ` Minimum spend: ₱${minSpend}.` : ''}`,
+      category: 'buy',
+      points: 40 + (i * 6),
+      capacity: 100,
+      reservedCount: 0,
+      startAt: startDate.toISOString(),
+      endAt: endDate.toISOString(),
+      gracePeriodHours: 24,
+      status: 'active',
+      verification: 'merchant',
+      position,
+      barangay: business.barangay || null,
+      buy: {
+        businessId: String(business.id),
+        businessName: business.name || 'Local Business',
+        productName,
+        minQuantity: null,
+        minSpend,
+      },
+      impact: {
+        unit: 'co2_kg',
+        amountPerCompletion: 0.5,
+        label: 'Support for local economy',
+      },
+      createdAt: now.toISOString(),
+    }
+    
+    const questRef = doc(db, QUESTS_COLLECTION, questId)
+    await setDoc(questRef, questData, { merge: true })
+    
+    buyQuests.push(questData)
+  }
+  
+  await logAudit({
+    action: 'seed_visit_buy_quests',
+    targetType: 'season',
+    targetId: seasonId,
+    details: {
+      seasonId,
+      visitCount: 10,
+      buyCount: 10,
+      adminUid: adminUser?.uid ?? null,
+      adminEmail: adminUser?.email ?? null,
+    },
+  })
+  
+  return { success: true, visitCount: 10, buyCount: 10 }
 }

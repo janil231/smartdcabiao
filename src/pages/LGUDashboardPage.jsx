@@ -30,6 +30,7 @@ import {
   activateQuest,
   deactivateQuest,
   seedSampleQuestsForActiveSeason,
+  seedVisitAndBuyQuestsForActiveSeason,
   backfillQuestLocationsForSeason,
   rescheduleDemoQuestsForSeason,
 } from '../services/quests.service'
@@ -38,7 +39,7 @@ import { listPendingReviews, setReviewStatus } from '../services/reviews.service
 import { listTopByPoints, listTopByImpact, IMPACT_UNITS } from '../services/leaderboard.service'
 import { isWithinCabiaoBounds, CABIAO_BOUNDS } from '../constants/cabiaoGeo'
 import { listSeasonImpact, sumImpactByUnit } from '../services/impactLedger.service'
-import { seedSampleVouchersForActiveSeason } from '../services/vouchers.service'
+import { seedSampleVouchersForActiveSeason, seedPercentOffVouchersForActiveSeason } from '../services/vouchers.service'
 import { listSeasonRedemptions, adminMarkVoucherUsed } from '../services/voucherRedemptions.service'
 
 const TABS = {
@@ -1364,6 +1365,10 @@ export default function LGUDashboardPage() {
   const [seedLoading, setSeedLoading] = useState(false)
   const [showSeedVouchersConfirm, setShowSeedVouchersConfirm] = useState(false)
   const [seedVouchersLoading, setSeedVouchersLoading] = useState(false)
+  const [showSeedPercentOffConfirm, setShowSeedPercentOffConfirm] = useState(false)
+  const [seedPercentOffLoading, setSeedPercentOffLoading] = useState(false)
+  const [showSeedVisitBuyConfirm, setShowSeedVisitBuyConfirm] = useState(false)
+  const [seedVisitBuyLoading, setSeedVisitBuyLoading] = useState(false)
 
   const handleSeedSampleQuests = async () => {
     setSeedLoading(true)
@@ -1379,6 +1384,20 @@ export default function LGUDashboardPage() {
     }
   }
 
+  const handleSeedVisitBuyQuests = async () => {
+    setSeedVisitBuyLoading(true)
+    try {
+      const result = await seedVisitAndBuyQuestsForActiveSeason({ uid: user?.uid, email: user?.email })
+      showToast(`Seeded ${result.visitCount} VISIT and ${result.buyCount} BUY quests!`)
+      setShowSeedVisitBuyConfirm(false)
+      loadData()
+    } catch (error) {
+      showToast(error.message, 'error')
+    } finally {
+      setSeedVisitBuyLoading(false)
+    }
+  }
+
   const handleSeedSampleVouchers = async () => {
     setSeedVouchersLoading(true)
     try {
@@ -1390,6 +1409,20 @@ export default function LGUDashboardPage() {
       showToast(error.message, 'error')
     } finally {
       setSeedVouchersLoading(false)
+    }
+  }
+
+  const handleSeedPercentOffVouchers = async () => {
+    setSeedPercentOffLoading(true)
+    try {
+      const result = await seedPercentOffVouchersForActiveSeason({ uid: user?.uid, email: user?.email })
+      showToast(`Seeded ${result.count} %OFF vouchers.`)
+      setShowSeedPercentOffConfirm(false)
+      loadData()
+    } catch (error) {
+      showToast(error.message, 'error')
+    } finally {
+      setSeedPercentOffLoading(false)
     }
   }
 
@@ -1916,6 +1949,12 @@ export default function LGUDashboardPage() {
                     Seed 10 Sample Quests
                   </button>
                   <button
+                    onClick={() => setShowSeedVisitBuyConfirm(true)}
+                    className="px-3 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 text-sm font-medium"
+                  >
+                    Seed Visit & Buy Quests (20)
+                  </button>
+                  <button
                     onClick={() => setShowCleanupConfirm(true)}
                     className="px-3 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 text-sm font-medium"
                   >
@@ -2147,16 +2186,25 @@ export default function LGUDashboardPage() {
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden p-6">
                 <h2 className="text-lg font-semibold text-gray-900 mb-2">Voucher Store (Active Season)</h2>
                 <p className="text-gray-600 text-sm mb-6">
-                  Seed 12 sample vouchers for the active season so the Voucher Store page shows available vouchers.
+                  Seed sample vouchers for the active season so the Voucher Store page shows available vouchers.
                 </p>
                 {isUserAdmin ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowSeedVouchersConfirm(true)}
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium"
-                  >
-                    Seed Sample Vouchers
-                  </button>
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowSeedVouchersConfirm(true)}
+                      className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium"
+                    >
+                      Seed Sample Vouchers
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowSeedPercentOffConfirm(true)}
+                      className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium"
+                    >
+                      Seed 10 %OFF Vouchers
+                    </button>
+                  </div>
                 ) : (
                   <p className="text-gray-500 text-sm">Admin access required to seed vouchers.</p>
                 )}
@@ -2340,6 +2388,37 @@ export default function LGUDashboardPage() {
         </div>
       )}
 
+      {showSeedPercentOffConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Seed 10 %OFF Vouchers</h3>
+            <p className="text-gray-600 mb-4">
+              Creates/updates 10 percent-off vouchers for partner stores (seed_pct_01 … seed_pct_10).
+              Each voucher is tied to a real business from the database.
+            </p>
+            <p className="text-sm text-yellow-600 mb-6">
+              Running this again is safe - existing stock remaining will not be reset.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowSeedPercentOffConfirm(false)}
+                disabled={seedPercentOffLoading}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSeedPercentOffVouchers}
+                disabled={seedPercentOffLoading}
+                className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:bg-gray-300"
+              >
+                {seedPercentOffLoading ? 'Seeding...' : 'Seed 10 %OFF Vouchers'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showSeedConfirm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl max-w-md w-full p-6">
@@ -2365,6 +2444,43 @@ export default function LGUDashboardPage() {
                 className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-300"
               >
                 {seedLoading ? 'Seeding...' : 'Seed 10 Quests'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSeedVisitBuyConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Seed Visit & Buy Quests</h3>
+            <p className="text-gray-600 mb-4">
+              This will create 20 new quests for the currently active season:
+            </p>
+            <ul className="text-sm text-gray-600 mb-2 list-disc list-inside">
+              <li>10 VISIT quests - Stay at a location for X minutes</li>
+              <li>10 BUY quests - Buy a product at a local business</li>
+            </ul>
+            <p className="text-sm text-gray-600 mb-4">
+              Quest IDs: seed_visit_01 to seed_visit_10, seed_buy_01 to seed_buy_10
+            </p>
+            <p className="text-sm text-yellow-600 mb-6">
+              Running this again is safe - it will update existing quests without creating duplicates.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowSeedVisitBuyConfirm(false)}
+                disabled={seedVisitBuyLoading}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSeedVisitBuyQuests}
+                disabled={seedVisitBuyLoading}
+                className="flex-1 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:bg-gray-300"
+              >
+                {seedVisitBuyLoading ? 'Seeding...' : 'Seed 20 Quests'}
               </button>
             </div>
           </div>
