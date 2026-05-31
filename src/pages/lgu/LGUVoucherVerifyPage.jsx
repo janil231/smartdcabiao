@@ -170,7 +170,7 @@ export default function LGUVoucherVerifyPage() {
   return (
     <div className="min-h-screen flex flex-col">
       <Navbar />
-      <main className="flex-1 pb-20 md:pb-0">
+      <main className="flex-1 pb-mobile-nav">
         <div className="max-w-2xl mx-auto px-4 py-8">
           <div className="mb-6">
             <Link to="/lgu" className="text-emerald-600 hover:underline text-sm mb-2 inline-block">

@@ -158,7 +158,7 @@ export default function DestinationDetails() {
     return (
       <div className="flex min-h-screen flex-col">
         <Navbar />
-        <main className="flex-1 pb-20 md:pb-0">
+        <main className="flex-1 pb-mobile-nav">
           <div className="animate-pulse">
             <div className="h-64 bg-gray-200" />
             <div className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
@@ -186,7 +186,7 @@ export default function DestinationDetails() {
     return (
       <div className="flex min-h-screen flex-col">
         <Navbar />
-        <main className="flex-1 pb-20 md:pb-0">
+        <main className="flex-1 pb-mobile-nav">
           <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
             <div className="text-center">
               <div className="inline-flex items-center justify-center w-16 h-16 bg-gray-100 rounded-full mb-4">
@@ -235,7 +235,7 @@ export default function DestinationDetails() {
         </div>
       </div>
 
-      <main className="flex-1 pb-20 md:pb-0">
+      <main className="flex-1 pb-mobile-nav">
         <div className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
           {/* Header */}
           <div className="mb-8">

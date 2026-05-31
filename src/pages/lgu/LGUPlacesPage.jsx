@@ -399,7 +399,7 @@ export default function LGUPlacesPage() {
     <div className="min-h-screen bg-gray-50">
       <Navbar />
       
-      <main className="flex-1 pb-20 md:pb-0">
+      <main className="flex-1 pb-mobile-nav">
         <div className="max-w-7xl mx-auto px-4 py-8">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
             <div>

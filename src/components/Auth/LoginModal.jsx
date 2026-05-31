@@ -107,7 +107,7 @@ export default function LoginModal({ isOpen, onClose }) {
             onChange={(e) => setEmail(e.target.value)}
             required
             autoComplete="email"
-            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-3 text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
           />
         </div>
         <div>
@@ -122,7 +122,7 @@ export default function LoginModal({ isOpen, onClose }) {
             required
             minLength={6}
             autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-3 text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
           />
           {mode === 'signup' && (
             <p className="mt-1 text-xs text-gray-500">At least 6 characters</p>
@@ -131,7 +131,7 @@ export default function LoginModal({ isOpen, onClose }) {
         <button
           type="submit"
           disabled={loading}
-          className="w-full rounded-lg bg-emerald-600 py-2.5 font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+          className="w-full rounded-lg bg-emerald-600 py-3 min-h-[44px] font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
         >
           {loading ? 'Please wait...' : mode === 'login' ? 'Log in' : 'Sign up'}
         </button>
@@ -142,7 +142,7 @@ export default function LoginModal({ isOpen, onClose }) {
           type="button"
           onClick={handleGoogle}
           disabled={loading}
-          className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white py-3 min-h-[44px] text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
         >
           <svg className="h-5 w-5" viewBox="0 0 24 24">
             <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -156,7 +156,7 @@ export default function LoginModal({ isOpen, onClose }) {
           type="button"
           onClick={handleFacebook}
           disabled={loading}
-          className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white py-3 min-h-[44px] text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
         >
           <svg className="h-5 w-5" fill="#1877F2" viewBox="0 0 24 24">
             <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
@@ -229,9 +229,9 @@ export default function LoginModal({ isOpen, onClose }) {
   )
 
   const modal = (
-    <div className="fixed inset-0 z-[100] flex min-h-screen items-center justify-center p-4 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="login-modal-title">
+    <div className="fixed inset-0 z-[100] flex items-stretch sm:items-center justify-center p-0 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="login-modal-title">
       <div className="absolute inset-0 bg-black/50" onClick={handleClose} aria-hidden />
-      <div className="relative z-10 w-full max-w-md rounded-xl bg-white p-6 shadow-xl max-h-[calc(100vh-2rem)] overflow-y-auto">
+      <div className="relative z-10 w-full h-full sm:h-auto sm:max-w-md bg-white sm:rounded-2xl p-6 sm:shadow-xl overflow-y-auto pb-[env(safe-area-inset-bottom)]">
         <div className="flex items-center justify-between">
           <h2 id="login-modal-title" className="text-xl font-semibold text-gray-900">
             {mode === 'login' ? 'Log in' : mode === 'signup' ? 'Sign up' : 'Reset Password'}

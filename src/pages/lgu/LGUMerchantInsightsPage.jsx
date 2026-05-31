@@ -175,7 +175,7 @@ export default function LGUMerchantInsightsPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar />
-      <main className="flex-1 pb-20 md:pb-0">
+      <main className="flex-1 pb-mobile-nav">
         <div className="max-w-6xl mx-auto px-4 py-8">
           <div className="mb-4">
             <Link to="/lgu/places" className="text-sm text-emerald-600 hover:underline">

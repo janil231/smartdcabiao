@@ -113,7 +113,7 @@ export default function BusinessDetailPage() {
     return (
       <div className="flex min-h-screen flex-col">
         <Navbar />
-        <main className="flex-1 pb-20 md:pb-0">
+        <main className="flex-1 pb-mobile-nav">
           <div className="animate-pulse">
             <div className="h-64 bg-gray-200" />
             <div className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
@@ -141,7 +141,7 @@ export default function BusinessDetailPage() {
     return (
       <div className="flex min-h-screen flex-col">
         <Navbar />
-        <main className="flex-1 pb-20 md:pb-0">
+        <main className="flex-1 pb-mobile-nav">
           <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
             <div className="text-center">
               <h1 className="text-2xl font-bold text-gray-900">Business Not Found</h1>
@@ -177,7 +177,7 @@ export default function BusinessDetailPage() {
   return (
     <div className="flex min-h-screen flex-col">
       <Navbar />
-      <main className="flex-1 pb-20 md:pb-0">
+      <main className="flex-1 pb-mobile-nav">
         {/* Breadcrumb */}
         <div className="bg-white border-b border-gray-200">
           <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6 lg:px-8">

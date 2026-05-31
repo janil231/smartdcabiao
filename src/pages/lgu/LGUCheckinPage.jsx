@@ -321,7 +321,7 @@ export default function LGUCheckinPage() {
     <div className="min-h-screen bg-gray-50">
       <Navbar />
       
-      <main className="flex-1 pb-20 md:pb-0">
+      <main className="flex-1 pb-mobile-nav">
         <div className="max-w-2xl mx-auto px-4 py-8">
           <div className="mb-8">
             <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">

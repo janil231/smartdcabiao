@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { isAdmin } from '../services/adminRole.service'
@@ -121,6 +122,23 @@ export default function Navbar() {
     }
   }, [location.state?.openLogin])
 
+  useEffect(() => {
+    setMenuOpen(false)
+  }, [location.pathname])
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const onKey = (e) => {
+      if (e.key === 'Escape') setMenuOpen(false)
+    }
+    document.body.style.overflow = 'hidden'
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = ''
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [menuOpen])
+
   const visibleMainLinks = mainLinks.filter(link => {
     if (link.adminOnly && !isUserAdmin) return false
     if (link.authOnly && !user) return false
@@ -137,11 +155,123 @@ export default function Navbar() {
 
   const handleLogout = () => {
     setUserMenuOpen(false)
+    setMenuOpen(false)
     logout()
   }
 
+  const closeMenu = () => setMenuOpen(false)
+
+  const mobileDrawer =
+    menuOpen &&
+    createPortal(
+      <div className="lg:hidden fixed inset-0 z-[200]" role="dialog" aria-modal="true" aria-label="Navigation menu">
+        <div
+          className="absolute inset-0 bg-black/60"
+          onClick={closeMenu}
+          aria-hidden
+        />
+        <div className="absolute top-0 right-0 bottom-0 w-[85vw] max-w-sm bg-white shadow-2xl flex flex-col animate-slide-in-right pb-[env(safe-area-inset-bottom)]">
+          <div className="flex items-center justify-between p-4 border-b border-gray-200 shrink-0">
+            <span className="font-bold text-lg text-emerald-700">Menu</span>
+            <button
+              type="button"
+              onClick={closeMenu}
+              className="min-w-11 min-h-11 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-600"
+              aria-label="Close menu"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+
+          {user && (
+            <div className="p-4 border-b border-gray-200 bg-gray-50 shrink-0">
+              <p className="text-xs text-gray-500 mb-1">Signed in as</p>
+              <p className="text-sm font-semibold text-gray-900 truncate">{user.email}</p>
+            </div>
+          )}
+
+          <nav className="flex-1 min-h-0 overflow-y-auto p-2">
+            {[...visibleMainLinks, ...visibleMoreLinks].map((link) => {
+              const isActive = location.pathname === link.to
+              return (
+                <Link
+                  key={link.label}
+                  to={link.to}
+                  onClick={closeMenu}
+                  className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium text-gray-800 min-h-[44px] transition ${
+                    isActive ? 'bg-emerald-50 text-emerald-700' : 'hover:bg-emerald-50'
+                  }`}
+                >
+                  {link.label}
+                </Link>
+              )
+            })}
+
+            <div className="h-px bg-gray-200 my-2 mx-2" />
+
+            <Link
+              to="/register-business"
+              onClick={closeMenu}
+              className="flex items-center gap-3 px-4 py-3 rounded-lg font-medium text-emerald-700 min-h-[44px] hover:bg-emerald-50"
+            >
+              List My Business
+            </Link>
+
+            {user ? (
+              <>
+                <Link
+                  to="/profile"
+                  onClick={closeMenu}
+                  className="flex items-center gap-3 px-4 py-3 rounded-lg font-medium text-gray-800 min-h-[44px] hover:bg-emerald-50"
+                >
+                  My Profile
+                </Link>
+                {isUserAdmin && (
+                  <Link
+                    to="/lgu"
+                    onClick={closeMenu}
+                    className="flex items-center gap-3 px-4 py-3 rounded-lg font-medium text-emerald-700 min-h-[44px] hover:bg-emerald-50"
+                  >
+                    LGU Admin
+                  </Link>
+                )}
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-lg font-medium text-red-600 min-h-[44px] hover:bg-red-50 text-left"
+                >
+                  Sign Out
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  closeMenu()
+                  setAuthModalOpen(true)
+                }}
+                className="w-[calc(100%-1rem)] mx-2 flex items-center justify-center px-4 py-3 rounded-xl bg-emerald-600 text-white font-semibold min-h-[44px] hover:bg-emerald-700"
+              >
+                Sign In
+              </button>
+            )}
+          </nav>
+
+          <div className="p-4 border-t border-gray-200 shrink-0">
+            <SearchBar placeholder="Search..." />
+            <p className="text-xs text-gray-400 text-center mt-3">SMARTDCABIAO</p>
+          </div>
+        </div>
+      </div>,
+      document.body
+    )
+
   return (
-    <header className={`sticky top-0 z-50 w-full shadow-sm ${
+    <>
+    <header className={`sticky top-0 z-30 w-full shadow-sm ${
       isHomePage 
         ? 'border-b border-white/10 bg-slate-900/55 backdrop-blur-lg' 
         : 'border-b border-gray-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80'
@@ -150,16 +280,16 @@ export default function Navbar() {
         <nav className="flex h-16 items-center justify-between gap-4">
           <Link
             to="/"
-            className={`flex items-center gap-2 text-lg font-bold tracking-tight shrink-0 ${
+            className={`flex items-center gap-1.5 sm:gap-2 text-base sm:text-lg font-bold tracking-tight shrink-0 min-w-0 ${
               isHomePage ? 'text-white' : 'text-emerald-700'
             }`}
           >
-            <span className={`rounded px-2 py-0.5 ${
+            <span className={`rounded px-2 py-0.5 text-sm sm:text-base ${
               isHomePage ? 'bg-white text-emerald-700' : 'bg-emerald-600 text-white'
             }`}>
               SMART
             </span>
-            <span className="hidden sm:inline">DCABIAO</span>
+            <span className="hidden min-[400px]:inline truncate">DCABIAO</span>
           </Link>
 
           {/* Desktop search */}
@@ -271,112 +401,25 @@ export default function Navbar() {
           {/* Mobile menu button */}
           <button
             type="button"
-            className={`lg:hidden inline-flex items-center justify-center rounded-lg p-2 transition shrink-0 ${
-              isHomePage 
-                ? 'text-white hover:bg-white/10' 
+            className={`lg:hidden inline-flex items-center justify-center rounded-lg min-w-11 min-h-11 transition shrink-0 ${
+              isHomePage
+                ? 'text-white hover:bg-white/10'
                 : 'text-gray-600 hover:bg-gray-100'
             }`}
-            aria-label="Toggle menu"
-            onClick={() => setMenuOpen(!menuOpen)}
+            aria-label="Open menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen(true)}
           >
-            <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              {menuOpen ? (
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              ) : (
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              )}
+            <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
         </nav>
       </div>
 
-      {/* Mobile menu */}
-      {menuOpen && (
-        <div className={`lg:hidden border-t px-4 py-4 ${
-          isHomePage 
-            ? 'border-white/10 bg-slate-900/90' 
-            : 'border-gray-200 bg-white'
-        }`}>
-          <div className="mb-4">
-            <SearchBar placeholder="Search businesses, destinations..." />
-          </div>
-          <ul className="flex flex-col gap-1">
-            {[...mainLinks, ...moreLinks].map((link) => {
-              if (link.adminOnly && !isUserAdmin) return null
-              if (link.authOnly && !user) return null
-              
-              const isActive = location.pathname === link.to
-              
-              return (
-                <li key={link.label}>
-                  <Link
-                    to={link.to}
-                    className={`block rounded-lg px-3 py-2.5 text-sm font-medium transition ${
-                      isActive
-                        ? (isHomePage ? 'bg-white/10 text-white' : 'bg-emerald-50 text-emerald-700')
-                        : (isHomePage ? 'text-white/80 hover:bg-white/10' : 'text-gray-600 hover:bg-gray-50')
-                    }`}
-                  >
-                    {link.label}
-                  </Link>
-                </li>
-              )
-            })}
-            <li className="border-t border-white/10 my-2" />
-            {user ? (
-              <>
-                <li>
-                  <span className={`block px-3 py-2 text-xs truncate ${
-                    isHomePage ? 'text-white/60' : 'text-gray-500'
-                  }`}>{user.email}</span>
-                </li>
-                {isUserAdmin && (
-                  <li>
-                    <Link to="/lgu" className={`block rounded-lg px-3 py-2.5 text-sm font-medium transition ${
-                      isHomePage ? 'text-white/80 hover:bg-white/10' : 'text-gray-600 hover:bg-gray-50'
-                    }`}>
-                      Admin Dashboard
-                    </Link>
-                  </li>
-                )}
-                <li>
-                  <Link to="/profile" className={`block rounded-lg px-3 py-2.5 text-sm font-medium transition ${
-                    isHomePage ? 'text-white/80 hover:bg-white/10' : 'text-gray-600 hover:bg-gray-50'
-                  }`}>
-                    Profile
-                  </Link>
-                </li>
-                <li>
-                  <button
-                    type="button"
-                    onClick={() => { setMenuOpen(false); logout(); }}
-                    className={`block w-full text-left rounded-lg px-3 py-2.5 text-sm font-medium transition ${
-                      isHomePage ? 'text-red-300 hover:bg-white/10' : 'text-red-600 hover:bg-red-50'
-                    }`}
-                  >
-                    Logout
-                  </button>
-                </li>
-              </>
-            ) : (
-              <li>
-                <button
-                  type="button"
-                  onClick={() => { setMenuOpen(false); setAuthModalOpen(true); }}
-                  className={`block w-full rounded-lg px-3 py-2.5 text-center font-medium transition ${
-                    isHomePage 
-                      ? 'bg-white/20 text-white hover:bg-white/30' 
-                      : 'bg-emerald-600 text-white hover:bg-emerald-700'
-                  }`}
-                >
-                  Login
-                </button>
-              </li>
-            )}
-          </ul>
-        </div>
-      )}
       <LoginModal isOpen={authModalOpen} onClose={() => setAuthModalOpen(false)} />
     </header>
+    {mobileDrawer}
+    </>
   )
 }

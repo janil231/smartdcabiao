@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, ZoomControl, useMap } from 'react-leaflet'
+import { Link } from 'react-router-dom'
+import { useIsMobile } from '../hooks/useIsMobile'
 import L from 'leaflet'
 import Navbar from '../components/Navbar'
 import LoginModal from '../components/Auth/LoginModal'
@@ -13,10 +15,8 @@ import {
 import { CABIAO_CENTER, CABIAO_DEFAULT_ZOOM } from '../constants/cabiaoGeo'
 import useMapFilters from '../features/map/useMapFilters'
 import MapFilterBar from '../features/map/MapFilterBar'
-import MapResults from '../features/map/MapResults'
 import MapUtilities from '../features/map/MapUtilities'
 import InvalidateMapSize from '../features/map/InvalidateMapSize'
-import MapInitialView from '../features/map/MapInitialView'
 import { getAllPlaces, clearPlacesCache } from '../features/map/mapHelpers'
 import { getBusinessById } from '../services/businesses.service'
 import 'leaflet/dist/leaflet.css'
@@ -49,6 +49,31 @@ const TYPE_COLORS = {
 }
 
 const FOCUS_ZOOM = 17
+
+/** Same view as mobile ↻ reset and desktop reset fallback (CABIAO_CENTER + CABIAO_DEFAULT_ZOOM). */
+const DEFAULT_MAP_VIEW = {
+  center: CABIAO_CENTER,
+  zoom: CABIAO_DEFAULT_ZOOM,
+}
+
+/** Sets initial map view once; does not refit when places load (avoids bad fitBounds zoom-out). */
+function ApplyDefaultMapView() {
+  const map = useMap()
+  const [searchParams] = useSearchParams()
+  const applied = useRef(false)
+
+  useEffect(() => {
+    if (applied.current) return
+    if (searchParams.get('focus')) {
+      applied.current = true
+      return
+    }
+    map.setView(DEFAULT_MAP_VIEW.center, DEFAULT_MAP_VIEW.zoom, { animate: false })
+    applied.current = true
+  }, [map, searchParams])
+
+  return null
+}
 
 function getMarkerIcon(type) {
   const style = TYPE_STYLES[type] || TYPE_STYLES[BUSINESS_TYPES.shop]
@@ -83,17 +108,44 @@ function FocusOnPlace() {
   return null
 }
 
+function MapFlyTo({ target, zoom = 16 }) {
+  const map = useMap()
+  useEffect(() => {
+    if (target && Array.isArray(target) && target.length >= 2) {
+      map.flyTo(target, zoom, { duration: 0.8 })
+    }
+  }, [target, zoom, map])
+  return null
+}
+
+function MapResizer() {
+  const map = useMap()
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      map.invalidateSize()
+    }, 100)
+    const onResize = () => map.invalidateSize()
+    window.addEventListener('resize', onResize)
+    return () => {
+      clearTimeout(timer)
+      window.removeEventListener('resize', onResize)
+    }
+  }, [map])
+  return null
+}
+
 export default function MapPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const { t } = useLanguage()
   const [authModalOpen, setAuthModalOpen] = useState(false)
   const [selectedPOI, setSelectedPOI] = useState(null)
-  const [showResults, setShowResults] = useState(false)
   const [locationMessage, setLocationMessage] = useState('')
   const [allPlaces, setAllPlaces] = useState([])
   const [loading, setLoading] = useState(true)
-  
+  const [flyTarget, setFlyTarget] = useState(null)
+  const isMobile = useIsMobile()
+
   const { filters, setFilter, clearFilters, hasActiveFilters } = useMapFilters()
 
   useEffect(() => {
@@ -133,11 +185,6 @@ export default function MapPage() {
     setSelectedPOI(poi)
   }
 
-  const handleMapFocus = (poi) => {
-    setSelectedPOI(poi)
-    // This will be handled by MapUtilities if needed
-  }
-
   const handleLocationFound = () => {
     setLocationMessage('')
   }
@@ -163,47 +210,87 @@ export default function MapPage() {
     }
   }
 
-  return (
-    <div className="flex flex-col min-h-screen">
-      <Navbar />
-      
-      {/* Filters */}
-      <MapFilterBar
-        filters={filters}
-        setFilter={setFilter}
-        clearFilters={clearFilters}
-        hasActiveFilters={hasActiveFilters}
-        resultsCount={filteredPlaces.length}
-      />
+  const handleMobileLocate = () => {
+    if (!navigator.geolocation) {
+      handleLocationError('Geolocation is not supported by your browser')
+      return
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setFlyTarget([pos.coords.latitude, pos.coords.longitude])
+        handleLocationFound()
+      },
+      () => handleLocationError('Could not get your location. Please enable location access.'),
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
+  }
 
-      {/* Location Message */}
+  const handleMobileReset = () => {
+    setFlyTarget(DEFAULT_MAP_VIEW.center)
+    setSelectedPOI(null)
+  }
+
+  const detailPath = (poi) =>
+    poi.type === BUSINESS_TYPES.attraction ? `/destinations/${poi.id}` : `/businesses/${poi.id}`
+
+  const filterBarProps = {
+    filters,
+    setFilter,
+    clearFilters,
+    hasActiveFilters,
+    resultsCount: filteredPlaces.length,
+    loading,
+  }
+
+  return (
+    <div className="flex flex-col min-h-0 h-[100dvh] max-h-[100dvh] overflow-hidden sm:min-h-screen sm:h-auto sm:max-h-none">
+      <Navbar />
+
+      <div className="hidden sm:block shrink-0">
+        <MapFilterBar {...filterBarProps} />
+      </div>
+
       {locationMessage && (
-        <div className="absolute top-20 left-1/2 z-50 -translate-x-1/2 mx-4 max-w-sm rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 shadow-lg">
-          {locationMessage}
+        <div className="pointer-events-none fixed top-20 left-1/2 z-[600] -translate-x-1/2 mx-4 max-w-sm sm:absolute">
+          <p className="pointer-events-auto rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 shadow-lg">
+            {locationMessage}
+          </p>
         </div>
       )}
 
-      {/* Main Content */}
-      <div className="flex-1 min-h-0 flex">
-        {/* Map Container */}
-        <div className="flex-1 min-h-0 relative">
+      <div className="relative flex-1 min-h-0 w-full h-[calc(100dvh-8rem)] sm:h-auto sm:flex sm:min-h-0 sm:flex-1">
+        <div className="absolute inset-0 sm:relative sm:flex-1 sm:min-h-0 sm:h-full map-mobile-chrome">
+          <div className="sm:hidden absolute inset-0 z-[400] pointer-events-none">
+            <MapFilterBar {...filterBarProps} />
+          </div>
+
           <MapContainer
-            center={CABIAO_CENTER}
-            zoom={CABIAO_DEFAULT_ZOOM}
+            center={DEFAULT_MAP_VIEW.center}
+            zoom={DEFAULT_MAP_VIEW.zoom}
             className="h-full w-full"
-            scrollWheelZoom={true}
+            style={{ height: '100%', width: '100%' }}
+            scrollWheelZoom
+            zoomControl={false}
           >
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
             
+            {!isMobile && <ZoomControl position="topright" />}
+
             {filteredPlaces.map((poi) => (
               <Marker
                 key={`${poi.poiType}-${poi.id}`}
                 position={poi.position}
                 icon={getMarkerIcon(poi.type)}
+                eventHandlers={{
+                  click: () => {
+                    if (isMobile) handlePOISelect(poi)
+                  },
+                }}
               >
+                {!isMobile && (
                 <Popup>
                   <div className="min-w-[200px] text-left">
                     <div className="flex items-start justify-between gap-2">
@@ -241,26 +328,110 @@ export default function MapPage() {
                     </div>
                   </div>
                 </Popup>
+                )}
               </Marker>
             ))}
-            
-            <MapInitialView places={filteredPlaces} />
+
+            <MapFlyTo
+              target={flyTarget}
+              zoom={
+                flyTarget &&
+                flyTarget[0] === DEFAULT_MAP_VIEW.center[0] &&
+                flyTarget[1] === DEFAULT_MAP_VIEW.center[1]
+                  ? DEFAULT_MAP_VIEW.zoom
+                  : 16
+              }
+            />
+            <ApplyDefaultMapView />
             <FocusOnPlace />
             <InvalidateMapSize />
-            <MapUtilities 
+            <MapResizer />
+            <MapUtilities
               pois={selectedPOI ? [selectedPOI] : filteredPlaces}
               onLocationFound={handleLocationFound}
               onLocationError={handleLocationError}
+              showLeafletControls={!isMobile}
             />
           </MapContainer>
+
+          <div className="absolute bottom-4 right-3 z-[400] flex flex-col gap-2 sm:hidden">
+            <button
+              type="button"
+              onClick={handleMobileLocate}
+              className="w-12 h-12 bg-white rounded-full shadow-lg border border-gray-200 flex items-center justify-center text-lg hover:bg-gray-50"
+              aria-label="Locate me"
+            >
+              📍
+            </button>
+            <button
+              type="button"
+              onClick={handleMobileReset}
+              className="w-12 h-12 bg-white rounded-full shadow-lg border border-gray-200 flex items-center justify-center text-lg hover:bg-gray-50"
+              aria-label="Reset to Cabiao"
+            >
+              ↻
+            </button>
+            <button
+              type="button"
+              onClick={handleAddPlace}
+              className="w-14 h-14 bg-emerald-600 rounded-full shadow-xl flex items-center justify-center text-white text-2xl hover:bg-emerald-700"
+              aria-label="Add a place"
+            >
+              +
+            </button>
+          </div>
 
           <button
             type="button"
             onClick={handleAddPlace}
-            className="absolute bottom-24 right-4 z-[1000] inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+            className="hidden sm:inline-flex absolute bottom-6 right-4 z-[1000] items-center gap-2 rounded-full bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 min-h-[44px]"
           >
             {t('registerBusiness.addAPlace')}
           </button>
+
+          {isMobile && selectedPOI && (
+            <>
+              <div
+                className="fixed inset-0 z-[450] bg-black/30 sm:hidden"
+                onClick={() => setSelectedPOI(null)}
+                aria-hidden
+              />
+              <div className="fixed inset-x-0 bottom-16 z-[500] bg-white rounded-t-3xl shadow-2xl border-t border-gray-200 max-h-[58vh] overflow-y-auto animate-slide-up-sheet pb-[env(safe-area-inset-bottom)] sm:hidden">
+                <div className="sticky top-0 bg-white pt-3 pb-2 flex justify-center">
+                  <div className="w-12 h-1.5 bg-gray-300 rounded-full" />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedPOI(null)}
+                  className="absolute top-3 right-3 w-11 h-11 bg-gray-100 rounded-full flex items-center justify-center text-gray-600"
+                  aria-label="Close"
+                >
+                  ✕
+                </button>
+                <div className="px-4 pb-5 pt-1">
+                  <span
+                    className={`inline-block rounded px-2 py-0.5 text-xs font-medium text-white ${
+                      TYPE_COLORS[selectedPOI.type]?.bg || 'bg-gray-500'
+                    }`}
+                  >
+                    {selectedPOI.category}
+                  </span>
+                  <h3 className="text-lg font-bold text-gray-900 mt-2 pr-10">{selectedPOI.name}</h3>
+                  <p className="text-sm text-gray-600 mt-1 line-clamp-3">{selectedPOI.description}</p>
+                  <p className="text-xs text-gray-500 mt-2">
+                    📍 {selectedPOI.barangay || selectedPOI.address?.split(',')[0] || 'Cabiao'}
+                  </p>
+                  <Link
+                    to={detailPath(selectedPOI)}
+                    onClick={() => setSelectedPOI(null)}
+                    className="mt-4 block w-full text-center bg-emerald-600 text-white py-3 min-h-[44px] rounded-xl font-semibold hover:bg-emerald-700"
+                  >
+                    View Details
+                  </Link>
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Desktop Results List */}
@@ -347,34 +518,6 @@ export default function MapPage() {
         </aside>
       </div>
 
-      {/* Mobile Results Drawer */}
-      <div className="lg:hidden">
-        <div className="fixed bottom-4 right-4 z-30">
-          <button
-            type="button"
-            onClick={() => setShowResults(true)}
-            className="rounded-full bg-emerald-600 p-3 text-white shadow-lg hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
-          >
-            <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-            {filteredPlaces.length > 0 && (
-              <span className="absolute -top-1 -right-1 rounded-full bg-red-500 px-1.5 py-0.5 text-xs font-bold text-white">
-                {filteredPlaces.length}
-              </span>
-            )}
-          </button>
-        </div>
-        
-        <MapResults
-          items={filteredPlaces}
-          selectedPOI={selectedPOI}
-          onPOISelect={handlePOISelect}
-          onMapFocus={handleMapFocus}
-          isOpen={showResults}
-          onClose={() => setShowResults(false)}
-        />
-      </div>
       <LoginModal isOpen={authModalOpen} onClose={() => setAuthModalOpen(false)} />
     </div>
   )

@@ -251,7 +251,7 @@ export default function ProfilePage() {
     <div className="min-h-screen bg-gray-50">
       <Navbar />
       
-      <main className="flex-1 pb-20 md:pb-0">
+      <main className="flex-1 pb-mobile-nav">
         <div className="max-w-4xl mx-auto px-4 py-8">
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
             <div className="flex items-center gap-4">

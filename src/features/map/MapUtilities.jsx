@@ -235,7 +235,7 @@ export function LocateMe({ onLocationFound, onLocationError }) {
 }
 
 // Combine both utilities in one component for easier usage
-export default function MapUtilities({ pois, onLocationFound, onLocationError }) {
+export default function MapUtilities({ pois, onLocationFound, onLocationError, showLeafletControls = true }) {
   const [fitToResultsEnabled, setFitToResultsEnabled] = useState(false)
   
   // Expose fit function to parent via ref or callback
@@ -249,6 +249,10 @@ export default function MapUtilities({ pois, onLocationFound, onLocationError })
     window.enableMapFitToResults = enableFitToResults
   }, [enableFitToResults])
   
+  if (!showLeafletControls) {
+    return <FitBounds pois={pois} enabled={fitToResultsEnabled} />
+  }
+
   return (
     <>
       <ResetToCabiao pois={pois} />

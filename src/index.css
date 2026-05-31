@@ -3,17 +3,78 @@
 @layer base {
   html {
     @apply scroll-smooth;
+    overflow-x: hidden;
+    max-width: 100vw;
   }
-  
-  /* Reduced motion support */
+
+  body {
+    @apply antialiased text-gray-800 bg-white;
+    overflow-x: hidden;
+    max-width: 100vw;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     html {
       scroll-behavior: auto;
     }
+
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
   }
-  
-  body {
-    @apply antialiased text-gray-800 bg-white;
+}
+
+/* Main content clearance above mobile bottom nav (hidden from sm:) */
+@layer utilities {
+  .pb-mobile-nav {
+    @apply pb-20 sm:pb-0;
+  }
+}
+
+/* Map: hide default Leaflet chrome on small screens (custom FABs used) */
+@media (max-width: 639px) {
+  .map-mobile-chrome .leaflet-control-zoom,
+  .map-mobile-chrome .leaflet-bar.leaflet-control {
+    display: none !important;
+  }
+}
+
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.25s ease-out;
+}
+
+@keyframes slide-up-sheet {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up-sheet {
+  animation: slide-up-sheet 280ms ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-slide-up-sheet {
+    animation: none;
+    opacity: 1;
+    transform: none;
   }
 }
 

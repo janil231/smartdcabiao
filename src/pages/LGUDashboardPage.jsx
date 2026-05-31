@@ -1785,7 +1785,7 @@ export default function LGUDashboardPage() {
     <div className="min-h-screen bg-gray-50">
       <Navbar />
       
-      <main className="flex-1 pb-20 md:pb-0">
+      <main className="flex-1 pb-mobile-nav">
         <div className="max-w-6xl mx-auto px-4 py-8">
           <div className="mb-8">
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">LGU Dashboard</h1>

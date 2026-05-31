@@ -74,7 +74,7 @@ export default function FavoritesPage() {
   return (
     <div className="flex min-h-screen flex-col">
       <Navbar />
-      <main className="flex-1 pb-20 md:pb-0">
+      <main className="flex-1 pb-mobile-nav">
         <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
           <div className="text-center sm:text-left mb-8">
             <div className="flex items-center justify-between mb-4">

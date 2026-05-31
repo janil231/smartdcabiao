@@ -608,7 +608,7 @@ export default function RegisterBusinessPage() {
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto px-4 py-6 sm:py-8 pb-24 sm:pb-8">
+      <main className="max-w-3xl mx-auto px-4 py-6 sm:py-8 pb-44 sm:pb-8">
         <div className="flex items-center justify-between mb-4 sm:mb-8 sticky top-16 z-30 bg-white/80 backdrop-blur rounded-2xl p-4 shadow-sm border border-gray-200">
           {STEPS.map((step, idx) => {
             const isCompleted = completedSteps.has(step.id)
@@ -1030,62 +1030,75 @@ export default function RegisterBusinessPage() {
           )}
 
           <div
-            className={`flex items-center justify-between gap-3 mt-8 pt-6 border-t border-gray-200
-              fixed bottom-0 left-0 right-0 px-4 py-3 bg-white/95 backdrop-blur border-t border-gray-200 z-20
-              sm:relative sm:static sm:bg-transparent sm:backdrop-blur-none sm:px-0 sm:py-0 sm:border-t sm:border-gray-200`}
+            className="
+              fixed bottom-16 inset-x-0 z-30
+              bg-white border-t border-gray-200 px-4 py-3
+              shadow-[0_-4px_12px_rgba(0,0,0,0.08)]
+              pb-[calc(0.75rem+env(safe-area-inset-bottom))]
+              sm:relative sm:bottom-auto sm:inset-x-auto sm:z-auto
+              sm:bg-transparent sm:border-0 sm:shadow-none sm:px-0 sm:py-0
+              sm:mt-8 sm:pt-6 sm:border-t sm:border-gray-200 sm:pb-0
+            "
           >
-            {currentStep > 1 ? (
-              <button
-                type="button"
-                onClick={handleBack}
-                disabled={isSubmitting}
-                className="min-h-[44px] px-4 sm:px-6 py-3 rounded-xl border border-gray-300 bg-white text-gray-700 font-semibold hover:bg-gray-50 transition flex items-center gap-2 disabled:opacity-50"
-              >
-                <span>←</span> {rb('back')}
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => navigate('/businesses')}
-                className="min-h-[44px] px-4 sm:px-6 py-3 rounded-xl border border-gray-300 bg-white text-gray-700 font-semibold hover:bg-gray-50 transition"
-              >
-                {rb('cancel')}
-              </button>
-            )}
+            <div className="flex items-center justify-between gap-3 max-w-3xl mx-auto">
+              {currentStep > 1 ? (
+                <button
+                  type="button"
+                  onClick={handleBack}
+                  disabled={isSubmitting}
+                  className="flex-1 sm:flex-none min-h-[48px] px-5 py-3 rounded-xl border border-gray-300 bg-white text-gray-700 font-semibold hover:bg-gray-50 transition flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  <span>←</span> {rb('back')}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => navigate('/businesses')}
+                  className="flex-1 sm:flex-none min-h-[48px] px-5 py-3 rounded-xl border border-gray-300 bg-white text-gray-700 font-semibold hover:bg-gray-50 transition flex items-center justify-center"
+                >
+                  {rb('cancel')}
+                </button>
+              )}
 
-            <span className="hidden sm:block text-sm text-gray-500">
-              {rb('stepOf')} {currentStep} {rb('of')} {STEPS.length}
-            </span>
+              <span className="hidden sm:block text-sm text-gray-500">
+                {rb('stepOf')} {currentStep} {rb('of')} {STEPS.length}
+              </span>
 
-            {currentStep < STEPS.length ? (
-              <button
-                type="button"
-                onClick={handleNext}
-                className="min-h-[44px] px-4 sm:px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm transition flex items-center gap-2"
-              >
-                {rb('next')} <span>→</span>
-              </button>
-            ) : (
-              <button
-                type="submit"
-                disabled={!canSubmit}
-                className="min-h-[44px] px-4 sm:px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isSubmitting ? (
-                  <>
-                    <span className="inline-block animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
-                    {t('registerBusiness.submitting')}
-                  </>
-                ) : (
-                  <>📤 {t('registerBusiness.submitForReview')}</>
-                )}
-              </button>
-            )}
+              {currentStep < STEPS.length ? (
+                <button
+                  type="button"
+                  onClick={handleNext}
+                  className="flex-1 sm:flex-none min-h-[48px] px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm transition flex items-center justify-center gap-2"
+                >
+                  {rb('next')} <span>→</span>
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!canSubmit}
+                  className="flex-1 sm:flex-none min-h-[48px] px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <span className="inline-block animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
+                      {t('registerBusiness.submitting')}
+                    </>
+                  ) : (
+                    <>📤 {t('registerBusiness.submitForReview')}</>
+                  )}
+                </button>
+              )}
+            </div>
+            <p className="text-center text-xs text-gray-400 mt-1.5 sm:hidden max-w-3xl mx-auto">
+              {rb('stepOf')} {currentStep} {rb('of')} {STEPS.length} · {rb(currentStepMeta.labelKey)}
+            </p>
           </div>
         </form>
       </main>
 
-      <Footer />
+      <div className="hidden sm:block">
+        <Footer />
+      </div>
     </div>
   )
 }
