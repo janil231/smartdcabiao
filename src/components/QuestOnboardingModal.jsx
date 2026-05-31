@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { getQuestSlotInfo } from '../utils/questSlots'
 
 const IMPACT_UNIT_CONFIG = {
   kg_trash: { label: 'Kg waste', icon: '🗑️' },
@@ -9,7 +10,7 @@ const IMPACT_UNIT_CONFIG = {
 }
 
 function FeaturedQuestCard({ quest, onJoin }) {
-  const slotsLeft = (quest.capacity || 0) - (quest.reservedCount || 0)
+  const { slotsLeft, isFull } = getQuestSlotInfo(quest)
   
   const formatDeadline = () => {
     if (!quest.endAt) return 'No deadline'
@@ -41,8 +42,8 @@ function FeaturedQuestCard({ quest, onJoin }) {
       )}
 
       <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
-        <span className={slotsLeft <= 5 ? 'text-orange-600' : ''}>
-          {slotsLeft} slots left
+        <span className={isFull ? 'text-red-600' : slotsLeft <= 5 ? 'text-orange-600' : ''}>
+          {isFull ? 'Full' : `${slotsLeft} slots left`}
         </span>
       </div>
 

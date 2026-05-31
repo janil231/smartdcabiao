@@ -7,11 +7,12 @@ import {
   doc,
   setDoc,
   updateDoc,
+  writeBatch,
   increment,
   serverTimestamp,
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
-import { getQuestById, decrementReservedCount } from './quests.service'
+import { getQuestById } from './quests.service'
 import { addPointsEntry } from './pointsLedger.service'
 import { logAudit } from './audit.service'
 import { addImpactEntry } from './impactLedger.service'
@@ -53,6 +54,33 @@ export async function getQuestParticipations(questId) {
   return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
 }
 
+export async function countActiveJoinedParticipations(questId) {
+  const parts = await getQuestParticipations(questId)
+  return parts.filter((p) => p.status === 'joined').length
+}
+
+export async function syncQuestReservedCount(questId) {
+  const activeJoined = await countActiveJoinedParticipations(questId)
+  const questRef = doc(db, QUESTS_COLLECTION, questId)
+  await updateDoc(questRef, { reservedCount: activeJoined })
+  return activeJoined
+}
+
+/** Fix quests whose stored reservedCount drifted above capacity (display + join). */
+export async function reconcileOverbookedQuestSlots(quests) {
+  return Promise.all(
+    quests.map(async (quest) => {
+      const capacity = Math.max(0, Number(quest.capacity) || 0)
+      const reserved = Math.max(0, Number(quest.reservedCount) || 0)
+      if (capacity > 0 && reserved > capacity) {
+        const synced = await syncQuestReservedCount(quest.id)
+        return { ...quest, reservedCount: synced }
+      }
+      return quest
+    })
+  )
+}
+
 export async function joinQuest({ uid, questId, userEmail }) {
   const quest = await getQuestById(questId)
   if (!quest) {
@@ -81,12 +109,14 @@ export async function joinQuest({ uid, questId, userEmail }) {
     }
   }
 
-  const availableSlots = quest.capacity - (quest.reservedCount || 0)
-  if (availableSlots <= 0) {
-    throw new Error('No slots available')
+  const capacity = Math.max(0, Number(quest.capacity) || 0)
+  const activeJoined = await countActiveJoinedParticipations(questId)
+
+  if (capacity > 0 && activeJoined >= capacity) {
+    throw new Error('This quest is full. All slots are taken.')
   }
 
-  await setDoc(participationRef, {
+  const participationData = {
     questId,
     seasonId: quest.seasonId,
     uid,
@@ -97,12 +127,20 @@ export async function joinQuest({ uid, questId, userEmail }) {
     expiresAt: expiresAt.toISOString(),
     completedAt: null,
     pointsAwarded: null,
-  })
+    verificationMethod: null,
+    verifiedAt: null,
+    verificationData: null,
+    autoApproved: false,
+    rejectionReason: null,
+  }
 
-  const questRef = doc(db, 'quests', questId)
-  await updateDoc(questRef, {
-    reservedCount: increment(1)
-  })
+  const questRef = doc(db, QUESTS_COLLECTION, questId)
+  const nextReserved = activeJoined + 1
+
+  const batch = writeBatch(db)
+  batch.set(participationRef, participationData, { merge: true })
+  batch.update(questRef, { reservedCount: nextReserved })
+  await batch.commit()
 
   return { success: true }
 }
@@ -126,8 +164,8 @@ export async function cancelQuest({ uid, questId }) {
     rewardStatus: 'expired',
   })
 
-  await decrementReservedCount(questId)
-  
+  await syncQuestReservedCount(questId)
+
   return { success: true }
 }
 
@@ -135,21 +173,24 @@ export async function expireMyStaleParticipations(uid) {
   const participations = await getUserParticipations(uid)
   const now = new Date()
   const expiredIds = []
-  
+
   for (const p of participations) {
-    if (p.status === 'joined' && p.expiresAt) {
-      const expiresAt = new Date(p.expiresAt)
-      if (expiresAt < now) {
-        expiredIds.push(p.id)
-        await updateDoc(doc(db, PARTICIPATIONS_COLLECTION, p.id), {
-          status: 'expired',
-          rewardStatus: 'expired',
-        })
-        await decrementReservedCount(p.questId)
-      }
+    if (p.status !== 'joined' || !p.expiresAt) continue
+    const expiresAt = new Date(p.expiresAt)
+    if (expiresAt >= now) continue
+
+    try {
+      expiredIds.push(p.id)
+      await updateDoc(doc(db, PARTICIPATIONS_COLLECTION, p.id), {
+        status: 'expired',
+        rewardStatus: 'expired',
+      })
+      await syncQuestReservedCount(p.questId)
+    } catch (err) {
+      console.warn('Could not expire participation', p.id, err?.message || err)
     }
   }
-  
+
   return expiredIds
 }
 
@@ -180,13 +221,8 @@ export async function expireAllStaleParticipations() {
     }
   }
   
-  for (const [questId, delta] of Object.entries(questSlotDeltas)) {
-    const quest = await getQuestById(questId)
-    if (quest) {
-      await updateDoc(doc(db, QUESTS_COLLECTION, questId), {
-        reservedCount: Math.max(0, (quest.reservedCount || 0) - delta)
-      })
-    }
+  for (const questId of Object.keys(questSlotDeltas)) {
+    await syncQuestReservedCount(questId)
   }
   
   return { expiredCount, freedSlots: expiredCount }
@@ -281,7 +317,7 @@ export async function adminMarkCompleted({ uid, questId, adminUser }) {
     })
   }
 
-  await decrementReservedCount(questId)
+  await syncQuestReservedCount(questId)
 
   await incrementEarnedPoints(quest.seasonId, { uid, email: participation.userEmail }, quest.points || 0)
 
@@ -347,7 +383,7 @@ export async function markQuestCompletedByUser(uid, questId) {
     reason: `Completed quest: ${quest.title}`,
   })
 
-  await decrementReservedCount(questId)
-  
+  await syncQuestReservedCount(questId)
+
   return { success: true }
 }

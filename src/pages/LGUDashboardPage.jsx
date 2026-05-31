@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { MapContainer, TileLayer, Marker } from 'react-leaflet'
 import Navbar from '../components/Navbar'
@@ -37,8 +37,17 @@ import {
   seedVisitAndBuyQuestsForActiveSeason,
   backfillQuestLocationsForSeason,
   rescheduleDemoQuestsForSeason,
+  backfillQuestVerificationTokensForSeason,
+  ensureQuestVerificationTokensAdmin,
 } from '../services/quests.service'
 import { getQuestParticipations, adminMarkCompleted, expireAllStaleParticipations } from '../services/participations.service'
+import {
+  listPendingSelfVerifications,
+  approvePendingVerification,
+  rejectPendingVerification,
+  getEffectiveVerificationMethod,
+} from '../services/questVerification.service'
+import QuestVerificationSetup from '../components/quest/QuestVerificationSetup'
 import { listPendingReviews, setReviewStatus } from '../services/reviews.service'
 import { listTopByPoints, listTopByImpact, IMPACT_UNITS } from '../services/leaderboard.service'
 import { isWithinCabiaoBounds, CABIAO_BOUNDS } from '../constants/cabiaoGeo'
@@ -729,6 +738,15 @@ function QuestFormModal({ quest, onClose, onSubmit, isLoading }) {
   const [impactUnit, setImpactUnit] = useState(quest?.impact?.unit || '')
   const [impactAmount, setImpactAmount] = useState(quest?.impact?.amountPerCompletion || '')
   const [impactLabel, setImpactLabel] = useState(quest?.impact?.label || '')
+  const [questType, setQuestType] = useState(quest?.questType || quest?.category || 'participate')
+  const [verificationMethod, setVerificationMethod] = useState(
+    quest?.verificationMethod || (quest?.questType === 'visit' || quest?.questType === 'buy' ? 'qr' : 'code')
+  )
+  const [autoApprove, setAutoApprove] = useState(quest?.autoApprove !== false)
+  const [requirePhoto, setRequirePhoto] = useState(quest?.requirePhoto !== false)
+  const [geofenceRadiusMeters, setGeofenceRadiusMeters] = useState(
+    quest?.geofenceRadiusMeters ?? (quest?.verificationMethod === 'qr' ? 200 : '')
+  )
 
   const reservedCount = quest?.reservedCount || 0
 
@@ -766,12 +784,21 @@ function QuestFormModal({ quest, onClose, onSubmit, isLoading }) {
       title,
       description,
       category,
+      questType,
       points: parseInt(points, 10),
       capacity: parseInt(capacity, 10),
       startAt: new Date(startAt).toISOString(),
       endAt: new Date(endAt).toISOString(),
       gracePeriodHours: parseInt(gracePeriodHours, 10),
       impact,
+      verificationMethod,
+      autoApprove: verificationMethod === 'manual' ? false : autoApprove,
+      requirePhoto,
+      geofenceRadiusMeters:
+        verificationMethod === 'qr' && geofenceRadiusMeters !== ''
+          ? parseInt(geofenceRadiusMeters, 10)
+          : null,
+      position: quest?.position || null,
     })
   }
 
@@ -877,6 +904,88 @@ function QuestFormModal({ quest, onClose, onSubmit, isLoading }) {
               className="w-full px-3 py-2 border border-gray-300 rounded-lg"
               min="1"
             />
+          </div>
+          <div className="border-t border-gray-200 pt-4 mt-2">
+            <p className="text-sm font-medium text-gray-900 mb-1">🔐 Verification Method</p>
+            <p className="text-xs text-gray-500 mb-3">How will users prove they completed this quest?</p>
+            <div className="grid gap-2 mb-4">
+              {[
+                { value: 'qr', label: '📱 QR Code Scan', hint: 'VISIT / BUY — print QR at venue' },
+                { value: 'code', label: '🔢 Event Code + Photo', hint: 'Events — staff announces code' },
+                { value: 'manual', label: '✍️ Manual LGU Check-In', hint: 'Fallback at /lgu/checkin' },
+              ].map((opt) => (
+                <label
+                  key={opt.value}
+                  className={`cursor-pointer rounded-xl border-2 p-3 transition ${
+                    verificationMethod === opt.value
+                      ? 'border-emerald-500 bg-emerald-50'
+                      : 'border-gray-200'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="verificationMethod"
+                    value={opt.value}
+                    checked={verificationMethod === opt.value}
+                    onChange={() => setVerificationMethod(opt.value)}
+                    className="sr-only"
+                  />
+                  <div className="font-semibold text-sm">{opt.label}</div>
+                  <div className="text-xs text-gray-600 mt-0.5">{opt.hint}</div>
+                </label>
+              ))}
+            </div>
+            {verificationMethod !== 'manual' && (
+              <label className="flex items-start gap-2 p-3 bg-gray-50 rounded-lg mb-3">
+                <input
+                  type="checkbox"
+                  checked={autoApprove}
+                  onChange={(e) => setAutoApprove(e.target.checked)}
+                  className="mt-1"
+                />
+                <span className="text-sm">
+                  <span className="font-semibold">Auto-approve valid submissions</span>
+                  <span className="block text-xs text-gray-500">
+                    Instantly credit points when QR/code is valid.
+                  </span>
+                </span>
+              </label>
+            )}
+            {verificationMethod === 'qr' && (
+              <div className="mb-3">
+                <label className="block text-xs font-medium text-gray-700 mb-1">Geofence radius (meters)</label>
+                <input
+                  type="number"
+                  value={geofenceRadiusMeters}
+                  onChange={(e) => setGeofenceRadiusMeters(e.target.value)}
+                  placeholder="200"
+                  className="w-32 px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  min="0"
+                />
+              </div>
+            )}
+            {verificationMethod === 'code' && (
+              <label className="flex items-center gap-2 mb-3 text-sm">
+                <input
+                  type="checkbox"
+                  checked={requirePhoto}
+                  onChange={(e) => setRequirePhoto(e.target.checked)}
+                />
+                Require photo upload
+              </label>
+            )}
+            <div className="mb-3">
+              <label className="block text-xs font-medium text-gray-700 mb-1">Quest type (for display)</label>
+              <select
+                value={questType}
+                onChange={(e) => setQuestType(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+              >
+                <option value="visit">Visit</option>
+                <option value="buy">Buy</option>
+                <option value="participate">Participate</option>
+              </select>
+            </div>
           </div>
           <div className="border-t border-gray-200 pt-4 mt-2">
             <p className="text-sm font-medium text-gray-900 mb-1">Sustainability Impact (optional)</p>
@@ -1004,6 +1113,7 @@ export default function LGUDashboardPage() {
   const [activeSeason, setActiveSeason] = useState(null)
   const [selectedSeasonFilter, setSelectedSeasonFilter] = useState('')
   const [questParticipations, setQuestParticipations] = useState([])
+  const [pendingSelfVerifications, setPendingSelfVerifications] = useState([])
   const [questDetails, setQuestDetails] = useState({})
   const [loading, setLoading] = useState(true)
   const [checkingAdmin, setCheckingAdmin] = useState(true)
@@ -1032,6 +1142,7 @@ export default function LGUDashboardPage() {
   const [markingVoucherUsedId, setMarkingVoucherUsedId] = useState(null)
   const [backfillLocationsLoading, setBackfillLocationsLoading] = useState(false)
   const [rescheduleDemoLoading, setRescheduleDemoLoading] = useState(false)
+  const [backfillVerificationLoading, setBackfillVerificationLoading] = useState(false)
 
   useEffect(() => {
     async function checkAdminStatus() {
@@ -1048,7 +1159,10 @@ export default function LGUDashboardPage() {
   }, [user])
 
   useEffect(() => {
-    if (!user || !isUserAdmin) return
+    if (!user || !isUserAdmin) {
+      setLoading(false)
+      return
+    }
 
     async function fetchData() {
       setLoading(true)
@@ -1123,8 +1237,11 @@ export default function LGUDashboardPage() {
               allParticipations.push(...participations)
             }
             setQuestParticipations(allParticipations)
+            const pending = await listPendingSelfVerifications(season.id)
+            setPendingSelfVerifications(pending)
           } else {
             setQuestParticipations([])
+            setPendingSelfVerifications([])
           }
         } else if (activeTab === TABS.VOUCHERS) {
           const active = await getActiveSeason()
@@ -1150,6 +1267,17 @@ export default function LGUDashboardPage() {
     setToast({ message, type })
     setTimeout(() => setToast(null), 3000)
   }
+
+  const ensureTokensForQuest = useCallback(
+    async (questId) => {
+      if (!user) throw new Error('Sign in as admin to generate verification codes.')
+      return ensureQuestVerificationTokensAdmin(questId, {
+        uid: user.uid,
+        email: user.email,
+      })
+    },
+    [user]
+  )
 
   async function loadData() {
     setLoading(true)
@@ -1228,8 +1356,11 @@ export default function LGUDashboardPage() {
             allParticipations.push(...participations)
           }
           setQuestParticipations(allParticipations)
+          const pending = await listPendingSelfVerifications(season.id)
+          setPendingSelfVerifications(pending)
         } else {
           setQuestParticipations([])
+          setPendingSelfVerifications([])
         }
       } else if (activeTab === TABS.VOUCHERS) {
         const active = await getActiveSeason()
@@ -1458,6 +1589,43 @@ export default function LGUDashboardPage() {
     }
   }
 
+  const handleApprovePendingVerification = async (participation) => {
+    setActionLoading(true)
+    try {
+      await approvePendingVerification({
+        uid: participation.uid,
+        questId: participation.questId,
+        adminUser: { uid: user.uid, email: user.email },
+      })
+      showToast('Approved — points released.')
+      loadData()
+    } catch (error) {
+      showToast(error.message, 'error')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleRejectPendingVerification = async (participation) => {
+    const reason = window.prompt('Rejection reason (optional):', 'Could not verify attendance')
+    if (reason === null) return
+    setActionLoading(true)
+    try {
+      await rejectPendingVerification({
+        uid: participation.uid,
+        questId: participation.questId,
+        adminUser: { uid: user.uid, email: user.email },
+        reason,
+      })
+      showToast('Submission rejected. User can verify again.')
+      loadData()
+    } catch (error) {
+      showToast(error.message, 'error')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
   const handleCreateSeason = async (formData) => {
     setActionLoading(true)
     try {
@@ -1649,6 +1817,31 @@ export default function LGUDashboardPage() {
     }
   }
 
+  const handleBackfillVerificationTokens = async () => {
+    const seasonId = selectedSeasonFilter || activeSeason?.id
+    if (!seasonId) {
+      showToast('Please select a season first.', 'error')
+      return
+    }
+    setBackfillVerificationLoading(true)
+    try {
+      const result = await backfillQuestVerificationTokensForSeason(seasonId, {
+        uid: user?.uid,
+        email: user?.email,
+      })
+      showToast(
+        result.updated > 0
+          ? `Generated codes/QR for ${result.updated} quest${result.updated === 1 ? '' : 's'}.`
+          : 'All quests already have verification codes or QR.'
+      )
+      loadData()
+    } catch (error) {
+      showToast(error.message, 'error')
+    } finally {
+      setBackfillVerificationLoading(false)
+    }
+  }
+
   const handleMarkVoucherUsed = async (redemptionId) => {
     if (!activeSeason?.id || !user) return
     setMarkingVoucherUsedId(redemptionId)
@@ -1711,6 +1904,7 @@ export default function LGUDashboardPage() {
           total: participations.length
         }
       })
+
     } catch {
       showToast('Error loading stats', 'error')
     } finally {
@@ -2177,6 +2371,13 @@ export default function LGUDashboardPage() {
                     {rescheduleDemoLoading ? 'Rescheduling…' : 'Reschedule Demo Quests'}
                   </button>
                   <button
+                    onClick={handleBackfillVerificationTokens}
+                    disabled={backfillVerificationLoading || (!selectedSeasonFilter && !activeSeason)}
+                    className="px-3 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm font-medium disabled:bg-gray-300"
+                  >
+                    {backfillVerificationLoading ? 'Generating…' : 'Generate Missing Codes/QR'}
+                  </button>
+                  <button
                     onClick={() => setShowQuestModal(true)}
                     disabled={!selectedSeasonFilter && !activeSeason}
                     className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm font-medium disabled:bg-gray-300"
@@ -2284,8 +2485,8 @@ export default function LGUDashboardPage() {
                             </tr>
                             {isExpanded && (
                               <tr key={`${quest.id}-stats`} className="bg-purple-50">
-                                <td colSpan={8} className="px-4 py-4">
-                                  <div className="flex flex-wrap gap-4">
+                                <td colSpan={10} className="px-4 py-4">
+                                  <div className="flex flex-wrap gap-4 mb-4">
                                     <div className="bg-white rounded-lg px-4 py-2 shadow-sm">
                                       <p className="text-xs text-gray-500 uppercase">Total</p>
                                       <p className="text-lg font-bold text-gray-900">{stats?.total || 0}</p>
@@ -2306,7 +2507,25 @@ export default function LGUDashboardPage() {
                                       <p className="text-xs text-gray-500 uppercase">Cancelled</p>
                                       <p className="text-lg font-bold text-gray-600">{stats?.cancelledCount || 0}</p>
                                     </div>
+                                    <div className="bg-white rounded-lg px-4 py-2 shadow-sm">
+                                      <p className="text-xs text-gray-500 uppercase">Verify</p>
+                                      <p className="text-sm font-medium text-gray-900">
+                                        {getEffectiveVerificationMethod(quest).toUpperCase()}
+                                      </p>
+                                    </div>
                                   </div>
+                                  <QuestVerificationSetup
+                                    quest={quest}
+                                    ensureTokensForQuest={ensureTokensForQuest}
+                                    onError={(msg) => showToast(msg, 'error')}
+                                    onQuestUpdated={(updated) => {
+                                      setQuests((prev) =>
+                                        prev.map((q) =>
+                                          q.id === quest.id ? { ...q, ...updated, id: quest.id } : q
+                                        )
+                                      )
+                                    }}
+                                  />
                                 </td>
                               </tr>
                             )}
@@ -2319,6 +2538,62 @@ export default function LGUDashboardPage() {
               )}
             </div>
           ) : activeTab === TABS.QUEST_VERIFICATIONS ? (
+            <div className="space-y-6">
+            {pendingSelfVerifications.length > 0 && (
+              <div className="bg-white rounded-xl shadow-sm border border-amber-200 overflow-hidden">
+                <div className="px-4 py-3 border-b border-amber-100 bg-amber-50">
+                  <h3 className="font-semibold text-amber-900">
+                    📋 Self-verified — pending approval ({pendingSelfVerifications.length})
+                  </h3>
+                </div>
+                <div className="divide-y divide-gray-100">
+                  {pendingSelfVerifications.map((p) => (
+                    <div key={p.id} className="p-4 flex flex-col sm:flex-row gap-4 sm:items-start">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-gray-900">{p.userEmail || p.uid}</p>
+                        <p className="text-sm text-gray-600">
+                          {questDetails[p.questId]?.title || p.questId}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Via {p.verificationMethod} ·{' '}
+                          {p.verifiedAt ? new Date(p.verifiedAt).toLocaleString() : '—'}
+                        </p>
+                        {p.verificationMethod === 'qr' && p.verificationData?.distanceFromQuestMeters != null && (
+                          <p className="text-xs text-gray-600 mt-1">
+                            📍 {Math.round(p.verificationData.distanceFromQuestMeters)}m from venue
+                          </p>
+                        )}
+                        {p.verificationMethod === 'code' && p.verificationData?.photoURL && (
+                          <img
+                            src={p.verificationData.photoURL}
+                            alt="Verification"
+                            className="mt-2 w-32 h-32 object-cover rounded-lg border border-gray-200"
+                          />
+                        )}
+                      </div>
+                      <div className="flex flex-col gap-2 shrink-0">
+                        <button
+                          type="button"
+                          disabled={actionLoading}
+                          onClick={() => handleApprovePendingVerification(p)}
+                          className="px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
+                        >
+                          ✅ Approve
+                        </button>
+                        <button
+                          type="button"
+                          disabled={actionLoading}
+                          onClick={() => handleRejectPendingVerification(p)}
+                          className="px-3 py-2 bg-red-100 text-red-700 rounded-lg text-sm font-medium hover:bg-red-200 disabled:opacity-50"
+                        >
+                          ❌ Reject
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
               {questParticipations.length === 0 ? (
                 <div className="text-center py-12 text-gray-500">
@@ -2382,6 +2657,7 @@ export default function LGUDashboardPage() {
                   </table>
                 </div>
               )}
+            </div>
             </div>
           ) : activeTab === TABS.VOUCHERS ? (
             <div className="space-y-6">

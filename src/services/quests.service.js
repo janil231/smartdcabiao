@@ -13,10 +13,19 @@ import {
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { logAudit } from './audit.service'
+import { getQuestSlotInfo } from '../utils/questSlots'
 import { getActiveSeason } from './seasons.service'
 import { listBusinesses } from './businesses.service'
 import { listDestinations } from './destinations.service'
 import { generateCabiaoCoordinates } from '../constants/cabiaoGeo'
+import {
+  buildQuestVerificationFields,
+  generateQRToken,
+  buildQRPayload,
+  getEffectiveVerificationMethod,
+  questNeedsVerificationTokens,
+  generateEventCode,
+} from './questVerification.service'
 
 const QUESTS_COLLECTION = 'quests'
 
@@ -90,7 +99,27 @@ export async function listAllQuests() {
   return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
 }
 
-export async function createQuest({ seasonId, title, description, category, points, capacity, startAt, endAt, gracePeriodHours, impact }, adminUser) {
+export async function createQuest(
+  {
+    seasonId,
+    title,
+    description,
+    category,
+    questType,
+    points,
+    capacity,
+    startAt,
+    endAt,
+    gracePeriodHours,
+    impact,
+    verificationMethod,
+    autoApprove,
+    requirePhoto,
+    geofenceRadiusMeters,
+    position,
+  },
+  adminUser
+) {
   const capacityNum = parseInt(capacity, 10)
   if (capacityNum < 1) {
     throw new Error('Capacity must be at least 1')
@@ -98,12 +127,22 @@ export async function createQuest({ seasonId, title, description, category, poin
   
   const questId = `quest_${Date.now()}`
   const questRef = doc(db, QUESTS_COLLECTION, questId)
+
+  const verificationFields = buildQuestVerificationFields(questId, {
+    questType,
+    category,
+    verificationMethod,
+    autoApprove,
+    requirePhoto,
+    geofenceRadiusMeters,
+  })
   
   await setDoc(questRef, {
     seasonId,
     title,
     description,
     category,
+    questType: questType || category || 'participate',
     points: parseInt(points, 10),
     capacity: parseInt(capacity, 10),
     reservedCount: 0,
@@ -111,8 +150,10 @@ export async function createQuest({ seasonId, title, description, category, poin
     endAt,
     gracePeriodHours: parseInt(gracePeriodHours, 10) || 24,
     impact: impact || null,
+    position: position || null,
     status: 'active',
     createdAt: new Date().toISOString(),
+    ...verificationFields,
   })
   
   await logAudit({
@@ -145,17 +186,54 @@ export async function updateQuest(questId, data, adminUser) {
   if (data.points) updateData.points = parseInt(data.points, 10)
   if (data.capacity) updateData.capacity = parseInt(data.capacity, 10)
   if (data.gracePeriodHours) updateData.gracePeriodHours = parseInt(data.gracePeriodHours, 10)
-  
+
+  if (
+    data.verificationMethod != null &&
+    data.verificationMethod !== quest.verificationMethod
+  ) {
+    Object.assign(
+      updateData,
+      buildQuestVerificationFields(questId, {
+        questType: data.questType ?? quest.questType,
+        category: data.category ?? quest.category,
+        verificationMethod: data.verificationMethod,
+        autoApprove: data.autoApprove ?? quest.autoApprove,
+        requirePhoto: data.requirePhoto ?? quest.requirePhoto,
+        geofenceRadiusMeters: data.geofenceRadiusMeters ?? quest.geofenceRadiusMeters,
+      })
+    )
+  } else {
+    const merged = { ...quest, ...updateData }
+    if (questNeedsVerificationTokens(merged)) {
+      const method = getEffectiveVerificationMethod(merged)
+      if (!merged.verificationMethod) updateData.verificationMethod = method
+      if (method === 'qr' && !merged.qrPayload) {
+        const qrToken = generateQRToken()
+        updateData.qrToken = qrToken
+        updateData.qrPayload = buildQRPayload(questId, qrToken)
+        updateData.geofenceRadiusMeters = merged.geofenceRadiusMeters ?? 200
+      } else if (method === 'code' && !merged.eventCode) {
+        updateData.eventCode = generateEventCode()
+        updateData.eventCodeUpdatedAt = new Date().toISOString()
+      }
+    }
+  }
+
+  if (Object.keys(updateData).length === 0) {
+    return { success: true, quest }
+  }
+
   await updateDoc(questRef, updateData)
-  
+
   await logAudit({
     action: 'QUEST_UPDATED',
     targetType: 'quest',
     targetId: questId,
     details: { ...updateData, adminUid: adminUser.uid, adminEmail: adminUser.email },
   })
-  
-  return { success: true }
+
+  const updatedQuest = await getQuestById(questId)
+  return { success: true, quest: updatedQuest }
 }
 
 export async function activateQuest(questId, adminUser) {
@@ -198,18 +276,22 @@ export async function deactivateQuest(questId, adminUser) {
   return { success: true }
 }
 
-export async function decrementReservedCount(questId) {
+export async function adjustQuestReservedCount(questId, delta) {
+  const quest = await getQuestById(questId)
+  if (!quest) {
+    throw new Error('Quest not found')
+  }
   const questRef = doc(db, QUESTS_COLLECTION, questId)
-  await updateDoc(questRef, {
-    reservedCount: increment(-1)
-  })
+  const next = Math.max(0, (quest.reservedCount || 0) + delta)
+  await updateDoc(questRef, { reservedCount: next })
+}
+
+export async function decrementReservedCount(questId) {
+  return adjustQuestReservedCount(questId, -1)
 }
 
 export async function incrementReservedCount(questId) {
-  const questRef = doc(db, QUESTS_COLLECTION, questId)
-  await updateDoc(questRef, {
-    reservedCount: increment(1)
-  })
+  return adjustQuestReservedCount(questId, 1)
 }
 
 export async function seedSampleQuestsForActiveSeason() {
@@ -399,7 +481,16 @@ export async function seedSampleQuestsForActiveSeason() {
   for (let i = 0; i < questsToCreate.length; i++) {
     const questId = `seed-q${i + 1}`
     const questRef = doc(db, QUESTS_COLLECTION, questId)
-    await setDoc(questRef, questsToCreate[i], { merge: true })
+    const base = questsToCreate[i]
+    const verificationFields = buildQuestVerificationFields(questId, {
+      questType: base.category,
+      category: base.category,
+    })
+    await setDoc(questRef, {
+      ...base,
+      ...verificationFields,
+      questType: base.category,
+    }, { merge: true })
   }
   
   await logAudit({
@@ -537,6 +628,42 @@ export async function rescheduleDemoQuestsForSeason(seasonId, adminUser) {
   return { success: true, updated: seedDocs.length }
 }
 
+export async function ensureQuestVerificationTokensAdmin(questId, adminUser) {
+  const quest = await getQuestById(questId)
+  if (!quest || !questNeedsVerificationTokens(quest)) {
+    return quest
+  }
+  const { quest: updated } = await updateQuest(questId, {}, adminUser)
+  return updated || quest
+}
+
+export async function backfillQuestVerificationTokensForSeason(seasonId, adminUser) {
+  if (!seasonId) throw new Error('Season ID is required')
+
+  const questsRef = collection(db, QUESTS_COLLECTION)
+  const qRef = query(questsRef, where('seasonId', '==', seasonId))
+  const snapshot = await getDocs(qRef)
+
+  let updated = 0
+  for (const docSnap of snapshot.docs) {
+    const quest = { id: docSnap.id, ...docSnap.data() }
+    if (!questNeedsVerificationTokens(quest)) continue
+    await ensureQuestVerificationTokensAdmin(docSnap.id, adminUser)
+    updated++
+  }
+
+  if (updated > 0) {
+    await logAudit({
+      action: 'QUEST_VERIFICATION_TOKENS_BACKFILL',
+      targetType: 'season',
+      targetId: seasonId,
+      details: { updated, adminUid: adminUser?.uid, adminEmail: adminUser?.email },
+    })
+  }
+
+  return { success: true, updated }
+}
+
 export function recommendQuests({ quests, participations, limit = 2 }) {
   if (!quests || quests.length === 0) return []
   
@@ -565,12 +692,12 @@ export function recommendQuests({ quests, participations, limit = 2 }) {
     
     if (completedQuestIds.has(quest.id)) return false
     
-    const slotsRemaining = (quest.capacity || 0) - (quest.reservedCount || 0)
-    if (slotsRemaining <= 0) return false
-    
+    const { slotsLeft, isFull } = getQuestSlotInfo(quest)
+    if (isFull || slotsLeft <= 0) return false
+
     return true
   })
-  
+
   const scoredQuests = activeQuests.map(quest => {
     let score = 0
     
@@ -594,8 +721,8 @@ export function recommendQuests({ quests, participations, limit = 2 }) {
       }
     }
     
-    const slotsRemaining = (quest.capacity || 0) - (quest.reservedCount || 0)
-    if (slotsRemaining <= 10) {
+    const { slotsLeft } = getQuestSlotInfo(quest)
+    if (slotsLeft <= 10) {
       score += 10
     }
     
@@ -658,6 +785,7 @@ export async function seedVisitAndBuyQuestsForActiveSeason(adminUser) {
       : generateCabiaoCoordinates(i, 20)
     
     const questId = `seed_visit_${String(i + 1).padStart(2, '0')}`
+    const qrToken = generateQRToken()
     
     visitQuests.push({
       seasonId,
@@ -672,7 +800,12 @@ export async function seedVisitAndBuyQuestsForActiveSeason(adminUser) {
       endAt: endDate.toISOString(),
       gracePeriodHours: 24,
       status: 'active',
-      verification: 'lgu',
+      verificationMethod: 'qr',
+      qrToken,
+      qrPayload: buildQRPayload(questId, qrToken),
+      autoApprove: true,
+      requirePhoto: false,
+      geofenceRadiusMeters: 200,
       position,
       barangay: place.barangay || null,
       visit: {
@@ -711,6 +844,7 @@ export async function seedVisitAndBuyQuestsForActiveSeason(adminUser) {
       : generateCabiaoCoordinates(i + 10, 20)
     
     const questId = `seed_buy_${String(i + 1).padStart(2, '0')}`
+    const buyQrToken = generateQRToken()
     
     const questData = {
       seasonId,
@@ -725,7 +859,12 @@ export async function seedVisitAndBuyQuestsForActiveSeason(adminUser) {
       endAt: endDate.toISOString(),
       gracePeriodHours: 24,
       status: 'active',
-      verification: 'merchant',
+      verificationMethod: 'qr',
+      qrToken: buyQrToken,
+      qrPayload: buildQRPayload(questId, buyQrToken),
+      autoApprove: true,
+      requirePhoto: false,
+      geofenceRadiusMeters: 200,
       position,
       barangay: business.barangay || null,
       buy: {

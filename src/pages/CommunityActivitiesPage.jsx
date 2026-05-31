@@ -10,11 +10,17 @@ import {
   getUserParticipations, 
   joinQuest, 
   cancelQuest, 
-  expireMyStaleParticipations 
+  expireMyStaleParticipations,
+  reconcileOverbookedQuestSlots,
 } from '../services/participations.service'
 import { hasUserSeenOnboarding, setSeenOnboarding, getUserLocation, setUserLocation as saveUserLocation } from '../services/userSettings.service'
 import { CABIAO_CENTER } from '../constants/cabiaoGeo'
+import { auth } from '../lib/firebase'
+import { getQuestSlotInfo } from '../utils/questSlots'
 import QuestOnboardingModal from '../components/QuestOnboardingModal'
+import QRScannerModal from '../components/quest/QRScannerModal'
+import EventCodeModal from '../components/quest/EventCodeModal'
+import { getEffectiveVerificationMethod } from '../services/questVerification.service'
 import { activities, ACTIVITY_TYPES } from '../data'
 
 const TYPE_STYLES = {
@@ -49,7 +55,18 @@ const IMPACT_UNIT_CONFIG = {
   co2_kg: { label: 'Kg CO₂', icon: '🌍' },
 }
 
-function QuestCard({ quest, participation, onJoin, onCancel, isLoading, focused, distanceKm, extraBadge }) {
+function QuestCard({
+  quest,
+  participation,
+  onJoin,
+  onCancel,
+  isLoading,
+  focused,
+  distanceKm,
+  extraBadge,
+  onScanQR,
+  onEnterCode,
+}) {
   const typeStyle = TYPE_STYLES[quest.category] || 'bg-gray-100 text-gray-700 border-gray-200'
   const typeLabel = TYPE_LABELS[quest.category] || 'Quest'
   
@@ -57,9 +74,8 @@ function QuestCard({ quest, participation, onJoin, onCancel, isLoading, focused,
   const questTypeStyle = QUEST_TYPE_STYLES[questType] || QUEST_TYPE_STYLES.participate
   const questTypeLabel = QUEST_TYPE_LABELS[questType] || 'PARTICIPATE'
 
-  const slotsLeft = quest.capacity - (quest.reservedCount || 0)
-  const isFull = slotsLeft <= 0
-  
+  const { capacity, reserved, slotsLeft, isFull } = getQuestSlotInfo(quest)
+
   const isJoined = participation?.status === 'joined'
   const isCompleted = participation?.status === 'completed'
   const isCancelledOrExpired = participation?.status === 'cancelled' || participation?.status === 'expired'
@@ -182,6 +198,11 @@ function QuestCard({ quest, participation, onJoin, onCancel, isLoading, focused,
   }
   
   const requirementText = getRequirementText()
+  const verifyMethod = getEffectiveVerificationMethod(quest)
+  const pendingSelfReview =
+    isJoined && participation?.verifiedAt && participation?.rewardStatus === 'pending'
+  const venueName =
+    quest.visit?.targetName || quest.buy?.businessName || quest.title
 
   return (
     <article 
@@ -231,9 +252,13 @@ function QuestCard({ quest, participation, onJoin, onCancel, isLoading, focused,
             <dt className="shrink-0 font-medium">🎯</dt>
             <dd className={isFull ? 'text-red-600 font-semibold' : slotsLeft <= 3 ? 'text-orange-600 font-medium' : ''}>
               {isFull ? (
-                <span>Slots: FULL</span>
+                <span>
+                  Full ({reserved}/{capacity} joined)
+                </span>
               ) : (
-                <span>Slots left: {slotsLeft} / {quest.capacity}</span>
+                <span>
+                  {slotsLeft} slot{slotsLeft !== 1 ? 's' : ''} left ({reserved}/{capacity} joined)
+                </span>
               )}
             </dd>
           </div>
@@ -256,6 +281,47 @@ function QuestCard({ quest, participation, onJoin, onCancel, isLoading, focused,
         </dl>
         
         {getDeadlineInfo()}
+
+        {isJoined && !isCompleted && !isCancelledOrExpired && (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+            <h4 className="font-semibold text-amber-900 text-sm mb-2">⏳ Ready to verify?</h4>
+            {pendingSelfReview ? (
+              <p className="text-sm text-amber-800">
+                ✅ Submitted! LGU will review and release your points shortly.
+              </p>
+            ) : verifyMethod === 'qr' ? (
+              <>
+                <p className="text-sm text-amber-800 mb-3">
+                  Find the QR code posted at <strong>{venueName}</strong> and scan it.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => onScanQR?.(quest)}
+                  className="w-full px-4 py-3 bg-emerald-600 text-white rounded-xl font-semibold flex items-center justify-center gap-2 hover:bg-emerald-700 min-h-[44px]"
+                >
+                  📱 Scan QR Code
+                </button>
+              </>
+            ) : verifyMethod === 'code' ? (
+              <>
+                <p className="text-sm text-amber-800 mb-3">
+                  Ask LGU staff at the event for today&apos;s code.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => onEnterCode?.(quest)}
+                  className="w-full px-4 py-3 bg-emerald-600 text-white rounded-xl font-semibold flex items-center justify-center gap-2 hover:bg-emerald-700 min-h-[44px]"
+                >
+                  🔢 Enter Event Code
+                </button>
+              </>
+            ) : (
+              <p className="text-sm text-amber-800">
+                ✍️ LGU staff will verify you in person at check-in.
+              </p>
+            )}
+          </div>
+        )}
         
         <button
           type="button"
@@ -379,7 +445,7 @@ function CancelConfirmModal({ isOpen, onClose, onConfirm, isLoading, questTitle 
 }
 
 export default function CommunityActivitiesPage() {
-  const { user } = useAuth()
+  const { user, loading: authLoading } = useAuth()
   const [searchParams] = useSearchParams()
   const focusQuestId = searchParams.get('focusQuestId')
   
@@ -398,6 +464,8 @@ export default function CommunityActivitiesPage() {
   const [userLocation, setUserLocation] = useState(null)
   const [locationLoading, setLocationLoading] = useState(false)
   const [locationError, setLocationError] = useState(null)
+  const [showQRScanner, setShowQRScanner] = useState(false)
+  const [codeQuest, setCodeQuest] = useState(null)
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type })
@@ -405,13 +473,20 @@ export default function CommunityActivitiesPage() {
   }
 
   const loadQuests = useCallback(async () => {
+    setError(null)
     try {
+      if (user) {
+        await auth.authStateReady()
+      }
       const season = await getActiveSeason()
       
       if (season) {
         setActiveSeason(season)
-        const questList = await listQuestsBySeason(season.id)
-        
+        let questList = await listQuestsBySeason(season.id)
+        if (questList.length > 0 && user) {
+          questList = await reconcileOverbookedQuestSlots(questList)
+        }
+
         if (questList.length > 0) {
           setQuests(questList)
           
@@ -423,7 +498,11 @@ export default function CommunityActivitiesPage() {
             })
             setParticipations(partsMap)
             
-            await expireMyStaleParticipations(user.uid)
+            try {
+              await expireMyStaleParticipations(user.uid)
+            } catch (expireErr) {
+              console.warn('Expire stale participations:', expireErr?.message || expireErr)
+            }
             const refreshedParts = await getUserParticipations(user.uid)
             const refreshedMap = {}
             refreshedParts.forEach(p => {
@@ -447,16 +526,29 @@ export default function CommunityActivitiesPage() {
       } else {
         setUseMockData(true)
       }
-    } catch {
-      setUseMockData(true)
+    } catch (err) {
+      console.error('Error loading quests:', err)
+      const msg = err?.message || ''
+      if (msg.includes('permission') || err?.code === 'permission-denied') {
+        setError(
+          'Could not load quest data (Firestore permission). Sign in, hard-refresh, and deploy the latest firestore.rules if this persists.'
+        )
+      } else if (msg.includes('BLOCKED') || err?.message?.includes('network')) {
+        setError(
+          'Firestore was blocked by a browser extension. Pause ad blockers for localhost:5173 and refresh.'
+        )
+      } else {
+        setUseMockData(true)
+      }
     } finally {
       setLoading(false)
     }
   }, [user])
 
   useEffect(() => {
+    if (authLoading) return
     loadQuests()
-  }, [loadQuests])
+  }, [loadQuests, authLoading])
 
   const handleLocationRequest = async () => {
     if (!navigator.geolocation) {
@@ -598,8 +690,8 @@ export default function CommunityActivitiesPage() {
   const beginnerQuests = useMemo(() => {
     return quests
       .filter(q => {
-        const slotsLeft = (q.capacity || 0) - (q.reservedCount || 0)
-        return slotsLeft > 0 && isQuestActiveNow(q)
+        const { slotsLeft, isFull } = getQuestSlotInfo(q)
+        return !isFull && slotsLeft > 0 && isQuestActiveNow(q)
       })
       .sort((a, b) => (a.points || 0) - (b.points || 0))
       .slice(0, 3)
@@ -620,12 +712,32 @@ export default function CommunityActivitiesPage() {
     handleJoin(questId)
   }
 
+  const refreshParticipations = async () => {
+    if (!user) return
+    const userParts = await getUserParticipations(user.uid)
+    const partsMap = {}
+    userParts.forEach((p) => {
+      partsMap[p.questId] = p
+    })
+    setParticipations(partsMap)
+  }
+
+  const handleVerifySuccess = async (result) => {
+    await refreshParticipations()
+    if (result.autoApproved) {
+      showToast(`🎉 Quest completed! You earned ${result.points} QP!`, 'success')
+    } else {
+      showToast('✅ Submitted! LGU will review and release your points shortly.', 'success')
+    }
+  }
+
   const handleJoin = async (questId) => {
     if (!user) return
     setActionLoading(questId)
     setError(null)
-    
+
     try {
+      await auth.authStateReady()
       const quest = quests.find(q => q.id === questId)
       await joinQuest({
         uid: user.uid,
@@ -699,6 +811,23 @@ export default function CommunityActivitiesPage() {
     const daysLeft = Math.ceil((endDate - now) / (1000 * 60 * 60 * 24))
     if (daysLeft <= 0) return 'Season ended'
     return `Ends in ${daysLeft} day${daysLeft > 1 ? 's' : ''}`
+  }
+
+  const questVerifyProps = {
+    onScanQR: () => {
+      if (!user) {
+        showToast('Sign in to verify quests', 'error')
+        return
+      }
+      setShowQRScanner(true)
+    },
+    onEnterCode: (q) => {
+      if (!user) {
+        showToast('Sign in to verify quests', 'error')
+        return
+      }
+      setCodeQuest(q)
+    },
   }
 
   return (
@@ -829,6 +958,7 @@ export default function CommunityActivitiesPage() {
                           isLoading={actionLoading === quest.id}
                           focused={focusQuestId === quest.id}
                           extraBadge={daysLabel}
+                          {...questVerifyProps}
                         />
                       )
                     })}
@@ -863,6 +993,7 @@ export default function CommunityActivitiesPage() {
                         isLoading={actionLoading === quest.id}
                         focused={focusQuestId === quest.id}
                         extraBadge={quest.impact?.label ? `Impact: ${quest.impact.label}` : 'High impact'}
+                        {...questVerifyProps}
                       />
                     ))}
                   </div>
@@ -914,6 +1045,7 @@ export default function CommunityActivitiesPage() {
                           isLoading={actionLoading === quest.id}
                           focused={focusQuestId === quest.id}
                           distanceKm={quest.distanceKm}
+                          {...questVerifyProps}
                         />
                       ))}
                     </div>
@@ -951,6 +1083,7 @@ export default function CommunityActivitiesPage() {
                   }}
                   isLoading={actionLoading === quest.id}
                   focused={focusQuestId === quest.id}
+                  {...questVerifyProps}
                 />
               ))
             )}
@@ -971,6 +1104,19 @@ export default function CommunityActivitiesPage() {
             setSeenOnboarding(user.uid, activeSeason.id)
           }
         }}
+      />
+
+      <QRScannerModal
+        isOpen={showQRScanner}
+        onClose={() => setShowQRScanner(false)}
+        onSuccess={handleVerifySuccess}
+      />
+
+      <EventCodeModal
+        isOpen={!!codeQuest}
+        quest={codeQuest}
+        onClose={() => setCodeQuest(null)}
+        onSuccess={handleVerifySuccess}
       />
 
       <CancelConfirmModal
