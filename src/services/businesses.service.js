@@ -1,7 +1,6 @@
 /**
  * Businesses Service Layer
- * Backend-ready service for business management
- * Uses Firestore when VITE_USE_FIRESTORE_DATA=true, falls back to mock data
+ * Loads from Firestore when available and merges with local mock data for demos.
  */
 
 import { getDocs, collection } from 'firebase/firestore'
@@ -14,24 +13,43 @@ const BUSINESSES_COLLECTION = 'businesses'
 
 let businessesCache = null
 
+function mapCategoryToType(category) {
+  switch (category) {
+    case 'food_dining':
+      return BUSINESS_TYPES.restaurant
+    case 'tourism_recreation':
+    case 'accommodation':
+      return BUSINESS_TYPES.attraction
+    case 'retail_shopping':
+    case 'services':
+    case 'agriculture':
+    case 'other':
+    default:
+      return BUSINESS_TYPES.shop
+  }
+}
+
 function normalizeBusinessDoc(docSnap) {
   const data = docSnap.data()
+  const category = data.category || ''
   return {
     id: docSnap.id,
     name: data.name || '',
-    category: data.category || '',
-    type: data.type || BUSINESS_TYPES.shop,
+    category: category,
+    type: data.type || mapCategoryToType(category),
     description: data.description || '',
-    position: normalizePosition(data.position),
+    position: normalizePosition(data.position || data.location),
+    barangay: data.barangay || '',
     address: data.address || '',
-    phone: data.phone || '',
+    phone: data.phone || data.contactNumber || '',
     hours: data.hours || '',
     priceRange: data.priceRange || '₱',
     specialties: data.specialties || [],
     features: data.features || [],
-    images: normalizeImages(data.images),
+    images: normalizeImages(data.images || data.photos),
     website: data.website || null,
-    socialMedia: data.socialMedia || {},
+    socialMedia: data.socialMedia || data.facebook ? { facebook: data.facebook } : {},
+    isActive: data.isActive !== false,
   }
 }
 
@@ -48,47 +66,79 @@ function normalizeImages(images) {
   return []
 }
 
+function mergeWithMock(firestoreList) {
+  const live = firestoreList || []
+  const firestoreIds = new Set(live.map(b => String(b.id)))
+  const mockOnly = mockBusinesses.filter(b => !firestoreIds.has(String(b.id)))
+  return [...live, ...mockOnly]
+}
+
 async function fetchFromFirestore() {
   try {
     const querySnapshot = await getDocs(collection(db, BUSINESSES_COLLECTION))
     if (querySnapshot.empty) {
-      return null
+      return []
     }
-    const businesses = querySnapshot.docs.map(normalizeBusinessDoc)
-    return businesses
-  } catch {
+    return querySnapshot.docs
+      .map(normalizeBusinessDoc)
+      .filter(b => b.isActive !== false)
+  } catch (error) {
+    if (import.meta.env.DEV) {
+      console.warn('[businesses] Firestore fetch failed:', error)
+    }
     return null
   }
 }
 
+async function clearMapPlacesCache() {
+  try {
+    const { clearPlacesCache } = await import('../features/map/mapHelpers')
+    clearPlacesCache()
+  } catch {
+    // ignore circular import edge cases
+  }
+}
+
 export async function listBusinesses({ forceRefresh = false } = {}) {
-  if (USE_FIRESTORE) {
-    if (forceRefresh) {
-      businessesCache = null
-    }
-    
-    if (!businessesCache) {
-      const firestoreData = await fetchFromFirestore()
-      
-      if (firestoreData && firestoreData.length > 0) {
-        businessesCache = firestoreData
-        writeCache(CACHE_KEYS.businesses, businessesCache)
-        return { data: businessesCache, source: 'live' }
-      }
-      
+  if (forceRefresh) {
+    businessesCache = null
+    await clearMapPlacesCache()
+  }
+
+  if (!businessesCache) {
+    const firestoreData = await fetchFromFirestore()
+
+    if (firestoreData === null) {
       const cached = readCache(CACHE_KEYS.businesses)
-      if (cached) {
+      if (cached?.data?.length) {
         businessesCache = cached.data
         return { data: businessesCache, source: 'cache' }
       }
-      
+      businessesCache = mockBusinesses
       return { data: mockBusinesses, source: 'mock' }
     }
-    
-    return { data: businessesCache, source: 'live' }
+
+    if (firestoreData.length > 0 || USE_FIRESTORE) {
+      const merged = mergeWithMock(firestoreData)
+      businessesCache = merged
+      writeCache(CACHE_KEYS.businesses, merged)
+      const source =
+        firestoreData.length === 0
+          ? 'mock'
+          : merged.length > firestoreData.length
+            ? 'mixed'
+            : 'live'
+      return { data: merged, source }
+    }
+
+    businessesCache = mockBusinesses
+    return { data: mockBusinesses, source: 'mock' }
   }
-  
-  return { data: mockBusinesses, source: 'mock' }
+
+  return {
+    data: businessesCache,
+    source: businessesCache.length > mockBusinesses.length ? 'live' : 'mock',
+  }
 }
 
 export async function getBusinessById(id) {
@@ -120,11 +170,14 @@ export async function searchBusinesses(query = '', filters = {}) {
 export async function getFeaturedBusinesses() {
   const { data } = await listBusinesses()
   const FEATURED_IDS = [1, 2, 3]
-  return data.filter(b => FEATURED_IDS.includes(b.id))
+  const featured = data.filter(b => FEATURED_IDS.includes(b.id))
+  if (featured.length > 0) return featured
+  return data.slice(0, 3)
 }
 
-export function clearBusinessesCache() {
+export async function clearBusinessesCache() {
   businessesCache = null
+  await clearMapPlacesCache()
 }
 
 export function getBusinessesLastSynced() {

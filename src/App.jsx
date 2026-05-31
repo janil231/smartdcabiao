@@ -28,6 +28,7 @@ import LGUCheckinPage from './pages/lgu/LGUCheckinPage'
 import LGUVoucherVerifyPage from './pages/lgu/LGUVoucherVerifyPage'
 import LGUMerchantInsightsPage from './pages/lgu/LGUMerchantInsightsPage'
 import ProfilePage from './pages/ProfilePage'
+import RegisterBusinessPage from './pages/RegisterBusinessPage'
 
 function App() {
   return (
@@ -55,6 +56,7 @@ function App() {
                   <Route path="/about" element={<AboutPage />} />
                   <Route path="/suggest" element={<SuggestPlacePage />} />
                   <Route path="/profile" element={<ProfilePage />} />
+                  <Route path="/register-business" element={<RegisterBusinessPage />} />
                   <Route path="/lgu" element={<LGUDashboardPage />} />
                   <Route path="/lgu/places" element={<LGUPlacesPage />} />
                   <Route path="/lgu/places/:type/new" element={<LGUPlaceFormPage />} />

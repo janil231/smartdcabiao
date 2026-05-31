@@ -115,6 +115,12 @@ export default function Navbar() {
     checkAdmin()
   }, [user])
 
+  useEffect(() => {
+    if (location.state?.openLogin) {
+      setAuthModalOpen(true)
+    }
+  }, [location.state?.openLogin])
+
   const visibleMainLinks = mainLinks.filter(link => {
     if (link.adminOnly && !isUserAdmin) return false
     if (link.authOnly && !user) return false

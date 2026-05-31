@@ -1,0 +1,168 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isSubmissionOwner() {
+      return isSignedIn() && (
+        resource.data.submittedBy == request.auth.uid
+        || resource.data.createdByUid == request.auth.uid
+      );
+    }
+
+    // ── Public directories ──────────────────────────────────────────
+    match /businesses/{businessId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /destinations/{destinationId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ── Submissions (Suggest Place + List My Business) ────────────
+    match /submissions/{submissionId} {
+      allow create: if isSignedIn()
+        && (
+          !('submittedBy' in request.resource.data)
+          || request.resource.data.submittedBy == request.auth.uid
+        )
+        && (
+          !('createdByUid' in request.resource.data)
+          || request.resource.data.createdByUid == request.auth.uid
+        );
+
+      allow read: if isAdmin() || isSubmissionOwner();
+      allow update, delete: if isAdmin();
+    }
+
+    // ── Issue reports ─────────────────────────────────────────────
+    match /reports/{reportId} {
+      allow create: if isSignedIn();
+      allow read: if isAdmin()
+        || (isSignedIn() && resource.data.createdByUid == request.auth.uid);
+      allow update, delete: if isAdmin();
+    }
+
+    // ── Reviews ───────────────────────────────────────────────────
+    match /reviews/{reviewId} {
+      allow read: if resource.data.status == 'approved'
+        || (isSignedIn() && resource.data.uid == request.auth.uid)
+        || isAdmin();
+
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.status == 'pending';
+
+      allow update: if isSignedIn()
+        && resource.data.uid == request.auth.uid
+        && resource.data.status == 'pending'
+        || isAdmin();
+
+      allow delete: if false;
+    }
+
+    // ── Seasons & quests ──────────────────────────────────────────
+    match /seasons/{seasonId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+
+      match /vouchers/{voucherId} {
+        allow read: if true;
+        allow create, update, delete: if isAdmin();
+      }
+
+      match /voucherRedemptions/{redemptionId} {
+        function isRedemptionOwner() {
+          return isSignedIn()
+            && (
+              resource.data.uid == request.auth.uid
+              || redemptionId.split('_')[1] == request.auth.uid
+            );
+        }
+
+        allow read: if isAdmin() || isRedemptionOwner();
+        allow create: if isSignedIn()
+          && request.resource.data.uid == request.auth.uid;
+        allow update: if isAdmin();
+        allow delete: if false;
+      }
+    }
+
+    match /quests/{questId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /participations/{participationId} {
+      allow read: if isAdmin()
+        || (isSignedIn() && resource.data.uid == request.auth.uid);
+
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid;
+
+      allow update: if isAdmin()
+        || (isSignedIn()
+          && resource.data.uid == request.auth.uid
+          && request.resource.data.uid == request.auth.uid);
+
+      allow delete: if false;
+    }
+
+    // ── Points, balances, impact, leaderboard ───────────────────
+    match /seasonBalances/{balanceId} {
+      allow read: if isAdmin()
+        || (isSignedIn() && balanceId.matches('.*_' + request.auth.uid + '$'));
+      allow create, update: if isAdmin() || isSignedIn();
+      allow delete: if false;
+    }
+
+    match /pointsLedger/{entryId} {
+      allow read: if isAdmin()
+        || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /impactLedger/{entryId} {
+      allow read: if isAdmin()
+        || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    match /seasonUserStats/{statsId} {
+      allow read: if true;
+      allow create, update: if isAdmin() || isSignedIn();
+      allow delete: if false;
+    }
+
+    // ── User settings ─────────────────────────────────────────────
+    match /users/{userId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    // ── Admin & audit ─────────────────────────────────────────────
+    match /admins/{adminId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /auditLogs/{logId} {
+      allow read, create: if isAdmin();
+      allow update, delete: if false;
+    }
+  }
+}

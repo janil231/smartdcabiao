@@ -13,15 +13,15 @@ function unwrapList(result) {
   return []
 }
 
-export async function getAllPlaces() {
-  if (cachedPlaces) {
+export async function getAllPlaces({ forceRefresh = false } = {}) {
+  if (!forceRefresh && cachedPlaces) {
     return cachedPlaces
   }
 
   try {
     const [businessesResult, destinationsResult] = await Promise.all([
-      listBusinesses(),
-      listDestinations()
+      listBusinesses({ forceRefresh }),
+      listDestinations({ forceRefresh })
     ])
 
     const businesses = unwrapList(businessesResult)

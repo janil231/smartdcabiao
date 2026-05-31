@@ -44,10 +44,26 @@ service cloud.firestore {
     // SUBMISSIONS
     // ========================================
     
-    // Anyone can submit, only admins can read/update
+    // Authenticated users can submit; admins manage review workflow
     match /submissions/{submissionId} {
-      allow read: if isAdmin();
-      allow create: if true;
+      allow create: if isSignedIn()
+        && (
+          !('submittedBy' in request.resource.data)
+          || request.resource.data.submittedBy == request.auth.uid
+        )
+        && (
+          !('createdByUid' in request.resource.data)
+          || request.resource.data.createdByUid == request.auth.uid
+        );
+
+      // Admin sees all; users can read their own (Profile status, List My Business)
+      allow read: if isAdmin() || (
+        isSignedIn() && (
+          resource.data.submittedBy == request.auth.uid
+          || resource.data.createdByUid == request.auth.uid
+        )
+      );
+
       allow update, delete: if isAdmin();
     }
     

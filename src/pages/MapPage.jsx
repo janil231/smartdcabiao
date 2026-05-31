@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import Navbar from '../components/Navbar'
+import LoginModal from '../components/Auth/LoginModal'
 import FavoriteButton from '../components/FavoriteButton'
+import { useAuth } from '../contexts/AuthContext'
+import { useLanguage } from '../contexts/LanguageContext'
 import {
   BUSINESS_TYPES,
 } from '../data'
@@ -14,7 +17,7 @@ import MapResults from '../features/map/MapResults'
 import MapUtilities from '../features/map/MapUtilities'
 import InvalidateMapSize from '../features/map/InvalidateMapSize'
 import MapInitialView from '../features/map/MapInitialView'
-import { getAllPlaces } from '../features/map/mapHelpers'
+import { getAllPlaces, clearPlacesCache } from '../features/map/mapHelpers'
 import { getBusinessById } from '../services/businesses.service'
 import 'leaflet/dist/leaflet.css'
 
@@ -81,6 +84,10 @@ function FocusOnPlace() {
 }
 
 export default function MapPage() {
+  const navigate = useNavigate()
+  const { user } = useAuth()
+  const { t } = useLanguage()
+  const [authModalOpen, setAuthModalOpen] = useState(false)
   const [selectedPOI, setSelectedPOI] = useState(null)
   const [showResults, setShowResults] = useState(false)
   const [locationMessage, setLocationMessage] = useState('')
@@ -93,7 +100,8 @@ export default function MapPage() {
     async function loadPlaces() {
       try {
         setLoading(true)
-        const places = await getAllPlaces()
+        clearPlacesCache()
+        const places = await getAllPlaces({ forceRefresh: true })
         setAllPlaces(places)
       } catch (error) {
         console.error('Error loading places:', error)
@@ -147,6 +155,14 @@ export default function MapPage() {
     }
   }
 
+  const handleAddPlace = () => {
+    if (user) {
+      navigate('/register-business')
+    } else {
+      setAuthModalOpen(true)
+    }
+  }
+
   return (
     <div className="flex flex-col min-h-screen">
       <Navbar />
@@ -170,7 +186,7 @@ export default function MapPage() {
       {/* Main Content */}
       <div className="flex-1 min-h-0 flex">
         {/* Map Container */}
-        <div className="flex-1 min-h-0">
+        <div className="flex-1 min-h-0 relative">
           <MapContainer
             center={CABIAO_CENTER}
             zoom={CABIAO_DEFAULT_ZOOM}
@@ -237,6 +253,14 @@ export default function MapPage() {
               onLocationError={handleLocationError}
             />
           </MapContainer>
+
+          <button
+            type="button"
+            onClick={handleAddPlace}
+            className="absolute bottom-24 right-4 z-[1000] inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+          >
+            {t('registerBusiness.addAPlace')}
+          </button>
         </div>
 
         {/* Desktop Results List */}
@@ -351,6 +375,7 @@ export default function MapPage() {
           onClose={() => setShowResults(false)}
         />
       </div>
+      <LoginModal isOpen={authModalOpen} onClose={() => setAuthModalOpen(false)} />
     </div>
   )
 }

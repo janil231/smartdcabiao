@@ -7,11 +7,14 @@ import {
   where, 
   orderBy, 
   writeBatch, 
-  serverTimestamp 
+  serverTimestamp,
+  addDoc,
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { isWithinCabiaoBounds } from '../constants/cabiaoGeo'
+import { BUSINESS_TYPES } from '../data/businesses'
 import { logAudit, AUDIT_ACTIONS } from './audit.service'
+import { clearBusinessesCache } from './businesses.service'
 
 const SUBMISSIONS_COLLECTION = 'submissions'
 const BUSINESSES_COLLECTION = 'businesses'
@@ -183,17 +186,23 @@ export async function approveSubmissionAndPublish(id, { reviewedBy, reviewedByEm
   }
 }
 
-export async function rejectSubmission(id, { reviewedBy, reviewedByEmail, notes } = {}) {
+export async function rejectSubmission(id, { reviewedBy, reviewedByEmail, notes, rejectionReason } = {}) {
   const submission = await getSubmissionById(id)
-  const result = await updateSubmissionStatus(id, {
-    status: 'rejected',
-    reviewedBy,
-    reviewedByEmail,
-    reviewedAt: serverTimestamp(),
-    notes
-  })
-  
-  if (result.success) {
+  const reason = rejectionReason || notes || null
+
+  try {
+    const docRef = doc(db, SUBMISSIONS_COLLECTION, id)
+    const batch = writeBatch(db)
+    batch.update(docRef, {
+      status: 'rejected',
+      reviewedBy: reviewedBy || null,
+      reviewedByEmail: reviewedByEmail || null,
+      reviewedAt: serverTimestamp(),
+      notes: notes || null,
+      rejectionReason: reason,
+    })
+    await batch.commit()
+
     await logAudit({
       action: AUDIT_ACTIONS.SUBMISSION_REJECTED,
       targetType: 'submission',
@@ -201,14 +210,132 @@ export async function rejectSubmission(id, { reviewedBy, reviewedByEmail, notes 
       adminUid: reviewedBy,
       adminEmail: reviewedByEmail,
       meta: {
-        name: submission?.name,
+        name: submission?.businessName || submission?.name,
         previousStatus: submission?.status,
-        notes
+        notes: reason,
+        type: submission?.type,
       }
     })
+
+    return { success: true }
+  } catch (error) {
+    console.error('Error rejecting submission:', error)
+    return { success: false, error: error.message }
   }
-  
-  return result
+}
+
+export async function approveBusinessSubmission(submissionId, submissionData, adminUid, adminEmail) {
+  try {
+    const submission = submissionData || await getSubmissionById(submissionId)
+    if (!submission) {
+      return { success: false, error: 'Submission not found' }
+    }
+
+    if (submission.type !== 'business') {
+      return { success: false, error: 'Not a business registration submission' }
+    }
+
+    const location = submission.location
+    if (!location?.lat || !location?.lng) {
+      return { success: false, error: 'Missing business location' }
+    }
+
+    if (!isWithinCabiaoBounds(location.lat, location.lng)) {
+      return {
+        success: false,
+        error: `Location outside Cabiao bounds. Lat: ${location.lat}, Lng: ${location.lng}`,
+      }
+    }
+
+    const category = submission.category || 'other'
+    const type =
+      category === 'food_dining'
+        ? BUSINESS_TYPES.restaurant
+        : category === 'tourism_recreation' || category === 'accommodation'
+          ? BUSINESS_TYPES.attraction
+          : BUSINESS_TYPES.shop
+
+    const businessData = {
+      name: submission.businessName,
+      category,
+      type,
+      description: submission.description,
+      barangay: submission.barangay,
+      address: submission.address,
+      location: submission.location,
+      position: [location.lat, location.lng],
+      contactNumber: submission.contactNumber || '',
+      phone: submission.contactNumber || '',
+      facebook: submission.facebook || '',
+      website: submission.website || '',
+      photos:
+        Array.isArray(submission.photoURLs) && submission.photoURLs.length > 0
+          ? submission.photoURLs.filter(Boolean)
+          : submission.photoURL
+            ? [submission.photoURL]
+            : [],
+      images:
+        Array.isArray(submission.photoURLs) && submission.photoURLs.length > 0
+          ? submission.photoURLs.filter(Boolean)
+          : submission.photoURL
+            ? [submission.photoURL]
+            : [],
+      isActive: true,
+      isVerified: false,
+      verified: false,
+      submittedBy: submission.submittedBy,
+      sourceSubmissionId: submissionId,
+      createdAt: serverTimestamp(),
+      rating: 0,
+      reviewCount: 0,
+    }
+
+    const businessRef = await addDoc(collection(db, BUSINESSES_COLLECTION), businessData)
+
+    const submissionRef = doc(db, SUBMISSIONS_COLLECTION, submissionId)
+    const batch = writeBatch(db)
+    batch.update(submissionRef, {
+      status: 'approved',
+      reviewedBy: adminUid || null,
+      reviewedByEmail: adminEmail || null,
+      reviewedAt: serverTimestamp(),
+      approvedBusinessId: businessRef.id,
+    })
+    await batch.commit()
+
+    await clearBusinessesCache()
+
+    await logAudit({
+      action: AUDIT_ACTIONS.SUBMISSION_APPROVED,
+      targetType: 'submission',
+      targetId: submissionId,
+      adminUid,
+      adminEmail,
+      meta: {
+        name: submission.businessName,
+        type: 'business',
+        previousStatus: submission.status,
+        approvedBusinessId: businessRef.id,
+      }
+    })
+
+    await logAudit({
+      action: AUDIT_ACTIONS.PUBLISHED_BUSINESS,
+      targetType: 'business',
+      targetId: businessRef.id,
+      adminUid,
+      adminEmail,
+      meta: {
+        name: submission.businessName,
+        sourceSubmissionId: submissionId,
+      }
+    })
+
+    return { success: true, businessId: businessRef.id }
+  } catch (error) {
+    console.error('Error approving business submission:', error)
+    return { success: false, error: error.message }
+  }
 }
 
 export async function requestMoreInfoSubmission(id, { reviewedBy, reviewedByEmail, notes } = {}) {

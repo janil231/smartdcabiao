@@ -37,6 +37,16 @@ service firebase.storage {
         request.resource.contentType.matches('image/(jpeg|jpg|png|webp)');
       allow delete: if isAdmin();
     }
+
+    // Business registration photos (List My Business feature)
+    match /submissions/{userId}/{fileName} {
+      allow read: if true;
+      allow write: if isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|jpg|png|webp)');
+      allow delete: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+    }
     
     // ========================================
     // GENERAL
@@ -73,9 +83,13 @@ places/
 
 ## Deploying Rules
 
+Deploy both Firestore and Storage rules from the repo root:
+
 ```bash
-firebase deploy --only storage
+firebase deploy --only firestore:rules,storage
 ```
+
+Rule source files: `firestore.rules`, `storage.rules`, configured in `firebase.json`.
 
 ## Testing Locally
 

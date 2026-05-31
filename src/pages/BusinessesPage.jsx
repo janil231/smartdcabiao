@@ -1,12 +1,15 @@
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { useState, useEffect, useCallback } from 'react'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
+import LoginModal from '../components/Auth/LoginModal'
 import SearchBar from '../components/SearchBar'
 import FavoriteButton from '../components/FavoriteButton'
 import AppImage from '../components/ui/AppImage'
 import Reveal from '../components/animations/Reveal'
 import DataStatusBadge from '../components/DataStatusBadge'
+import { useAuth } from '../contexts/AuthContext'
+import { useLanguage } from '../contexts/LanguageContext'
 import { getBusinessImage } from '../utils/placeImages'
 import { getBusinessesLastSynced } from '../services/businesses.service'
 import { BUSINESS_TYPES } from '../data'
@@ -106,12 +109,24 @@ const FILTER_OPTIONS = [
 
 export default function BusinessesPage() {
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
+  const { user } = useAuth()
+  const { t } = useLanguage()
+  const [authModalOpen, setAuthModalOpen] = useState(false)
   const [filter, setFilter] = useState('all')
   const [businesses, setBusinesses] = useState([])
   const [loading, setLoading] = useState(true)
   const [dataSource, setDataSource] = useState('live')
   const [lastSynced, setLastSynced] = useState(null)
   const searchQuery = searchParams.get('search') || ''
+
+  const handleAddBusiness = () => {
+    if (user) {
+      navigate('/register-business')
+    } else {
+      setAuthModalOpen(true)
+    }
+  }
 
   const loadBusinesses = useCallback(async (forceRefresh = false) => {
     try {
@@ -256,10 +271,26 @@ export default function BusinessesPage() {
               </div>
             </div>
           )}
+
+          <Reveal delay={300}>
+            <div className="mt-10 sm:mt-12 bg-emerald-50 border border-emerald-200 rounded-2xl p-6 sm:p-8 text-center">
+              <div className="text-3xl mb-3">🏪</div>
+              <h2 className="text-lg font-semibold text-gray-900">{t('registerBusiness.dontSeeYourBusiness')}</h2>
+              <p className="text-sm text-gray-600 mt-2 max-w-md mx-auto">{t('registerBusiness.getListedCTA')}</p>
+              <button
+                type="button"
+                onClick={handleAddBusiness}
+                className="mt-5 inline-flex items-center px-5 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition"
+              >
+                + {t('registerBusiness.addYourBusiness')}
+              </button>
+            </div>
+          </Reveal>
         </div>
         </div>
       </main>
       <Footer />
+      <LoginModal isOpen={authModalOpen} onClose={() => setAuthModalOpen(false)} />
     </div>
   )
 }

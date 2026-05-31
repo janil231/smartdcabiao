@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
+import { MapContainer, TileLayer, Marker } from 'react-leaflet'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
 import { useAuth } from '../contexts/AuthContext'
@@ -7,9 +8,12 @@ import { isAdmin } from '../services/adminRole.service'
 import { 
   listSubmissions, 
   approveSubmissionAndPublish, 
+  approveBusinessSubmission,
   rejectSubmission,
   requestMoreInfoSubmission 
 } from '../services/adminSubmissions.service'
+import { getCategoryLabel } from '../constants/cabiaoBarangays'
+import 'leaflet/dist/leaflet.css'
 import { 
   listReports, 
   markReportInProgress, 
@@ -56,6 +60,7 @@ const TABS = {
 function StatusBadge({ status }) {
   const styles = {
     new: 'bg-blue-100 text-blue-800',
+    pending: 'bg-yellow-100 text-yellow-800',
     approved: 'bg-green-100 text-green-800',
     rejected: 'bg-red-100 text-red-800',
     needs_info: 'bg-yellow-100 text-yellow-800',
@@ -69,29 +74,121 @@ function StatusBadge({ status }) {
   )
 }
 
+function getSubmissionDisplayName(submission) {
+  if (submission?.type === 'business') return submission.businessName || 'Business Registration'
+  return submission?.name || 'Untitled'
+}
+
+function BusinessSubmissionPhotoGallery({ urls, alt }) {
+  const [lightboxIndex, setLightboxIndex] = useState(null)
+
+  return (
+    <div>
+      <p className="text-sm font-medium text-gray-500 mb-2">
+        Business Photos ({urls.length})
+      </p>
+      <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">
+        {urls.map((url, i) => (
+          <button
+            key={`${url}-${i}`}
+            type="button"
+            onClick={() => setLightboxIndex(i)}
+            className="relative shrink-0 rounded-lg overflow-hidden border border-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+          >
+            <img
+              src={url}
+              alt={`${alt} ${i + 1}`}
+              className="h-28 w-28 sm:h-32 sm:w-32 object-cover"
+            />
+            {i === 0 && (
+              <span className="absolute bottom-1 left-1 px-1.5 py-0.5 text-[10px] font-semibold bg-emerald-600 text-white rounded">
+                Cover
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+      {lightboxIndex != null && (
+        <div
+          className="fixed inset-0 z-[3000] bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setLightboxIndex(null)}
+          role="presentation"
+        >
+          <button
+            type="button"
+            className="absolute top-4 right-4 text-white text-2xl hover:opacity-80"
+            onClick={() => setLightboxIndex(null)}
+            aria-label="Close"
+          >
+            ✕
+          </button>
+          <img
+            src={urls[lightboxIndex]}
+            alt={alt}
+            className="max-h-[90vh] max-w-full object-contain rounded-lg"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function BusinessLocationPreview({ location }) {
+  if (!location?.lat || !location?.lng) return null
+  return (
+    <div className="h-48 rounded-lg overflow-hidden border border-gray-200">
+      <MapContainer
+        center={[location.lat, location.lng]}
+        zoom={15}
+        className="h-full w-full"
+        scrollWheelZoom={false}
+        dragging={false}
+        zoomControl={false}
+      >
+        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+        <Marker position={[location.lat, location.lng]} />
+      </MapContainer>
+    </div>
+  )
+}
+
 function SubmissionModal({ submission, onClose, onApprove, onReject, onNeedsInfo, isLoading }) {
   if (!submission) return null
 
-  const position = submission.position
+  const isBusinessRegistration = submission.type === 'business'
+  const displayName = getSubmissionDisplayName(submission)
+  const position = isBusinessRegistration ? submission.location : submission.position
   let isOutOfBounds = false
   if (position) {
-    const [lat, lng] = Array.isArray(position) ? position : [position.lat, position.lng]
+    const lat = Array.isArray(position) ? position[0] : position.lat
+    const lng = Array.isArray(position) ? position[1] : position.lng
     isOutOfBounds = lat && lng && !isWithinCabiaoBounds(lat, lng)
   }
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="p-6 border-b border-gray-200">
+      <div
+        className={`rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto ${
+          isBusinessRegistration ? 'bg-emerald-50 border border-emerald-200' : 'bg-white'
+        }`}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className={`p-6 border-b ${isBusinessRegistration ? 'border-emerald-200' : 'border-gray-200'}`}>
           <div className="flex justify-between items-start">
             <div>
-              <h2 className="text-xl font-bold text-gray-900">{submission.name}</h2>
-              <div className="flex gap-2 mt-2">
+              <h2 className="text-xl font-bold text-gray-900">{displayName}</h2>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {isBusinessRegistration && (
+                  <span className="px-2 py-1 bg-emerald-100 text-emerald-800 rounded text-xs font-medium">
+                    🏪 Business Registration
+                  </span>
+                )}
                 <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-medium">
-                  {submission.entryType?.toUpperCase() || 'BUSINESS'}
+                  {(isBusinessRegistration ? 'business' : submission.entryType)?.toUpperCase() || 'BUSINESS'}
                 </span>
                 <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-medium">
-                  {submission.category?.toUpperCase() || 'OTHER'}
+                  {(isBusinessRegistration ? getCategoryLabel(submission.category) : submission.category)?.toUpperCase() || 'OTHER'}
                 </span>
                 <StatusBadge status={submission.status} />
               </div>
@@ -104,7 +201,18 @@ function SubmissionModal({ submission, onClose, onApprove, onReject, onNeedsInfo
           </div>
         </div>
 
-        <div className="p-6 space-y-4">
+        <div className="p-6 space-y-4 bg-white rounded-b-xl">
+          {isBusinessRegistration && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+              <p className="text-sm font-semibold text-amber-900">Owner / Representative</p>
+              <p className="text-gray-900 font-medium">{submission.ownerName}</p>
+              <p className="text-sm text-gray-700 mt-1">{submission.ownerContact}</p>
+              {submission.isOwner && (
+                <p className="text-xs text-emerald-700 mt-2">✓ Confirmed as owner or authorized representative</p>
+              )}
+            </div>
+          )}
+
           {submission.barangay && (
             <div>
               <p className="text-sm font-medium text-gray-500">Barangay</p>
@@ -121,12 +229,28 @@ function SubmissionModal({ submission, onClose, onApprove, onReject, onNeedsInfo
             <p className="text-sm font-medium text-gray-500">Description</p>
             <p className="text-gray-900">{submission.description}</p>
           </div>
-          {submission.contact && (
+
+          {isBusinessRegistration && submission.contactNumber && (
+            <div>
+              <p className="text-sm font-medium text-gray-500">Contact Number</p>
+              <p className="text-gray-900">{submission.contactNumber}</p>
+            </div>
+          )}
+
+          {(submission.contact && !isBusinessRegistration) && (
             <div>
               <p className="text-sm font-medium text-gray-500">Contact</p>
               <p className="text-gray-900">{submission.contact}</p>
             </div>
           )}
+
+          {submission.facebook && (
+            <div>
+              <p className="text-sm font-medium text-gray-500">Facebook</p>
+              <p className="text-gray-900">{submission.facebook}</p>
+            </div>
+          )}
+
           {submission.website && (
             <div>
               <p className="text-sm font-medium text-gray-500">Website</p>
@@ -135,7 +259,21 @@ function SubmissionModal({ submission, onClose, onApprove, onReject, onNeedsInfo
               </a>
             </div>
           )}
-          {submission.images?.length > 0 && (
+
+          {isBusinessRegistration && (() => {
+            const galleryUrls =
+              Array.isArray(submission.photoURLs) && submission.photoURLs.length > 0
+                ? submission.photoURLs.filter(Boolean)
+                : submission.photoURL
+                  ? [submission.photoURL]
+                  : []
+            if (galleryUrls.length === 0) return null
+            return (
+              <BusinessSubmissionPhotoGallery urls={galleryUrls} alt={displayName} />
+            )
+          })()}
+
+          {submission.images?.length > 0 && !isBusinessRegistration && (
             <div>
               <p className="text-sm font-medium text-gray-500 mb-2">Images ({submission.images.length})</p>
               <div className="flex flex-wrap gap-2">
@@ -147,11 +285,15 @@ function SubmissionModal({ submission, onClose, onApprove, onReject, onNeedsInfo
               </div>
             </div>
           )}
+
           {position && (
             <div>
-              <p className="text-sm font-medium text-gray-500">Location</p>
-              <p className="text-gray-900">
-                Lat: {Array.isArray(position) ? position[0] : position.lat}, 
+              <p className="text-sm font-medium text-gray-500 mb-2">Location</p>
+              {isBusinessRegistration ? (
+                <BusinessLocationPreview location={submission.location} />
+              ) : null}
+              <p className="text-gray-900 mt-2">
+                Lat: {Array.isArray(position) ? position[0] : position.lat},
                 Lng: {Array.isArray(position) ? position[1] : position.lng}
               </p>
               {isOutOfBounds && (
@@ -161,39 +303,53 @@ function SubmissionModal({ submission, onClose, onApprove, onReject, onNeedsInfo
               )}
             </div>
           )}
+
           <div>
             <p className="text-sm font-medium text-gray-500">Submitted</p>
             <p className="text-gray-900">
               {submission.createdAt ? new Date(submission.createdAt).toLocaleString() : 'Unknown'}
-              {submission.createdByEmail && ` by ${submission.createdByEmail}`}
+              {(submission.submitterEmail || submission.createdByEmail) &&
+                ` by ${submission.submitterEmail || submission.createdByEmail}`}
             </p>
           </div>
-          {submission.notes && (
+
+          {(submission.rejectionReason || submission.notes) && (
             <div>
-              <p className="text-sm font-medium text-gray-500">Notes</p>
-              <p className="text-gray-900">{submission.notes}</p>
+              <p className="text-sm font-medium text-gray-500">Notes / Rejection Reason</p>
+              <p className="text-gray-900">{submission.rejectionReason || submission.notes}</p>
+            </div>
+          )}
+
+          {submission.approvedBusinessId && (
+            <div>
+              <p className="text-sm font-medium text-gray-500">Published Business</p>
+              <Link to={`/businesses/${submission.approvedBusinessId}`} className="text-emerald-600 hover:underline">
+                View business listing →
+              </Link>
             </div>
           )}
         </div>
 
-        <div className="p-6 border-t border-gray-200 bg-gray-50 flex flex-wrap gap-3">
+        <div className="p-6 border-t border-gray-200 bg-gray-50 flex flex-wrap gap-3 rounded-b-xl">
           <button
             onClick={onApprove}
-            disabled={isLoading || isOutOfBounds}
+            disabled={isLoading || isOutOfBounds || submission.status === 'approved'}
             className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed font-medium"
           >
-            {isLoading ? 'Processing...' : 'Approve & Publish'}
+            {isLoading ? 'Processing...' : isBusinessRegistration ? 'Approve & Add to Directory' : 'Approve & Publish'}
           </button>
-          <button
-            onClick={onNeedsInfo}
-            disabled={isLoading}
-            className="flex-1 px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 disabled:bg-gray-300 font-medium"
-          >
-            Needs More Info
-          </button>
+          {!isBusinessRegistration && (
+            <button
+              onClick={onNeedsInfo}
+              disabled={isLoading}
+              className="flex-1 px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 disabled:bg-gray-300 font-medium"
+            >
+              Needs More Info
+            </button>
+          )}
           <button
             onClick={onReject}
-            disabled={isLoading}
+            disabled={isLoading || submission.status === 'rejected'}
             className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-gray-300 font-medium"
           >
             Reject
@@ -853,6 +1009,8 @@ export default function LGUDashboardPage() {
   const [checkingAdmin, setCheckingAdmin] = useState(true)
   const [isUserAdmin, setIsUserAdmin] = useState(false)
   const [selectedSubmission, setSelectedSubmission] = useState(null)
+  const [showRejectModal, setShowRejectModal] = useState(false)
+  const [rejectReason, setRejectReason] = useState('')
   const [selectedReport, setSelectedReport] = useState(null)
   const [selectedReview, setSelectedReview] = useState(null)
   const [selectedParticipation, setSelectedParticipation] = useState(null)
@@ -1094,16 +1252,32 @@ export default function LGUDashboardPage() {
     if (!selectedSubmission) return
     setActionLoading(true)
     try {
-      const result = await approveSubmissionAndPublish(selectedSubmission.id, {
-        reviewedBy: user?.uid,
-        reviewedByEmail: user?.email
-      })
+      let result
+      if (selectedSubmission.type === 'business') {
+        result = await approveBusinessSubmission(
+          selectedSubmission.id,
+          selectedSubmission,
+          user?.uid,
+          user?.email
+        )
+        if (result.success) {
+          showToast('Business approved and added to the directory!')
+        }
+      } else {
+        result = await approveSubmissionAndPublish(selectedSubmission.id, {
+          reviewedBy: user?.uid,
+          reviewedByEmail: user?.email
+        })
+        if (result.success) {
+          showToast('Successfully published!')
+        }
+      }
+
       if (result.success) {
-        showToast('Successfully published!')
         setSelectedSubmission(null)
         loadData()
       } else {
-        showToast(result.error || 'Failed to publish', 'error')
+        showToast(result.error || 'Failed to approve', 'error')
       }
     } catch (error) {
       showToast(error.message, 'error')
@@ -1112,18 +1286,31 @@ export default function LGUDashboardPage() {
     }
   }
 
-  const handleReject = async () => {
+  const handleRejectClick = () => {
+    setRejectReason('')
+    setShowRejectModal(true)
+  }
+
+  const handleConfirmReject = async () => {
     if (!selectedSubmission) return
+    if (!rejectReason.trim()) {
+      showToast('Please provide a rejection reason', 'error')
+      return
+    }
+
     setActionLoading(true)
     try {
       const result = await rejectSubmission(selectedSubmission.id, {
         reviewedBy: user?.uid,
         reviewedByEmail: user?.email,
-        notes: 'Rejected by admin'
+        rejectionReason: rejectReason.trim(),
+        notes: rejectReason.trim(),
       })
       if (result.success) {
         showToast('Submission rejected')
+        setShowRejectModal(false)
         setSelectedSubmission(null)
+        setRejectReason('')
         loadData()
       } else {
         showToast(result.error || 'Failed to reject', 'error')
@@ -1582,7 +1769,7 @@ export default function LGUDashboardPage() {
     return <NotAuthorized />
   }
 
-  const newSubmissions = submissions.filter(s => s.status === 'new').length
+  const newSubmissions = submissions.filter(s => s.status === 'new' || s.status === 'pending').length
   const newReports = reports.filter(r => r.status === 'new').length
   const pendingQuests = questParticipations.filter(p => p.status === 'joined').length
 
@@ -1702,11 +1889,26 @@ export default function LGUDashboardPage() {
                         <tr 
                           key={sub.id} 
                           onClick={() => setSelectedSubmission(sub)}
-                          className="hover:bg-gray-50 cursor-pointer"
+                          className={`hover:bg-gray-50 cursor-pointer ${
+                            sub.type === 'business' ? 'bg-emerald-50/50' : ''
+                          }`}
                         >
-                          <td className="px-4 py-3 font-medium text-gray-900">{sub.name}</td>
-                          <td className="px-4 py-3 text-gray-600">{sub.entryType || 'business'}</td>
-                          <td className="px-4 py-3 text-gray-600">{sub.category || '-'}</td>
+                          <td className="px-4 py-3 font-medium text-gray-900">
+                            <div className="flex items-center gap-2">
+                              {sub.type === 'business' && (
+                                <span className="text-xs px-1.5 py-0.5 bg-emerald-100 text-emerald-800 rounded font-medium">
+                                  🏪
+                                </span>
+                              )}
+                              {getSubmissionDisplayName(sub)}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-gray-600">
+                            {sub.type === 'business' ? 'Business Registration' : (sub.entryType || 'business')}
+                          </td>
+                          <td className="px-4 py-3 text-gray-600">
+                            {sub.type === 'business' ? getCategoryLabel(sub.category) : (sub.category || '-')}
+                          </td>
                           <td className="px-4 py-3 text-gray-600">{sub.barangay || '-'}</td>
                           <td className="px-4 py-3 text-gray-600 text-sm">
                             {sub.createdAt ? new Date(sub.createdAt).toLocaleDateString() : '-'}
@@ -2296,10 +2498,49 @@ export default function LGUDashboardPage() {
           submission={selectedSubmission}
           onClose={() => setSelectedSubmission(null)}
           onApprove={handleApprove}
-          onReject={handleReject}
+          onReject={handleRejectClick}
           onNeedsInfo={handleNeedsInfo}
           isLoading={actionLoading}
         />
+      )}
+
+      {showRejectModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Reject Submission</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Provide a reason for rejecting this submission. The submitter will see this on their profile.
+            </p>
+            <textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              rows={4}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+              placeholder="Reason for rejection..."
+            />
+            <div className="flex gap-3 mt-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRejectModal(false)
+                  setRejectReason('')
+                }}
+                disabled={actionLoading}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmReject}
+                disabled={actionLoading || !rejectReason.trim()}
+                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-gray-300"
+              >
+                {actionLoading ? 'Rejecting...' : 'Confirm Reject'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {selectedReport && (
