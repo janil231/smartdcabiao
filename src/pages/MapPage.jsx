@@ -121,13 +121,13 @@ function MapFlyTo({ target, zoom = 16 }) {
 function MapResizer() {
   const map = useMap()
   useEffect(() => {
-    const timer = setTimeout(() => {
-      map.invalidateSize()
-    }, 100)
+    const timer1 = setTimeout(() => map.invalidateSize(), 100)
+    const timer2 = setTimeout(() => map.invalidateSize(), 500)
     const onResize = () => map.invalidateSize()
     window.addEventListener('resize', onResize)
     return () => {
-      clearTimeout(timer)
+      clearTimeout(timer1)
+      clearTimeout(timer2)
       window.removeEventListener('resize', onResize)
     }
   }, [map])
@@ -243,11 +243,18 @@ export default function MapPage() {
   }
 
   return (
-    <div className="flex flex-col min-h-0 h-[100dvh] max-h-[100dvh] overflow-hidden sm:min-h-screen sm:h-auto sm:max-h-none">
+    <div className="flex flex-col min-h-0 h-[100dvh] max-h-[100dvh] overflow-hidden sm:h-screen sm:max-h-screen">
       <Navbar />
 
-      <div className="hidden sm:block shrink-0">
+      <div className="hidden sm:block shrink-0 relative">
         <MapFilterBar {...filterBarProps} />
+        <button
+          type="button"
+          onClick={handleAddPlace}
+          className="hidden sm:inline-flex lg:hidden absolute right-4 top-1/2 z-20 -translate-y-1/2 items-center gap-2 rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 min-h-[40px]"
+        >
+          {t('registerBusiness.addAPlace')}
+        </button>
       </div>
 
       {locationMessage && (
@@ -258,8 +265,8 @@ export default function MapPage() {
         </div>
       )}
 
-      <div className="relative flex-1 min-h-0 w-full h-[calc(100dvh-8rem)] sm:h-auto sm:flex sm:min-h-0 sm:flex-1">
-        <div className="absolute inset-0 sm:relative sm:flex-1 sm:min-h-0 sm:h-full map-mobile-chrome">
+      <div className="relative flex min-h-0 w-full flex-1 h-[calc(100dvh-8rem)] sm:h-auto">
+        <div className="absolute inset-0 sm:relative sm:flex-1 sm:min-h-0 sm:h-full sm:w-full map-mobile-chrome">
           <div className="sm:hidden absolute inset-0 z-[400] pointer-events-none">
             <MapFilterBar {...filterBarProps} />
           </div>
@@ -381,14 +388,6 @@ export default function MapPage() {
             </button>
           </div>
 
-          <button
-            type="button"
-            onClick={handleAddPlace}
-            className="hidden sm:inline-flex absolute bottom-6 right-4 z-[1000] items-center gap-2 rounded-full bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 min-h-[44px]"
-          >
-            {t('registerBusiness.addAPlace')}
-          </button>
-
           {isMobile && selectedPOI && (
             <>
               <div
@@ -435,13 +434,21 @@ export default function MapPage() {
         </div>
 
         {/* Desktop Results List */}
-        <aside className="hidden lg:flex lg:w-[380px] h-full border-l border-gray-200 bg-white">
-          <div className="h-full flex flex-col w-full">
-            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+        <aside className="hidden lg:flex lg:w-[380px] shrink-0 min-h-0 h-full border-l border-gray-200 bg-white">
+          <div className="flex h-full min-h-0 w-full flex-col">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 px-6 py-4">
               <h3 className="font-semibold text-gray-900">
                 <span className="text-emerald-600">{filteredPlaces.length}</span>
                 <span className="ml-1 text-gray-700">Result{filteredPlaces.length !== 1 ? 's' : ''}</span>
               </h3>
+              <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleAddPlace}
+                className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+              >
+                {t('registerBusiness.addAPlace')}
+              </button>
               {filteredPlaces.length > 1 && (
                 <button
                   type="button"
@@ -454,9 +461,10 @@ export default function MapPage() {
                   </svg>
                 </button>
               )}
+              </div>
             </div>
             
-            <div className="flex-1 overflow-y-auto p-6 space-y-3">
+            <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-3">
               {filteredPlaces.length === 0 ? (
                 <div className="text-center py-8">
                   <div className="mx-auto mb-4 h-12 w-12 rounded-full bg-gray-100 flex items-center justify-center">
