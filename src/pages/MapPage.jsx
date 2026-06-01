@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import { MapContainer, TileLayer, Marker, Popup, ZoomControl, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, ZoomControl, useMap, useMapEvents } from 'react-leaflet'
 import { Link } from 'react-router-dom'
 import { useIsMobile } from '../hooks/useIsMobile'
 import L from 'leaflet'
@@ -134,6 +134,30 @@ function MapResizer() {
   return null
 }
 
+function MapInstanceCapture({ mapRef }) {
+  const map = useMap()
+  useEffect(() => {
+    mapRef.current = map
+    return () => {
+      mapRef.current = null
+    }
+  }, [map, mapRef])
+  return null
+}
+
+function MapClickHandler({ onMapClick, enabled }) {
+  useMapEvents({
+    click: () => {
+      if (enabled) onMapClick()
+    },
+  })
+  return null
+}
+
+function getPlaceKey(poi) {
+  return `${poi.poiType}-${poi.id}`
+}
+
 export default function MapPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
@@ -145,6 +169,9 @@ export default function MapPage() {
   const [loading, setLoading] = useState(true)
   const [flyTarget, setFlyTarget] = useState(null)
   const isMobile = useIsMobile()
+  const mapRef = useRef(null)
+  const markerRefs = useRef({})
+  const flyTimeoutRef = useRef(null)
 
   const { filters, setFilter, clearFilters, hasActiveFilters } = useMapFilters()
 
@@ -181,8 +208,42 @@ export default function MapPage() {
     return results
   }, [allPlaces, filters])
 
+  useEffect(() => {
+    return () => {
+      if (flyTimeoutRef.current) clearTimeout(flyTimeoutRef.current)
+    }
+  }, [])
+
   const handlePOISelect = (poi) => {
     setSelectedPOI(poi)
+  }
+
+  const flyToPlace = (poi) => {
+    if (!poi?.position || isMobile) return
+
+    setSelectedPOI(poi)
+
+    const map = mapRef.current
+    if (map) {
+      map.flyTo(poi.position, FOCUS_ZOOM, { duration: 1.2, easeLinearity: 0.25 })
+    } else {
+      setFlyTarget(poi.position)
+    }
+
+    if (flyTimeoutRef.current) clearTimeout(flyTimeoutRef.current)
+    flyTimeoutRef.current = setTimeout(() => {
+      const marker = markerRefs.current[getPlaceKey(poi)]
+      marker?.openPopup()
+      flyTimeoutRef.current = null
+    }, 1300)
+
+    const cardEl = document.querySelector(`[data-place-id="${getPlaceKey(poi)}"]`)
+    cardEl?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }
+
+  const handleDesktopMapClick = () => {
+    setSelectedPOI(null)
+    mapRef.current?.closePopup()
   }
 
   const handleLocationFound = () => {
@@ -286,14 +347,24 @@ export default function MapPage() {
             
             {!isMobile && <ZoomControl position="topright" />}
 
-            {filteredPlaces.map((poi) => (
+            {filteredPlaces.map((poi) => {
+              const placeKey = getPlaceKey(poi)
+              return (
               <Marker
-                key={`${poi.poiType}-${poi.id}`}
+                key={placeKey}
                 position={poi.position}
                 icon={getMarkerIcon(poi.type)}
+                ref={(ref) => {
+                  if (ref) markerRefs.current[placeKey] = ref
+                  else delete markerRefs.current[placeKey]
+                }}
                 eventHandlers={{
                   click: () => {
-                    if (isMobile) handlePOISelect(poi)
+                    if (isMobile) {
+                      handlePOISelect(poi)
+                    } else {
+                      setSelectedPOI(poi)
+                    }
                   },
                 }}
               >
@@ -301,12 +372,12 @@ export default function MapPage() {
                 <Popup>
                   <div className="min-w-[200px] text-left">
                     <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1">
+                      <div className="flex-1 min-w-0">
                         <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium text-white ${TYPE_COLORS[poi.type]?.bg || 'bg-gray-500'}`}>
                           {poi.category}
                         </span>
                         <h3 className="mt-2 font-semibold text-gray-900">{poi.name}</h3>
-                        <p className="mt-1 text-sm text-gray-600">{poi.description}</p>
+                        <p className="mt-1 text-sm text-gray-600 line-clamp-2">{poi.description}</p>
                         <p className="mt-1 text-xs text-gray-500">
                           📍 {poi.barangay || (poi.address?.split(',')[0] || 'Cabiao')}
                         </p>
@@ -317,28 +388,21 @@ export default function MapPage() {
                         className="flex-shrink-0"
                       />
                     </div>
-                    <div className="mt-3 flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handlePOISelect(poi)}
-                        className="flex-1 inline-flex items-center justify-center gap-1 rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 transition"
-                      >
-                        Select
-                      </button>
-                      <a
-                        href={poi.type === BUSINESS_TYPES.attraction ? `/destinations/${poi.id}` : `/businesses/${poi.id}`}
-                        className="inline-flex items-center justify-center gap-1 rounded border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 transition"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        Details
-                      </a>
-                    </div>
+                    <Link
+                      to={detailPath(poi)}
+                      className="mt-3 flex w-full items-center justify-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 transition"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      View Details →
+                    </Link>
                   </div>
                 </Popup>
                 )}
               </Marker>
-            ))}
+            )})}
 
+            <MapInstanceCapture mapRef={mapRef} />
+            <MapClickHandler onMapClick={handleDesktopMapClick} enabled={!isMobile} />
             <MapFlyTo
               target={flyTarget}
               zoom={
@@ -346,7 +410,7 @@ export default function MapPage() {
                 flyTarget[0] === DEFAULT_MAP_VIEW.center[0] &&
                 flyTarget[1] === DEFAULT_MAP_VIEW.center[1]
                   ? DEFAULT_MAP_VIEW.zoom
-                  : 16
+                  : FOCUS_ZOOM
               }
             />
             <ApplyDefaultMapView />
@@ -475,19 +539,20 @@ export default function MapPage() {
                   <p className="text-gray-500">No places found matching your filters.</p>
                 </div>
               ) : (
-                filteredPlaces.map((poi) => (
-                  <div
-                    key={`${poi.poiType}-${poi.id}`}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => handlePOISelect(poi)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") handlePOISelect(poi)
-                    }}
-                    className={`w-full rounded-lg border p-4 text-left transition cursor-pointer ${
-                      selectedPOI?.id === poi.id && selectedPOI?.poiType === poi.poiType
-                        ? 'border-emerald-500 bg-emerald-50'
-                        : 'border-gray-200 bg-white hover:bg-gray-50'
+                filteredPlaces.map((poi) => {
+                  const placeKey = getPlaceKey(poi)
+                  const isSelected =
+                    selectedPOI?.id === poi.id && selectedPOI?.poiType === poi.poiType
+                  return (
+                  <button
+                    key={placeKey}
+                    type="button"
+                    data-place-id={placeKey}
+                    onClick={() => flyToPlace(poi)}
+                    className={`w-full rounded-lg border-2 p-4 text-left transition ${
+                      isSelected
+                        ? 'border-emerald-500 bg-emerald-50 shadow-md'
+                        : 'border-gray-200 bg-white hover:border-emerald-300 hover:shadow-sm'
                     }`}
                   >
                     <div className="flex items-start gap-3">
@@ -518,8 +583,8 @@ export default function MapPage() {
                         </div>
                       </div>
                     </div>
-                  </div>
-                ))
+                  </button>
+                )})
               )}
             </div>
           </div>
