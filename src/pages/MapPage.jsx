@@ -390,7 +390,7 @@ export default function MapPage() {
                     </div>
                     <Link
                       to={detailPath(poi)}
-                      className="mt-3 flex w-full items-center justify-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 transition"
+                      className="mt-3 flex w-full items-center justify-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold !text-white hover:!text-white hover:bg-emerald-700 transition no-underline"
                       onClick={(e) => e.stopPropagation()}
                     >
                       View Details →
