@@ -1,17 +1,14 @@
-import { Link, useSearchParams, useNavigate } from 'react-router-dom'
-import { useState, useEffect, useCallback } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
 import LoginModal from '../components/Auth/LoginModal'
-import SearchBar from '../components/SearchBar'
 import FavoriteButton from '../components/FavoriteButton'
 import AppImage from '../components/ui/AppImage'
 import Reveal from '../components/animations/Reveal'
-import DataStatusBadge from '../components/DataStatusBadge'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import { getBusinessImage } from '../utils/placeImages'
-import { getBusinessesLastSynced } from '../services/businesses.service'
 import { BUSINESS_TYPES } from '../data'
 
 const TYPE_STYLES = {
@@ -108,7 +105,6 @@ const FILTER_OPTIONS = [
 ]
 
 export default function BusinessesPage() {
-  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const { user } = useAuth()
   const { t } = useLanguage()
@@ -116,9 +112,7 @@ export default function BusinessesPage() {
   const [filter, setFilter] = useState('all')
   const [businesses, setBusinesses] = useState([])
   const [loading, setLoading] = useState(true)
-  const [dataSource, setDataSource] = useState('live')
-  const [lastSynced, setLastSynced] = useState(null)
-  const searchQuery = searchParams.get('search') || ''
+  const [searchQuery, setSearchQuery] = useState('')
 
   const handleAddBusiness = () => {
     if (user) {
@@ -128,42 +122,46 @@ export default function BusinessesPage() {
     }
   }
 
-  const loadBusinesses = useCallback(async (forceRefresh = false) => {
+  const loadBusinesses = useCallback(async () => {
     try {
       setLoading(true)
       const { listBusinesses } = await import('../services/businesses.service')
-      const { data, source } = await listBusinesses({ forceRefresh })
-      
-      let filtered = data
-      if (searchQuery.trim()) {
-        const lowercaseQuery = searchQuery.toLowerCase()
-        filtered = data.filter(b =>
-          b.name.toLowerCase().includes(lowercaseQuery) ||
-          b.category?.toLowerCase().includes(lowercaseQuery) ||
-          b.description?.toLowerCase().includes(lowercaseQuery)
-        )
-      }
-      if (filter && filter !== 'all') {
-        filtered = filtered.filter(b => b.type === filter)
-      }
-      
-      setBusinesses(filtered)
-      setDataSource(source)
-      setLastSynced(getBusinessesLastSynced())
+      const { data } = await listBusinesses()
+      setBusinesses(data)
     } catch {
-      setDataSource('mock')
+      // Silent fallback
     } finally {
       setLoading(false)
     }
-  }, [searchQuery, filter])
+  }, [])
 
   useEffect(() => {
     loadBusinesses()
   }, [loadBusinesses])
 
-  const handleRefresh = useCallback(async () => {
-    await loadBusinesses(true)
-  }, [loadBusinesses])
+  const filteredBusinesses = useMemo(() => {
+    let list = businesses
+
+    if (filter !== 'all') {
+      list = list.filter(b => b.type === filter)
+    }
+
+    const q = searchQuery.trim().toLowerCase()
+    if (q) {
+      list = list.filter(b => {
+        const haystack = [
+          b.name,
+          b.description,
+          b.category,
+          b.barangay,
+          b.address,
+        ].filter(Boolean).join(' ').toLowerCase()
+        return haystack.includes(q)
+      })
+    }
+
+    return list
+  }, [businesses, filter, searchQuery])
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -183,21 +181,32 @@ export default function BusinessesPage() {
             </p>
           </Reveal>
 
-          <Reveal delay={120}>
-            <div className="mt-4">
-              <DataStatusBadge 
-                source={dataSource} 
-                lastSyncedAt={lastSynced}
-                onRefresh={handleRefresh}
-              />
-            </div>
-          </Reveal>
-
           {/* Search and Filter Section - Sticky on mobile */}
           <Reveal delay={160}>
             <div className="mt-6 sm:mt-8 space-y-4 sticky top-[72px] sm:top-0 z-30 -mx-4 sm:mx-0 px-4 sm:px-0 py-3 sm:py-0 bg-white/95 sm:bg-transparent backdrop-blur-sm sm:backdrop-blur-none -top-3 sm:top-0">
-              <div className="max-w-md">
-                <SearchBar placeholder="Search businesses..." />
+              <div className="max-w-md relative">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search businesses..."
+                  className="w-full px-4 py-3 pr-10 rounded-2xl border border-emerald-300 bg-white focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 focus:outline-none text-sm"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                </span>
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-10 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 w-6 h-6 flex items-center justify-center"
+                    aria-label="Clear search"
+                  >
+                    ✕
+                  </button>
+                )}
               </div>
               
               <div className="flex flex-wrap gap-2">
@@ -225,7 +234,7 @@ export default function BusinessesPage() {
               <p className="text-sm text-gray-600">
               {loading ? 'Loading...' : (
                 <>
-                  {businesses.length} {businesses.length === 1 ? 'business' : 'businesses'} found
+                  {filteredBusinesses.length} {filteredBusinesses.length === 1 ? 'business' : 'businesses'} found
                   {searchQuery && ` for "${searchQuery}"`}
                   {filter !== 'all' && ` in ${FILTER_OPTIONS.find(f => f.value === filter)?.label.toLowerCase()}`}
                 </>
@@ -251,23 +260,49 @@ export default function BusinessesPage() {
                 </div>
               ))}
             </div>
-          ) : businesses.length > 0 ? (
+          ) : filteredBusinesses.length > 0 ? (
             <div className="mt-6 sm:mt-10 grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-              {businesses.map((business) => (
+              {filteredBusinesses.map((business) => (
                 <BusinessCard key={business.id} business={business} />
               ))}
             </div>
           ) : (
             <div className="mt-6 sm:mt-10 text-center">
               <div className="rounded-lg bg-gray-50 px-6 py-12">
-                <p className="text-gray-600">No businesses found matching your criteria.</p>
-                <button
-                  type="button"
-                  onClick={() => setFilter('all')}
-                  className="mt-4 text-sm font-medium text-emerald-600 hover:text-emerald-700"
-                >
-                  Clear filters
-                </button>
+                <div className="text-5xl mb-3">🔍</div>
+                <h3 className="text-lg font-semibold text-gray-800 mb-1">
+                  No results found
+                </h3>
+                <p className="text-sm text-gray-500">
+                  {searchQuery
+                    ? `We couldn't find anything matching "${searchQuery}".`
+                    : 'No businesses match the selected filter.'}
+                </p>
+                <p className="text-xs text-gray-400 mt-2">
+                  Try a different search or filter.
+                </p>
+                {(searchQuery || filter !== 'all') && (
+                  <div className="mt-4 flex gap-3 justify-center">
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchQuery('')}
+                        className="text-sm font-medium text-emerald-600 hover:text-emerald-700"
+                      >
+                        Clear search
+                      </button>
+                    )}
+                    {filter !== 'all' && (
+                      <button
+                        type="button"
+                        onClick={() => setFilter('all')}
+                        className="text-sm font-medium text-emerald-600 hover:text-emerald-700"
+                      >
+                        Clear filter
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}

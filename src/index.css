@@ -3,14 +3,10 @@
 @layer base {
   html {
     @apply scroll-smooth;
-    overflow-x: hidden;
-    max-width: 100vw;
   }
 
   body {
     @apply antialiased text-gray-800 bg-white;
-    overflow-x: hidden;
-    max-width: 100vw;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -139,7 +135,7 @@
 
 .page-enter {
   animation: page-enter 220ms ease-out forwards;
-  will-change: opacity, transform;
+  will-change: opacity;
 }
 
 .reveal {
@@ -162,4 +158,39 @@
 .leaflet-div-icon.custom-marker {
   background: none !important;
   border: none !important;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@keyframes pulse-slow {
+  0%, 100% { box-shadow: 0 4px 12px rgba(5, 150, 105, 0.4); }
+  50% { box-shadow: 0 4px 24px rgba(5, 150, 105, 0.7); }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+
+.animate-slide-up {
+  animation: slide-up 0.25s ease-out;
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 2.5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-slide-up,
+  .animate-pulse-slow {
+    animation: none;
+  }
 }

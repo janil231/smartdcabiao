@@ -104,6 +104,7 @@ export default function Navbar() {
   const [isUserAdmin, setIsUserAdmin] = useState(false)
   const [moreDropdownOpen, setMoreDropdownOpen] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const [scrolled, setScrolled] = useState(false)
   const location = useLocation()
   const { user, logout } = useAuth()
 
@@ -128,6 +129,13 @@ export default function Navbar() {
   useEffect(() => {
     setMenuOpen(false)
   }, [location.pathname])
+
+  useEffect(() => {
+    const handleScroll = () => setScrolled(window.scrollY > 8)
+    handleScroll()
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [])
 
   useEffect(() => {
     if (!menuOpen) return
@@ -274,10 +282,10 @@ export default function Navbar() {
 
   return (
     <>
-    <header className={`sticky top-0 z-[1100] w-full shadow-sm ${
+    <header className={`sticky top-0 z-[1100] w-full transition-shadow duration-200 ${
       isHomePage 
-        ? 'border-b border-white/10 bg-slate-900/55 backdrop-blur-lg' 
-        : 'border-b border-gray-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80'
+        ? `border-b border-white/10 bg-slate-900/55 backdrop-blur-lg ${scrolled ? 'shadow-md' : 'shadow-none'}` 
+        : `border-b border-gray-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 ${scrolled ? 'shadow-md' : 'shadow-none'}`
     }`}>
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <nav className="flex h-16 items-center justify-between gap-4">

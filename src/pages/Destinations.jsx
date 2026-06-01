@@ -1,14 +1,11 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
-import { useSearchParams, Link } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
-import SearchBar from '../components/SearchBar'
 import FavoriteButton from '../components/FavoriteButton'
 import AppImage from '../components/ui/AppImage'
-import DataStatusBadge from '../components/DataStatusBadge'
 import RatingSummary from '../components/reviews/RatingSummary'
 import { getDestinationImage } from '../utils/placeImages'
-import { getDestinationsLastSynced } from '../services/destinations.service'
 
 // Consistent styling with BusinessCard
 const TYPE_STYLES = {
@@ -112,55 +109,32 @@ function DestinationCard({ destination }) {
 }
 
 export default function DestinationsPage() {
-  const [searchParams] = useSearchParams()
   const [destinations, setDestinations] = useState([])
   const [barangays, setBarangays] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
-  const [dataSource, setDataSource] = useState('live')
-  const [lastSynced, setLastSynced] = useState(null)
-  const searchQuery = searchParams.get('search') || ''
+  const [searchQuery, setSearchQuery] = useState('')
 
-  const loadDestinations = useCallback(async (forceRefresh = false) => {
+  const loadDestinations = useCallback(async () => {
     try {
       setLoading(true)
       const { listDestinations: fetchDestinations } = await import('../services/destinations.service')
-      const { data, source } = await fetchDestinations({ forceRefresh })
+      const { data } = await fetchDestinations()
       
-      let filtered = data
-      if (searchQuery.trim()) {
-        const lowercaseQuery = searchQuery.toLowerCase()
-        filtered = data.filter(d =>
-          d.name.toLowerCase().includes(lowercaseQuery) ||
-          d.description?.toLowerCase().includes(lowercaseQuery) ||
-          d.barangay?.toLowerCase().includes(lowercaseQuery) ||
-          d.tags?.some(tag => tag.toLowerCase().includes(lowercaseQuery))
-        )
-      }
-      if (filter && filter !== 'all') {
-        filtered = filtered.filter(d => d.barangay === filter)
-      }
-      
-      setDestinations(filtered)
-      setDataSource(source)
-      setLastSynced(getDestinationsLastSynced())
+      setDestinations(data)
       
       const barangaysData = [...new Set(data.map(d => d.barangay).filter(Boolean))].sort()
       setBarangays(barangaysData)
     } catch {
-      setDataSource('mock')
+      // Silent fallback
     } finally {
       setLoading(false)
     }
-  }, [searchQuery, filter])
+  }, [])
 
   // Load destinations and barangays
   useEffect(() => {
     loadDestinations()
-  }, [loadDestinations])
-
-  const handleRefresh = useCallback(async () => {
-    await loadDestinations(true)
   }, [loadDestinations])
 
   // Build filter options
@@ -168,6 +142,31 @@ export default function DestinationsPage() {
     { value: 'all', label: 'All Barangays' },
     ...barangays.map(barangay => ({ value: barangay, label: barangay }))
   ], [barangays])
+
+  const filteredDestinations = useMemo(() => {
+    let list = destinations
+
+    if (filter !== 'all') {
+      list = list.filter(d => d.barangay === filter)
+    }
+
+    const q = searchQuery.trim().toLowerCase()
+    if (q) {
+      list = list.filter(d => {
+        const haystack = [
+          d.name,
+          d.description,
+          d.category,
+          d.barangay,
+          d.address,
+          ...(d.tags || []),
+        ].filter(Boolean).join(' ').toLowerCase()
+        return haystack.includes(q)
+      })
+    }
+
+    return list
+  }, [destinations, filter, searchQuery])
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -181,20 +180,33 @@ export default function DestinationsPage() {
             <p className="mt-2 sm:mt-3 max-w-2xl text-base sm:text-lg text-gray-600">
               Explore beautiful destinations and points of interest in Cabiao. Discover natural attractions, historical sites, and local landmarks.
             </p>
-
-            <div className="mt-4">
-              <DataStatusBadge 
-                source={dataSource} 
-                lastSyncedAt={lastSynced}
-                onRefresh={handleRefresh}
-              />
-            </div>
           </div>
 
           {/* Search and Filter Section - Sticky on mobile */}
           <div className="mt-6 sm:mt-8 space-y-4 sticky top-[72px] sm:top-0 z-30 -mx-4 sm:mx-0 px-4 sm:py-0 py-3 bg-white/95 sm:bg-transparent backdrop-blur-sm sm:backdrop-blur-none -top-3 sm:top-0">
-            <div className="max-w-md">
-              <SearchBar placeholder="Search destinations..." />
+            <div className="max-w-md relative">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search destinations..."
+                className="w-full px-4 py-3 pr-10 rounded-2xl border border-emerald-300 bg-white focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 focus:outline-none text-sm"
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </span>
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-10 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 w-6 h-6 flex items-center justify-center"
+                  aria-label="Clear search"
+                >
+                  ✕
+                </button>
+              )}
             </div>
             
             <div className="flex flex-wrap gap-2">
@@ -220,7 +232,7 @@ export default function DestinationsPage() {
             <p className="text-sm text-gray-600">
               {loading ? 'Loading...' : (
                 <>
-                  {destinations.length} {destinations.length === 1 ? 'destination' : 'destinations'} found
+                  {filteredDestinations.length} {filteredDestinations.length === 1 ? 'destination' : 'destinations'} found
                   {searchQuery && ` for "${searchQuery}"`}
                   {filter !== 'all' && ` in ${filter}`}
                 </>
@@ -245,9 +257,9 @@ export default function DestinationsPage() {
                 </div>
               ))}
             </div>
-          ) : destinations.length > 0 ? (
+          ) : filteredDestinations.length > 0 ? (
             <div className="mt-6 sm:mt-10 grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-              {destinations.map((destination) => (
+              {filteredDestinations.map((destination) => (
                 <DestinationCard key={destination.id} destination={destination} />
               ))}
             </div>
@@ -272,15 +284,32 @@ export default function DestinationsPage() {
                 </div>
                 <h3 className="text-lg font-medium text-gray-900 mb-2">No destinations found</h3>
                 <p className="text-gray-600 mb-4">
-                  Try adjusting your search or filter criteria.
+                  {searchQuery
+                    ? `We couldn't find anything matching "${searchQuery}".`
+                    : 'Try adjusting your search or filter criteria.'}
                 </p>
-                <button
-                  type="button"
-                  onClick={() => { setFilter('all'); window.location.href = '/destinations'; }}
-                  className="text-sm font-medium text-emerald-600 hover:text-emerald-700"
-                >
-                  Clear filters
-                </button>
+                {(searchQuery || filter !== 'all') && (
+                  <div className="flex gap-3 justify-center">
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchQuery('')}
+                        className="text-sm font-medium text-emerald-600 hover:text-emerald-700"
+                      >
+                        Clear search
+                      </button>
+                    )}
+                    {filter !== 'all' && (
+                      <button
+                        type="button"
+                        onClick={() => setFilter('all')}
+                        className="text-sm font-medium text-emerald-600 hover:text-emerald-700"
+                      >
+                        Clear filter
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}

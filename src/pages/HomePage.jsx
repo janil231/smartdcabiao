@@ -5,6 +5,7 @@ import BusinessPromotionCarousel from '../components/BusinessPromotionCarousel'
 import MapPreview from '../components/MapPreview'
 import EventsSection from '../components/EventsSection'
 import SustainableTourismTips from '../components/SustainableTourismTips'
+import FloatingFacebookWidget from '../components/home/FloatingFacebookWidget'
 import Footer from '../components/Footer'
 
 export default function HomePage() {
@@ -19,6 +20,7 @@ export default function HomePage() {
         <EventsSection />
         <SustainableTourismTips />
       </main>
+      <FloatingFacebookWidget />
       <Footer />
     </div>
   )
