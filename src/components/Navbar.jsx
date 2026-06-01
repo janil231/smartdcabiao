@@ -50,8 +50,11 @@ function Dropdown({ isOpen, onClose, children }) {
   if (!isOpen) return null
 
   return (
-    <div ref={dropdownRef} className="absolute right-0 mt-2 w-48 rounded-lg shadow-lg ring-1 ring-black ring-opacity-5">
-      <div className="py-1 bg-white rounded-lg overflow-hidden">
+    <div
+      ref={dropdownRef}
+      className="absolute right-0 z-[1100] mt-2 w-48 rounded-lg bg-white shadow-lg ring-1 ring-black/5"
+    >
+      <div className="py-1 rounded-lg overflow-hidden">
         {children}
       </div>
     </div>
@@ -271,7 +274,7 @@ export default function Navbar() {
 
   return (
     <>
-    <header className={`sticky top-0 z-30 w-full shadow-sm ${
+    <header className={`sticky top-0 z-[1100] w-full shadow-sm ${
       isHomePage 
         ? 'border-b border-white/10 bg-slate-900/55 backdrop-blur-lg' 
         : 'border-b border-gray-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80'

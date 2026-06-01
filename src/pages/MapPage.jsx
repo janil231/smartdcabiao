@@ -265,8 +265,8 @@ export default function MapPage() {
         </div>
       )}
 
-      <div className="relative flex min-h-0 w-full flex-1 h-[calc(100dvh-8rem)] sm:h-auto">
-        <div className="absolute inset-0 sm:relative sm:flex-1 sm:min-h-0 sm:h-full sm:w-full map-mobile-chrome">
+      <div className="relative z-0 flex min-h-0 w-full flex-1 h-[calc(100dvh-8rem)] sm:h-auto">
+        <div className="absolute inset-0 z-0 sm:relative sm:flex-1 sm:min-h-0 sm:h-full sm:w-full map-mobile-chrome">
           <div className="sm:hidden absolute inset-0 z-[400] pointer-events-none">
             <MapFilterBar {...filterBarProps} />
           </div>

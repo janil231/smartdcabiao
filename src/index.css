@@ -42,6 +42,14 @@
   }
 }
 
+/* Keep Leaflet panes/controls below app navbar (z-[1100]) */
+.map-mobile-chrome .leaflet-pane,
+.map-mobile-chrome .leaflet-top,
+.map-mobile-chrome .leaflet-bottom,
+.map-mobile-chrome .leaflet-control-container {
+  z-index: 400 !important;
+}
+
 @keyframes slide-in-right {
   from {
     transform: translateX(100%);
