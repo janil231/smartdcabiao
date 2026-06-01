@@ -119,54 +119,76 @@ export default function VoucherStorePage() {
   const [selectedRedemption, setSelectedRedemption] = useState(null)
 
   useEffect(() => {
-    async function load() {
-      setLoading(true)
+    let cancelled = false
+    ;(async () => {
       try {
         const active = await getActiveSeason()
-        if (!active) {
-          setSeason(null)
-          setVouchers([])
+        if (!cancelled) setSeason(active || null)
+      } catch (err) {
+        console.error('[VoucherStore] Failed to fetch active season:', err)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    if (!season) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const list = await listSeasonVouchers(season.id)
+        if (!cancelled) setVouchers(list)
+      } catch (err) {
+        console.error('[VoucherStore] Failed to fetch vouchers:', err)
+        if (!cancelled) setVouchers([])
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [season])
+
+  useEffect(() => {
+    if (!user?.uid || !season) {
+      setBalance(null)
+      setRedemptions([])
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        let userBalance = await getOrCreateSeasonBalance(season.id, user).catch(() => null)
+
+        const needsRebuild = !userBalance ||
+          (userBalance.pointsEarned === 0 && userBalance.pointsSpent === 0 && userBalance.pointsBalance === 0)
+
+        if (needsRebuild) {
+          await rebuildSeasonBalanceFromLedger({
+            seasonId: season.id,
+            uid: user.uid,
+            userEmail: user.email,
+          }).catch((err) => {
+            console.warn('[VoucherStore] Balance rebuild failed (non-fatal):', err)
+          })
+          userBalance = await getOrCreateSeasonBalance(season.id, user).catch(() => null)
+        }
+
+        const redemptions = await listMyRedemptions(season.id, user.uid).catch(() => [])
+
+        if (!cancelled) {
+          setBalance(userBalance)
+          setRedemptions(redemptions)
+        }
+      } catch (err) {
+        console.warn('[VoucherStore] User data fetch failed (non-fatal):', err)
+        if (!cancelled) {
           setBalance(null)
           setRedemptions([])
-          return
         }
-        setSeason(active)
-        
-        let userBalance = null
-        if (user) {
-          userBalance = await getOrCreateSeasonBalance(active.id, user)
-          
-          const needsRebuild = !userBalance || 
-            (userBalance.pointsEarned === 0 && userBalance.pointsSpent === 0 && userBalance.pointsBalance === 0)
-          
-          if (needsRebuild) {
-            console.log('[VoucherStore] Balance missing or zero, rebuilding from ledger...')
-            await rebuildSeasonBalanceFromLedger({ 
-              seasonId: active.id, 
-              uid: user.uid, 
-              userEmail: user.email 
-            })
-            userBalance = await getOrCreateSeasonBalance(active.id, user)
-          }
-        }
-        
-        const [voucherList, userRedemptions] = await Promise.all([
-          listSeasonVouchers(active.id),
-          user ? listMyRedemptions(active.id, user.uid) : Promise.resolve([]),
-        ])
-        setVouchers(voucherList)
-        setBalance(userBalance)
-        setRedemptions(userRedemptions)
-      } catch {
-        setVouchers([])
-        setBalance(null)
-        setRedemptions([])
-      } finally {
-        setLoading(false)
       }
-    }
-    load()
-  }, [user])
+    })()
+    return () => { cancelled = true }
+  }, [user, season])
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type })
@@ -180,14 +202,15 @@ export default function VoucherStorePage() {
       const result = await redeemVoucher({ seasonId: season.id, voucherId: voucher.id, user })
       setRedeemSuccessCode(result.code)
       showToast('Voucher redeemed!')
-      const [userBalance, userRedemptions, voucherList] = await Promise.all([
-        getOrCreateSeasonBalance(season.id, user),
-        listMyRedemptions(season.id, user.uid),
-        listSeasonVouchers(season.id),
-      ])
-      setBalance(userBalance)
-      setRedemptions(userRedemptions)
-      setVouchers(voucherList)
+      Promise.all([
+        getOrCreateSeasonBalance(season.id, user).catch(() => null),
+        listMyRedemptions(season.id, user.uid).catch(() => []),
+        listSeasonVouchers(season.id).catch(() => []),
+      ]).then(([userBalance, userRedemptions, voucherList]) => {
+        setBalance(userBalance)
+        setRedemptions(userRedemptions)
+        setVouchers(voucherList)
+      })
     } catch (error) {
       showToast(error.message || 'Failed to redeem voucher', 'error')
     } finally {
