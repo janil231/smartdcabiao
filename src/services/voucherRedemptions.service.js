@@ -19,11 +19,10 @@ export async function listMyRedemptions(seasonId, uid) {
   if (!seasonId || !uid) return []
 
   const redemptionsRef = collection(db, 'seasons', seasonId, 'voucherRedemptions')
-  const snapshot = await getDocs(redemptionsRef)
+  const q = query(redemptionsRef, where('uid', '==', uid))
+  const snapshot = await getDocs(q)
 
-  return snapshot.docs
-    .map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
-    .filter(r => r.uid === uid)
+  return snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
 }
 
 /**
