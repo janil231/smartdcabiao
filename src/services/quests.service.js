@@ -294,6 +294,74 @@ export async function incrementReservedCount(questId) {
   return adjustQuestReservedCount(questId, 1)
 }
 
+export async function updateQuestActive(questId, isActive) {
+  const questRef = doc(db, QUESTS_COLLECTION, questId)
+  const quest = await getQuestById(questId)
+
+  if (!quest) {
+    throw new Error('Quest not found')
+  }
+
+  await updateDoc(questRef, {
+    status: isActive ? 'active' : 'inactive',
+    isActive: !!isActive,
+  })
+
+  await logAudit({
+    action: isActive ? 'QUEST_ACTIVATED' : 'QUEST_DEACTIVATED',
+    targetType: 'quest',
+    targetId: questId,
+    details: { title: quest.title, isActive },
+  })
+
+  return { success: true }
+}
+
+export async function repairQuestReservedCounts(seasonId) {
+  const questsSnap = await getDocs(
+    query(collection(db, QUESTS_COLLECTION), where('seasonId', '==', seasonId))
+  )
+
+  let repairedCount = 0
+  const repairs = []
+
+  for (const questDoc of questsSnap.docs) {
+    const questId = questDoc.id
+    const currentCount = questDoc.data().reservedCount || 0
+
+    const partsSnap = await getDocs(
+      query(
+        collection(db, 'participations'),
+        where('questId', '==', questId),
+        where('status', '==', 'joined')
+      )
+    )
+    const actualCount = partsSnap.size
+
+    if (actualCount !== currentCount) {
+      await updateDoc(doc(db, QUESTS_COLLECTION, questId), {
+        reservedCount: actualCount,
+      })
+      repairedCount++
+      repairs.push({
+        questId,
+        title: questDoc.data().title,
+        before: currentCount,
+        after: actualCount,
+      })
+    }
+  }
+
+  await logAudit({
+    action: 'REPAIR_QUEST_RESERVED_COUNTS',
+    targetType: 'season',
+    targetId: seasonId,
+    details: { repairedCount, repairs },
+  })
+
+  return { repairedCount, repairs }
+}
+
 export async function seedSampleQuestsForActiveSeason() {
   const activeSeason = await getActiveSeason()
   

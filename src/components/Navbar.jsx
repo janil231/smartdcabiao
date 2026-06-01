@@ -18,7 +18,7 @@ const moreLinks = [
   { label: 'Favorites', to: '/favorites' },
   { label: 'Rewards', to: '/rewards' },
   { label: 'Vouchers', to: '/vouchers' },
-  { label: 'Suggest', to: '/suggest' },
+  { label: 'Suggest', to: '/suggest-destination' },
 ]
 
 function Dropdown({ isOpen, onClose, children }) {

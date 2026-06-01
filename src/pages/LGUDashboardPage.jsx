@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Link } from 'react-router-dom'
+import { useState, useEffect, Fragment } from 'react'
+import { createPortal } from 'react-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { MapContainer, TileLayer, Marker } from 'react-leaflet'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
@@ -31,29 +32,17 @@ import {
   listQuestsBySeason,
   createQuest,
   updateQuest,
-  activateQuest,
-  deactivateQuest,
-  seedSampleQuestsForActiveSeason,
-  seedVisitAndBuyQuestsForActiveSeason,
-  backfillQuestLocationsForSeason,
-  rescheduleDemoQuestsForSeason,
-  backfillQuestVerificationTokensForSeason,
-  ensureQuestVerificationTokensAdmin,
+  updateQuestActive,
+  repairQuestReservedCounts,
 } from '../services/quests.service'
 import { getQuestParticipations, adminMarkCompleted, expireAllStaleParticipations } from '../services/participations.service'
-import {
-  listPendingSelfVerifications,
-  approvePendingVerification,
-  rejectPendingVerification,
-  getEffectiveVerificationMethod,
-} from '../services/questVerification.service'
-import QuestVerificationSetup from '../components/quest/QuestVerificationSetup'
 import { listPendingReviews, setReviewStatus } from '../services/reviews.service'
 import { listTopByPoints, listTopByImpact, IMPACT_UNITS } from '../services/leaderboard.service'
 import { isWithinCabiaoBounds, CABIAO_BOUNDS } from '../constants/cabiaoGeo'
 import { listSeasonImpact, sumImpactByUnit } from '../services/impactLedger.service'
-import { seedSampleVouchersForActiveSeason, seedPercentOffVouchersForActiveSeason } from '../services/vouchers.service'
-import { listSeasonRedemptions, adminMarkVoucherUsed } from '../services/voucherRedemptions.service'
+import { listSeasonRedemptions, findRedemptionByCode, adminMarkVoucherUsed } from '../services/voucherRedemptions.service'
+import { logAudit } from '../services/audit.service'
+import CheckInPanel from '../panels/CheckInPanel'
 
 const TABS = {
   SUBMISSIONS: 'submissions',
@@ -61,10 +50,25 @@ const TABS = {
   REVIEWS: 'reviews',
   SEASONS: 'seasons',
   QUESTS: 'quests',
-  QUEST_VERIFICATIONS: 'quest_verifications',
   VOUCHERS: 'vouchers',
-  PLACES: 'places'
+  CHECKIN: 'checkin',
 }
+
+const MODERATION_ITEMS = [
+  { key: TABS.SUBMISSIONS, icon: '📥', label: 'Submissions' },
+  { key: TABS.REPORTS, icon: '🚩', label: 'Reports' },
+  { key: TABS.REVIEWS, icon: '⭐', label: 'Reviews' },
+]
+
+const TOURISM_ITEMS = [
+  { key: TABS.SEASONS, icon: '🗓️', label: 'Seasons' },
+  { key: TABS.QUESTS, icon: '🎯', label: 'Quests' },
+  { key: TABS.VOUCHERS, icon: '🎟️', label: 'Vouchers' },
+]
+
+const TOOLS_ITEMS = [
+  { key: 'checkin', icon: '✅', label: 'Check-In' },
+]
 
 function StatusBadge({ status }) {
   const styles = {
@@ -74,7 +78,7 @@ function StatusBadge({ status }) {
     rejected: 'bg-red-100 text-red-800',
     needs_info: 'bg-yellow-100 text-yellow-800',
     in_progress: 'bg-orange-100 text-orange-800',
-    resolved: 'bg-green-100 text-green-800'
+    resolved: 'bg-green-100 text-green-800',
   }
   return (
     <span className={`px-2 py-1 rounded-full text-xs font-medium ${styles[status] || 'bg-gray-100 text-gray-800'}`}>
@@ -86,6 +90,124 @@ function StatusBadge({ status }) {
 function getSubmissionDisplayName(submission) {
   if (submission?.type === 'business') return submission.businessName || 'Business Registration'
   return submission?.name || 'Untitled'
+}
+
+function SidebarSection({ title, items, activeKey, onSelect, navigate }) {
+  return (
+    <div className="mb-6">
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2 px-3">
+        {title}
+      </h3>
+      <div className="space-y-1">
+        {items.map((item) => {
+          const isLink = !!item.href
+
+          if (isLink) {
+            return (
+              <button
+                key={item.key}
+                onClick={() => navigate(item.href)}
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-gray-100 transition text-left group"
+              >
+                <span className="text-lg">{item.icon}</span>
+                <span className="flex-1 font-medium text-gray-700 text-sm group-hover:text-gray-900">
+                  {item.label}
+                </span>
+                <span className="text-gray-400 text-sm">→</span>
+              </button>
+            )
+          }
+
+          const isActive = activeKey === item.key
+          return (
+            <button
+              key={item.key}
+              onClick={() => onSelect(item.key)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition text-left ${
+                isActive
+                  ? 'bg-emerald-50 text-emerald-700 border-l-4 border-emerald-600 -ml-1 pl-3.5'
+                  : 'hover:bg-gray-100 text-gray-700'
+              }`}
+            >
+              <span className="text-lg">{item.icon}</span>
+              <span className="flex-1 font-medium text-sm">{item.label}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function MobileTabSelector({ activeTab, onChange, moderationItems, tourismItems, toolsItems, navigate, counts }) {
+  const [open, setOpen] = useState(false)
+
+  const allItems = [...moderationItems, ...tourismItems]
+  const activeItem = allItems.find((t) => t.key === activeTab)
+
+  return (
+    <div className="relative mb-4">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-4 py-3 bg-white border border-gray-200 rounded-xl shadow-sm"
+      >
+        <span className="flex items-center gap-2 font-semibold text-gray-800">
+          <span className="text-lg">{activeItem?.icon}</span>
+          {activeItem?.label}
+        </span>
+        <span className={`transition-transform ${open ? 'rotate-180' : ''}`}>▼</span>
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute z-40 left-0 right-0 mt-2 bg-white rounded-2xl shadow-xl border border-gray-200 p-3 max-h-[70vh] overflow-y-auto">
+            <p className="text-xs font-semibold uppercase text-gray-500 mb-2 px-2">Moderation</p>
+            {moderationItems.map((item) => (
+              <button
+                key={item.key}
+                onClick={() => { onChange(item.key); setOpen(false) }}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-left ${
+                  activeTab === item.key ? 'bg-emerald-50 text-emerald-700' : 'hover:bg-gray-100'
+                }`}
+              >
+                <span>{item.icon}</span>
+                <span className="flex-1 font-medium text-sm">{item.label}</span>
+              </button>
+            ))}
+
+            <p className="text-xs font-semibold uppercase text-gray-500 mt-3 mb-2 px-2">Tourism Program</p>
+            {tourismItems.map((item) => (
+              <button
+                key={item.key}
+                onClick={() => { onChange(item.key); setOpen(false) }}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-left ${
+                  activeTab === item.key ? 'bg-emerald-50 text-emerald-700' : 'hover:bg-gray-100'
+                }`}
+              >
+                <span>{item.icon}</span>
+                <span className="flex-1 font-medium text-sm">{item.label}</span>
+              </button>
+            ))}
+
+            <p className="text-xs font-semibold uppercase text-gray-500 mt-3 mb-2 px-2">Tools</p>
+            {toolsItems.map((item) => (
+              <button
+                key={item.key}
+                onClick={() => { onChange(item.key); setOpen(false) }}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-left ${
+                  activeTab === item.key ? 'bg-emerald-50 text-emerald-700' : 'hover:bg-gray-100'
+                }`}
+              >
+                <span>{item.icon}</span>
+                <span className="flex-1 font-medium text-sm">{item.label}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
 }
 
 function BusinessSubmissionPhotoGallery({ urls, alt }) {
@@ -166,6 +288,7 @@ function SubmissionModal({ submission, onClose, onApprove, onReject, onNeedsInfo
   if (!submission) return null
 
   const isBusinessRegistration = submission.type === 'business'
+  const isDestination = submission.type === 'destination'
   const displayName = getSubmissionDisplayName(submission)
   const position = isBusinessRegistration ? submission.location : submission.position
   let isOutOfBounds = false
@@ -179,11 +302,11 @@ function SubmissionModal({ submission, onClose, onApprove, onReject, onNeedsInfo
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div
         className={`rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto ${
-          isBusinessRegistration ? 'bg-emerald-50 border border-emerald-200' : 'bg-white'
+          isBusinessRegistration ? 'bg-emerald-50 border border-emerald-200' : isDestination ? 'bg-blue-50 border border-blue-200' : 'bg-white'
         }`}
         onClick={e => e.stopPropagation()}
       >
-        <div className={`p-6 border-b ${isBusinessRegistration ? 'border-emerald-200' : 'border-gray-200'}`}>
+        <div className={`p-6 border-b ${isBusinessRegistration ? 'border-emerald-200' : isDestination ? 'border-blue-200' : 'border-gray-200'}`}>
           <div className="flex justify-between items-start">
             <div>
               <h2 className="text-xl font-bold text-gray-900">{displayName}</h2>
@@ -193,8 +316,13 @@ function SubmissionModal({ submission, onClose, onApprove, onReject, onNeedsInfo
                     🏪 Business Registration
                   </span>
                 )}
+                {isDestination && (
+                  <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+                    🌴 Destination Suggestion
+                  </span>
+                )}
                 <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-medium">
-                  {(isBusinessRegistration ? 'business' : submission.entryType)?.toUpperCase() || 'BUSINESS'}
+                  {(isBusinessRegistration ? 'business' : isDestination ? 'destination' : submission.entryType)?.toUpperCase() || 'OTHER'}
                 </span>
                 <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-medium">
                   {(isBusinessRegistration ? getCategoryLabel(submission.category) : submission.category)?.toUpperCase() || 'OTHER'}
@@ -222,6 +350,13 @@ function SubmissionModal({ submission, onClose, onApprove, onReject, onNeedsInfo
             </div>
           )}
 
+          {isDestination && submission.tagline && (
+            <div>
+              <p className="text-sm font-medium text-gray-500">Tagline</p>
+              <p className="text-gray-900">{submission.tagline}</p>
+            </div>
+          )}
+
           {submission.barangay && (
             <div>
               <p className="text-sm font-medium text-gray-500">Barangay</p>
@@ -234,10 +369,37 @@ function SubmissionModal({ submission, onClose, onApprove, onReject, onNeedsInfo
               <p className="text-gray-900">{submission.address}</p>
             </div>
           )}
+          {isDestination && submission.landmark && (
+            <div>
+              <p className="text-sm font-medium text-gray-500">Landmark</p>
+              <p className="text-gray-900">{submission.landmark}</p>
+            </div>
+          )}
           <div>
             <p className="text-sm font-medium text-gray-500">Description</p>
             <p className="text-gray-900">{submission.description}</p>
           </div>
+
+          {isDestination && submission.bestTime && (
+            <div>
+              <p className="text-sm font-medium text-gray-500">Best Time to Visit</p>
+              <p className="text-gray-900">{submission.bestTime}</p>
+            </div>
+          )}
+
+          {isDestination && submission.activities && (
+            <div>
+              <p className="text-sm font-medium text-gray-500">Activities</p>
+              <p className="text-gray-900">{submission.activities}</p>
+            </div>
+          )}
+
+          {isDestination && submission.entranceFee && (
+            <div>
+              <p className="text-sm font-medium text-gray-500">Entrance Fee</p>
+              <p className="text-gray-900 capitalize">{submission.entranceFee}</p>
+            </div>
+          )}
 
           {isBusinessRegistration && submission.contactNumber && (
             <div>
@@ -282,13 +444,13 @@ function SubmissionModal({ submission, onClose, onApprove, onReject, onNeedsInfo
             )
           })()}
 
-          {submission.images?.length > 0 && !isBusinessRegistration && (
+          {isDestination && submission.photoURLs?.length > 0 && (
             <div>
-              <p className="text-sm font-medium text-gray-500 mb-2">Images ({submission.images.length})</p>
-              <div className="flex flex-wrap gap-2">
-                {submission.images.map((img, i) => (
-                  <a key={i} href={img} target="_blank" rel="noopener noreferrer" className="text-sm text-emerald-600 hover:underline">
-                    Image {i + 1}
+              <p className="text-sm font-medium text-gray-500 mb-2">Photos ({submission.photoURLs.length})</p>
+              <div className="grid grid-cols-3 gap-2">
+                {submission.photoURLs.filter(Boolean).map((url, i) => (
+                  <a key={i} href={url} target="_blank" rel="noopener noreferrer">
+                    <img src={url} alt="" className="w-full h-24 object-cover rounded-lg border border-gray-200" />
                   </a>
                 ))}
               </div>
@@ -382,13 +544,10 @@ function ReportModal({ report, onClose, onMarkInProgress, onMarkResolved, isLoad
         <div className="p-6 border-b border-gray-200">
           <div className="flex justify-between items-start">
             <div>
-              <h2 className="text-xl font-bold text-gray-900">Report Details</h2>
-              <div className="flex gap-2 mt-2">
+              <h2 className="text-xl font-bold text-gray-900">{report.reporterEmail || 'Anonymous Report'}</h2>
+              <div className="flex flex-wrap gap-2 mt-2">
                 <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-medium">
-                  {report.targetType?.toUpperCase() || 'UNKNOWN'}
-                </span>
-                <span className="px-2 py-1 bg-red-100 text-red-800 rounded text-xs font-medium">
-                  {report.issueType?.toUpperCase() || 'ISSUE'}
+                  {report.targetType?.toUpperCase()}
                 </span>
                 <StatusBadge status={report.status} />
               </div>
@@ -400,70 +559,48 @@ function ReportModal({ report, onClose, onMarkInProgress, onMarkResolved, isLoad
             </button>
           </div>
         </div>
-
         <div className="p-6 space-y-4">
           <div>
-            <p className="text-sm font-medium text-gray-500">Issue Type</p>
-            <p className="text-gray-900">{report.issueType}</p>
+            <p className="text-sm font-medium text-gray-500">Reason</p>
+            <p className="text-gray-900">{report.reason}</p>
           </div>
+          {report.details && (
+            <div>
+              <p className="text-sm font-medium text-gray-500">Details</p>
+              <p className="text-gray-900">{report.details}</p>
+            </div>
+          )}
           <div>
-            <p className="text-sm font-medium text-gray-500">Message</p>
-            <p className="text-gray-900">{report.message}</p>
+            <p className="text-sm font-medium text-gray-500">Target</p>
+            <Link to={targetLink} className="text-emerald-600 hover:underline text-sm">
+              View reported {report.targetType} →
+            </Link>
           </div>
-          {report.targetId && (
-            <div>
-              <p className="text-sm font-medium text-gray-500">Target ID</p>
-              <Link to={targetLink} className="text-emerald-600 hover:underline">
-                {report.targetId}
-              </Link>
-            </div>
-          )}
-          {report.pageUrl && (
-            <div>
-              <p className="text-sm font-medium text-gray-500">Page URL</p>
-              <a href={report.pageUrl} target="_blank" rel="noopener noreferrer" className="text-emerald-600 hover:underline">
-                {report.pageUrl}
-              </a>
-            </div>
-          )}
           <div>
             <p className="text-sm font-medium text-gray-500">Reported</p>
             <p className="text-gray-900">
               {report.createdAt ? new Date(report.createdAt).toLocaleString() : 'Unknown'}
             </p>
           </div>
-          {report.reporterEmail && (
-            <div>
-              <p className="text-sm font-medium text-gray-500">Reporter</p>
-              <p className="text-gray-900">{report.reporterEmail}</p>
-            </div>
-          )}
-          {report.notes && (
-            <div>
-              <p className="text-sm font-medium text-gray-500">Review Notes</p>
-              <p className="text-gray-900">{report.notes}</p>
-            </div>
-          )}
         </div>
-
-        <div className="p-6 border-t border-gray-200 bg-gray-50 flex flex-wrap gap-3">
-          {report.status === 'new' && (
-            <button
-              onClick={onMarkInProgress}
-              disabled={isLoading}
-              className="flex-1 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:bg-gray-300 font-medium"
-            >
-              Mark In Progress
-            </button>
-          )}
+        <div className="p-6 border-t border-gray-200 bg-gray-50 flex gap-3 rounded-b-xl">
           {report.status !== 'resolved' && (
-            <button
-              onClick={onMarkResolved}
-              disabled={isLoading}
-              className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 font-medium"
-            >
-              Mark Resolved
-            </button>
+            <>
+              <button
+                onClick={onMarkInProgress}
+                disabled={isLoading || report.status === 'in_progress'}
+                className="flex-1 px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 disabled:bg-gray-300 font-medium"
+              >
+                {isLoading ? 'Processing...' : 'Mark In Progress'}
+              </button>
+              <button
+                onClick={onMarkResolved}
+                disabled={isLoading}
+                className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:bg-gray-300 font-medium"
+              >
+                Mark Resolved
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -474,23 +611,22 @@ function ReportModal({ report, onClose, onMarkInProgress, onMarkResolved, isLoad
 function ReviewModal({ review, onClose, onApprove, onReject, isLoading }) {
   if (!review) return null
 
-  const targetLink = review.targetType === 'business' 
-    ? `/businesses/${review.targetId}` 
-    : `/destinations/${review.targetId}`
-
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-xl max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="p-6 border-b border-gray-200">
           <div className="flex justify-between items-start">
             <div>
-              <h2 className="text-xl font-bold text-gray-900">Review Details</h2>
-              <div className="flex gap-2 mt-2">
-                <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-medium">
-                  {review.targetType?.toUpperCase() || 'BUSINESS'}
+              <h2 className="text-xl font-bold text-gray-900">
+                {review.userDisplayName || review.userEmail || 'Anonymous'}
+              </h2>
+              <div className="flex items-center gap-2 mt-2">
+                <span className="flex items-center gap-1 text-yellow-500">
+                  {'★'.repeat(review.rating)}{'☆'.repeat(5 - (review.rating || 0))}
                 </span>
-                <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-xs font-medium flex items-center gap-1">
-                  <span>★</span> {review.rating}/5
+                <span className="text-sm text-gray-500">({review.rating})</span>
+                <span className="text-xs text-gray-400">
+                  {review.createdAt ? new Date(review.createdAt).toLocaleDateString() : ''}
                 </span>
               </div>
             </div>
@@ -501,60 +637,34 @@ function ReviewModal({ review, onClose, onApprove, onReject, isLoading }) {
             </button>
           </div>
         </div>
-
         <div className="p-6 space-y-4">
           <div>
-            <p className="text-sm font-medium text-gray-500">Reviewer</p>
-            <p className="text-gray-900">{review.userDisplayName || review.userEmail || 'Anonymous'}</p>
-          </div>
-          {review.title && (
-            <div>
-              <p className="text-sm font-medium text-gray-500">Title</p>
-              <p className="text-gray-900 font-medium">{review.title}</p>
-            </div>
-          )}
-          <div>
             <p className="text-sm font-medium text-gray-500">Review</p>
-            <p className="text-gray-900">{review.text}</p>
+            <p className="text-gray-900">{review.text || review.review}</p>
           </div>
-          {review.sustainabilityNote && (
-            <div>
-              <p className="text-sm font-medium text-gray-500">Sustainability Note</p>
-              <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-lg">
-                <p className="text-emerald-800">{review.sustainabilityNote}</p>
-              </div>
-            </div>
-          )}
-          {review.targetId && (
-            <div>
-              <p className="text-sm font-medium text-gray-500">Target</p>
-              <Link to={targetLink} className="text-emerald-600 hover:underline">
-                View {review.targetType}: {review.targetId}
-              </Link>
-            </div>
-          )}
           <div>
-            <p className="text-sm font-medium text-gray-500">Submitted</p>
-            <p className="text-gray-900">
-              {review.createdAt ? new Date(review.createdAt).toLocaleString() : 'Unknown'}
-            </p>
+            <p className="text-sm font-medium text-gray-500">Target Type</p>
+            <p className="text-gray-900 capitalize">{review.targetType}</p>
+          </div>
+          <div>
+            <p className="text-sm font-medium text-gray-500">Target ID</p>
+            <p className="text-gray-900 text-sm font-mono">{review.targetId}</p>
           </div>
         </div>
-
-        <div className="p-6 border-t border-gray-200 bg-gray-50 flex flex-wrap gap-3">
+        <div className="p-6 border-t border-gray-200 bg-gray-50 flex gap-3 rounded-b-xl">
           <button
             onClick={onApprove}
             disabled={isLoading}
-            className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 font-medium"
+            className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:bg-gray-300 font-medium"
           >
-            {isLoading ? 'Processing...' : 'Approve'}
+            Approve Review
           </button>
           <button
             onClick={onReject}
             disabled={isLoading}
             className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-gray-300 font-medium"
           >
-            {isLoading ? 'Processing...' : 'Reject'}
+            Reject Review
           </button>
         </div>
       </div>
@@ -565,156 +675,114 @@ function ReviewModal({ review, onClose, onApprove, onReject, isLoading }) {
 function QuestVerificationModal({ participation, quest, onClose, onMarkCompleted, isLoading }) {
   if (!participation) return null
 
-  const formatDate = (dateStr) => {
-    if (!dateStr) return 'N/A'
-    return new Date(dateStr).toLocaleString()
-  }
-
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="p-6 border-b border-gray-200">
-          <div className="flex justify-between items-start">
-            <div>
-              <h2 className="text-xl font-bold text-gray-900">Quest Participation</h2>
-              <div className="flex gap-2 mt-2">
-                <span className="px-2 py-1 bg-emerald-100 text-emerald-800 rounded text-xs font-medium">
-                  {quest?.title || 'Quest'}
-                </span>
-                <span className={`px-2 py-1 rounded text-xs font-medium ${
-                  participation.status === 'joined' ? 'bg-blue-100 text-blue-800' :
-                  participation.status === 'completed' ? 'bg-green-100 text-green-800' :
-                  'bg-gray-100 text-gray-800'
-                }`}>
-                  {participation.status?.toUpperCase() || 'JOINED'}
-                </span>
-              </div>
-            </div>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-        </div>
-
-        <div className="p-6 space-y-4">
+      <div className="bg-white rounded-xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
+        <h3 className="text-lg font-bold text-gray-900 mb-2">Quest Participation</h3>
+        <div className="space-y-3">
           <div>
-            <p className="text-sm font-medium text-gray-500">User ID</p>
-            <p className="text-gray-900 font-mono text-sm">{participation.uid}</p>
+            <p className="text-sm font-medium text-gray-500">Quest</p>
+            <p className="text-gray-900">{quest?.title || participation.questId}</p>
           </div>
-          {participation.userEmail && (
+          <div>
+            <p className="text-sm font-medium text-gray-500">User</p>
+            <p className="text-gray-900">{participation.userEmail || participation.uid}</p>
+          </div>
+          <div>
+            <p className="text-sm font-medium text-gray-500">Status</p>
+            <StatusBadge status={participation.status} />
+          </div>
+          {participation.joinedAt && (
             <div>
-              <p className="text-sm font-medium text-gray-500">Email</p>
-              <p className="text-gray-900">{participation.userEmail}</p>
+              <p className="text-sm font-medium text-gray-500">Joined</p>
+              <p className="text-gray-900 text-sm">{new Date(participation.joinedAt).toLocaleString()}</p>
             </div>
           )}
-          <div>
-            <p className="text-sm font-medium text-gray-500">Points</p>
-            <p className="text-gray-900">{quest?.points || 0} pts</p>
-          </div>
-          <div>
-            <p className="text-sm font-medium text-gray-500">Joined At</p>
-            <p className="text-gray-900">{formatDate(participation.joinedAt)}</p>
-          </div>
-          <div>
-            <p className="text-sm font-medium text-gray-500">Expires At</p>
-            <p className="text-gray-900">{formatDate(participation.expiresAt)}</p>
-          </div>
-          {participation.completedAt && (
-            <div>
-              <p className="text-sm font-medium text-gray-500">Completed At</p>
-              <p className="text-gray-900">{formatDate(participation.completedAt)}</p>
-            </div>
-          )}
-          <div>
-            <p className="text-sm font-medium text-gray-500">Reward Status</p>
-            <p className={`font-medium ${
-              participation.rewardStatus === 'released' ? 'text-green-600' :
-              participation.rewardStatus === 'pending' ? 'text-yellow-600' :
-              'text-gray-600'
-            }`}>
-              {participation.rewardStatus?.toUpperCase() || 'PENDING'}
-            </p>
-          </div>
         </div>
-
-        {participation.status === 'joined' && (
-          <div className="p-6 border-t border-gray-200 bg-gray-50 flex flex-wrap gap-3">
+        <div className="mt-6 flex gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+          >
+            Close
+          </button>
+          {participation.status !== 'completed' && (
             <button
               onClick={onMarkCompleted}
               disabled={isLoading}
               className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:bg-gray-300 font-medium"
             >
-              {isLoading ? 'Processing...' : 'Mark Completed & Release Reward'}
+              {isLoading ? 'Processing...' : 'Mark Completed'}
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   )
 }
 
 function SeasonFormModal({ onClose, onSubmit, isLoading }) {
-  const [name, setName] = useState('')
-  const [startAt, setStartAt] = useState('')
-  const [endAt, setEndAt] = useState('')
+  const [form, setForm] = useState({ name: '', startAt: '', endAt: '' })
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!name || !startAt || !endAt) return
-    onSubmit({ name, startAt, endAt })
+    if (!form.name.trim() || !form.startAt || !form.endAt) return
+    onSubmit({
+      name: form.name.trim(),
+      startAt: new Date(form.startAt),
+      endAt: new Date(form.endAt),
+    })
   }
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl max-w-md w-full" onClick={e => e.stopPropagation()}>
-        <div className="p-6 border-b border-gray-200">
-          <h2 className="text-xl font-bold text-gray-900">Create New Season</h2>
-        </div>
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+      <div className="bg-white rounded-xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
+        <h3 className="text-lg font-bold text-gray-900 mb-4">Create Season</h3>
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Season Name *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
             <input
               type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              placeholder="e.g. Summer 2026"
               required
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Start Date *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
             <input
               type="date"
-              value={startAt}
-              onChange={(e) => setStartAt(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              value={form.startAt}
+              onChange={(e) => setForm({ ...form, startAt: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
               required
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">End Date *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
             <input
               type="date"
-              value={endAt}
-              onChange={(e) => setEndAt(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              value={form.endAt}
+              onChange={(e) => setForm({ ...form, endAt: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
               required
             />
           </div>
-          <div className="flex gap-3 pt-2">
+          <div className="flex gap-3 mt-6">
             <button
               type="button"
               onClick={onClose}
+              disabled={isLoading}
               className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
             >
               Cancel
             </button>
             <button
               type="submit"
-              disabled={isLoading || !name || !startAt || !endAt}
-              className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:bg-gray-300"
+              disabled={isLoading || !form.name.trim() || !form.startAt || !form.endAt}
+              className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:bg-gray-300 font-medium"
             >
               {isLoading ? 'Creating...' : 'Create Season'}
             </button>
@@ -726,385 +794,155 @@ function SeasonFormModal({ onClose, onSubmit, isLoading }) {
 }
 
 function QuestFormModal({ quest, onClose, onSubmit, isLoading }) {
-  const [title, setTitle] = useState(quest?.title || '')
-  const [description, setDescription] = useState(quest?.description || '')
-  const [category, setCategory] = useState(quest?.category || 'event')
-  const [points, setPoints] = useState(quest?.points || 50)
-  const [capacity, setCapacity] = useState(quest?.capacity || 20)
-  const [startAt, setStartAt] = useState(quest?.startAt ? quest.startAt.split('T')[0] : '')
-  const [endAt, setEndAt] = useState(quest?.endAt ? quest.endAt.split('T')[0] : '')
-  const [gracePeriodHours, setGracePeriodHours] = useState(quest?.gracePeriodHours || 24)
-  const [capacityError, setCapacityError] = useState('')
-  const [impactUnit, setImpactUnit] = useState(quest?.impact?.unit || '')
-  const [impactAmount, setImpactAmount] = useState(quest?.impact?.amountPerCompletion || '')
-  const [impactLabel, setImpactLabel] = useState(quest?.impact?.label || '')
-  const [questType, setQuestType] = useState(quest?.questType || quest?.category || 'participate')
-  const [verificationMethod, setVerificationMethod] = useState(
-    quest?.verificationMethod || (quest?.questType === 'visit' || quest?.questType === 'buy' ? 'qr' : 'code')
-  )
-  const [autoApprove, setAutoApprove] = useState(quest?.autoApprove !== false)
-  const [requirePhoto, setRequirePhoto] = useState(quest?.requirePhoto !== false)
-  const [geofenceRadiusMeters, setGeofenceRadiusMeters] = useState(
-    quest?.geofenceRadiusMeters ?? (quest?.verificationMethod === 'qr' ? 200 : '')
-  )
+  const [form, setForm] = useState({
+    title: quest?.title || '',
+    category: quest?.category || 'eco_challenge',
+    description: quest?.description || '',
+    points: quest?.points || 10,
+    capacity: quest?.capacity || 50,
+    deadline: quest?.deadline ? (quest.deadline.toDate ? quest.deadline.toDate().toISOString().split('T')[0] : quest.deadline) : '',
+    verificationMethod: quest?.verificationMethod || 'auto',
+  })
 
-  const reservedCount = quest?.reservedCount || 0
-
-  const handleCapacityChange = (e) => {
-    const value = e.target.value
-    setCapacity(value)
-    
-    if (value && reservedCount > 0) {
-      const capacityNum = parseInt(value, 10)
-      if (capacityNum < reservedCount) {
-        setCapacityError(`Capacity cannot be lower than reserved slots (${reservedCount})`)
-      } else {
-        setCapacityError('')
-      }
-    } else {
-      setCapacityError('')
+  useEffect(() => {
+    if (onClose) {
+      document.body.style.overflow = 'hidden'
     }
-  }
+    return () => { document.body.style.overflow = '' }
+  }, [onClose])
+
+  useEffect(() => {
+    if (!onClose) return
+    const handler = (e) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!title || !description || !startAt || !endAt) return
-    
-    if (capacityError) return
-    
-    const impact = impactUnit && impactAmount && impactLabel
-      ? {
-          unit: impactUnit,
-          amountPerCompletion: Number(impactAmount),
-          label: impactLabel,
-        }
-      : null
-
+    if (!form.title.trim()) return
     onSubmit({
-      title,
-      description,
-      category,
-      questType,
-      points: parseInt(points, 10),
-      capacity: parseInt(capacity, 10),
-      startAt: new Date(startAt).toISOString(),
-      endAt: new Date(endAt).toISOString(),
-      gracePeriodHours: parseInt(gracePeriodHours, 10),
-      impact,
-      verificationMethod,
-      autoApprove: verificationMethod === 'manual' ? false : autoApprove,
-      requirePhoto,
-      geofenceRadiusMeters:
-        verificationMethod === 'qr' && geofenceRadiusMeters !== ''
-          ? parseInt(geofenceRadiusMeters, 10)
-          : null,
-      position: quest?.position || null,
+      ...form,
+      title: form.title.trim(),
+      description: form.description.trim(),
+      points: Number(form.points),
+      capacity: Number(form.capacity),
+      deadline: form.deadline ? new Date(form.deadline) : null,
     })
   }
 
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="p-6 border-b border-gray-200">
-          <h2 className="text-xl font-bold text-gray-900">{quest ? 'Edit Quest' : 'Create New Quest'}</h2>
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
+      <div className="fixed inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-2xl my-8 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between rounded-t-2xl z-10">
+          <h3 className="font-semibold text-lg text-gray-900">{quest ? 'Edit Quest' : 'Create Quest'}</h3>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg transition" aria-label="Close">✕</button>
         </div>
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
             <input
               type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-              required
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Description *</label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-              rows={3}
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
               required
             />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
             <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              value={form.category}
+              onChange={(e) => setForm({ ...form, category: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
             >
-              <option value="event">Event</option>
-              <option value="cleanup">Clean-up</option>
-              <option value="treePlanting">Tree Planting</option>
+              <option value="eco_challenge">Eco Challenge</option>
+              <option value="community">Community</option>
+              <option value="tourism">Tourism</option>
+              <option value="culture">Culture</option>
             </select>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Points *</label>
-              <input
-                type="number"
-                value={points}
-                onChange={(e) => setPoints(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                min="1"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Capacity *
-                {quest && reservedCount > 0 && (
-                  <span className="ml-1 text-xs text-gray-500">(reserved: {reservedCount})</span>
-                )}
-              </label>
-              <input
-                type="number"
-                value={capacity}
-                onChange={handleCapacityChange}
-                className={`w-full px-3 py-2 border rounded-lg ${capacityError ? 'border-red-500' : 'border-gray-300'}`}
-                min="1"
-                required
-              />
-              {capacityError && (
-                <p className="text-xs text-red-600 mt-1">{capacityError}</p>
-              )}
-            </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+            <textarea
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              rows={3}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Start Date *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Points</label>
               <input
-                type="date"
-                value={startAt}
-                onChange={(e) => setStartAt(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                required
+                type="number"
+                value={form.points}
+                onChange={(e) => setForm({ ...form, points: e.target.value })}
+                min={1}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">End Date *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Capacity</label>
               <input
-                type="date"
-                value={endAt}
-                onChange={(e) => setEndAt(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                required
+                type="number"
+                value={form.capacity}
+                onChange={(e) => setForm({ ...form, capacity: e.target.value })}
+                min={1}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Grace Period (hours)</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Deadline</label>
             <input
-              type="number"
-              value={gracePeriodHours}
-              onChange={(e) => setGracePeriodHours(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-              min="1"
+              type="date"
+              value={form.deadline}
+              onChange={(e) => setForm({ ...form, deadline: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
           </div>
-          <div className="border-t border-gray-200 pt-4 mt-2">
-            <p className="text-sm font-medium text-gray-900 mb-1">🔐 Verification Method</p>
-            <p className="text-xs text-gray-500 mb-3">How will users prove they completed this quest?</p>
-            <div className="grid gap-2 mb-4">
-              {[
-                { value: 'qr', label: '📱 QR Code Scan', hint: 'VISIT / BUY — print QR at venue' },
-                { value: 'code', label: '🔢 Event Code + Photo', hint: 'Events — staff announces code' },
-                { value: 'manual', label: '✍️ Manual LGU Check-In', hint: 'Fallback at /lgu/checkin' },
-              ].map((opt) => (
-                <label
-                  key={opt.value}
-                  className={`cursor-pointer rounded-xl border-2 p-3 transition ${
-                    verificationMethod === opt.value
-                      ? 'border-emerald-500 bg-emerald-50'
-                      : 'border-gray-200'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="verificationMethod"
-                    value={opt.value}
-                    checked={verificationMethod === opt.value}
-                    onChange={() => setVerificationMethod(opt.value)}
-                    className="sr-only"
-                  />
-                  <div className="font-semibold text-sm">{opt.label}</div>
-                  <div className="text-xs text-gray-600 mt-0.5">{opt.hint}</div>
-                </label>
-              ))}
-            </div>
-            {verificationMethod !== 'manual' && (
-              <label className="flex items-start gap-2 p-3 bg-gray-50 rounded-lg mb-3">
-                <input
-                  type="checkbox"
-                  checked={autoApprove}
-                  onChange={(e) => setAutoApprove(e.target.checked)}
-                  className="mt-1"
-                />
-                <span className="text-sm">
-                  <span className="font-semibold">Auto-approve valid submissions</span>
-                  <span className="block text-xs text-gray-500">
-                    Instantly credit points when QR/code is valid.
-                  </span>
-                </span>
-              </label>
-            )}
-            {verificationMethod === 'qr' && (
-              <div className="mb-3">
-                <label className="block text-xs font-medium text-gray-700 mb-1">Geofence radius (meters)</label>
-                <input
-                  type="number"
-                  value={geofenceRadiusMeters}
-                  onChange={(e) => setGeofenceRadiusMeters(e.target.value)}
-                  placeholder="200"
-                  className="w-32 px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                  min="0"
-                />
-              </div>
-            )}
-            {verificationMethod === 'code' && (
-              <label className="flex items-center gap-2 mb-3 text-sm">
-                <input
-                  type="checkbox"
-                  checked={requirePhoto}
-                  onChange={(e) => setRequirePhoto(e.target.checked)}
-                />
-                Require photo upload
-              </label>
-            )}
-            <div className="mb-3">
-              <label className="block text-xs font-medium text-gray-700 mb-1">Quest type (for display)</label>
-              <select
-                value={questType}
-                onChange={(e) => setQuestType(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-              >
-                <option value="visit">Visit</option>
-                <option value="buy">Buy</option>
-                <option value="participate">Participate</option>
-              </select>
-            </div>
-          </div>
-          <div className="border-t border-gray-200 pt-4 mt-2">
-            <p className="text-sm font-medium text-gray-900 mb-1">Sustainability Impact (optional)</p>
-            <p className="text-xs text-gray-500 mb-3">
-              Define the environmental impact for each completed participation in this quest.
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Unit</label>
-                <select
-                  value={impactUnit}
-                  onChange={(e) => setImpactUnit(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                >
-                  <option value="">Select unit</option>
-                  <option value="kg_trash">Kg of trash</option>
-                  <option value="trees">Trees</option>
-                  <option value="hours">Volunteer hours</option>
-                  <option value="kg_plastic">Kg of plastic</option>
-                  <option value="co2_kg">Kg CO₂</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Amount per completion</label>
-                <input
-                  type="number"
-                  value={impactAmount}
-                  onChange={(e) => setImpactAmount(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                  min="0"
-                  step="0.1"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Label</label>
-                <input
-                  type="text"
-                  value={impactLabel}
-                  onChange={(e) => setImpactLabel(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                  placeholder="e.g. Kg of waste collected"
-                />
-              </div>
-            </div>
-          </div>
-          <div className="flex gap-3 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Verification Method</label>
+            <select
+              value={form.verificationMethod}
+              onChange={(e) => setForm({ ...form, verificationMethod: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
             >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={isLoading || !title || !description || !startAt || !endAt || !!capacityError}
-              className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:bg-gray-300"
-            >
-              {isLoading ? 'Saving...' : quest ? 'Update Quest' : 'Create Quest'}
-            </button>
+              <option value="auto">Auto (geofence)</option>
+              <option value="qr">QR Code</option>
+              <option value="code">Event Code + Photo</option>
+            </select>
           </div>
         </form>
-      </div>
-    </div>
-  )
-}
-
-function NotAuthorized() {
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <Navbar />
-      <main className="flex-1 flex items-center justify-center px-4 py-20">
-        <div className="text-center max-w-md">
-          <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
-            <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-            </svg>
-          </div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Access Denied</h1>
-          <p className="text-gray-600 mb-6">
-            You are not authorized to access the LGU Dashboard. Please contact your administrator.
-          </p>
-          <Link
-            to="/"
-            className="inline-flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium"
+        <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex items-center justify-end gap-3 rounded-b-2xl">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isLoading}
+            className="px-5 py-2.5 rounded-xl border border-gray-300 bg-white text-gray-700 font-semibold hover:bg-gray-50 transition"
           >
-            Back to Home
-          </Link>
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={isLoading || !form.title.trim()}
+            className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition"
+          >
+            {isLoading ? 'Saving...' : quest ? 'Update Quest' : 'Create Quest'}
+          </button>
         </div>
-      </main>
-      <Footer />
-    </div>
-  )
-}
-
-function TabButton({ active, onClick, count, children }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`flex-1 py-3 px-4 font-medium text-sm rounded-lg transition-colors ${
-        active 
-          ? 'bg-emerald-600 text-white' 
-          : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'
-      }`}
-    >
-      {children}
-      {count !== undefined && (
-        <span className={`ml-2 px-2 py-0.5 rounded-full text-xs ${
-          active ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-600'
-        }`}>
-          {count}
-        </span>
-      )}
-    </button>
+      </div>
+    </div>,
+    document.body
   )
 }
 
 export default function LGUDashboardPage() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState(TABS.SUBMISSIONS)
   const [submissions, setSubmissions] = useState([])
   const [reports, setReports] = useState([])
@@ -1113,11 +951,11 @@ export default function LGUDashboardPage() {
   const [activeSeason, setActiveSeason] = useState(null)
   const [selectedSeasonFilter, setSelectedSeasonFilter] = useState('')
   const [questParticipations, setQuestParticipations] = useState([])
-  const [pendingSelfVerifications, setPendingSelfVerifications] = useState([])
   const [questDetails, setQuestDetails] = useState({})
   const [loading, setLoading] = useState(true)
   const [checkingAdmin, setCheckingAdmin] = useState(true)
   const [isUserAdmin, setIsUserAdmin] = useState(false)
+  const [submissionTypeFilter, setSubmissionTypeFilter] = useState('all')
   const [selectedSubmission, setSelectedSubmission] = useState(null)
   const [showRejectModal, setShowRejectModal] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
@@ -1140,9 +978,15 @@ export default function LGUDashboardPage() {
   const [seasonRedemptions, setSeasonRedemptions] = useState([])
   const [redemptionStatusFilter, setRedemptionStatusFilter] = useState('all')
   const [markingVoucherUsedId, setMarkingVoucherUsedId] = useState(null)
-  const [backfillLocationsLoading, setBackfillLocationsLoading] = useState(false)
-  const [rescheduleDemoLoading, setRescheduleDemoLoading] = useState(false)
-  const [backfillVerificationLoading, setBackfillVerificationLoading] = useState(false)
+  const [showCleanupConfirm, setShowCleanupConfirm] = useState(false)
+  const [cleanupLoading, setCleanupLoading] = useState(false)
+  const [confirmToggle, setConfirmToggle] = useState(null)
+  const [repairLoading, setRepairLoading] = useState(false)
+  const [verifyCode, setVerifyCode] = useState('')
+  const [verifySearching, setVerifySearching] = useState(false)
+  const [verifyResult, setVerifyResult] = useState(null)
+  const [verifyError, setVerifyError] = useState(null)
+  const [verifyMarkLoading, setVerifyMarkLoading] = useState(false)
 
   useEffect(() => {
     async function checkAdminStatus() {
@@ -1184,6 +1028,10 @@ export default function LGUDashboardPage() {
           if (active && !selectedSeasonFilter) {
             setSelectedSeasonFilter(active.id)
           }
+          if (active) {
+            const lbData = await listTopByPoints(active.id, 10)
+            setLeaderboardData(lbData)
+          }
         } else if (activeTab === TABS.QUESTS) {
           const seasonList = await listSeasons()
           setSeasons(seasonList)
@@ -1221,28 +1069,6 @@ export default function LGUDashboardPage() {
             setSeasonImpactTotals({})
             setQuestImpactTotals({})
           }
-        } else if (activeTab === TABS.QUEST_VERIFICATIONS) {
-          const season = await getActiveSeason()
-          if (season) {
-            const quests = await listActiveQuests(season.id)
-            const questTitles = {}
-            quests.forEach(q => {
-              questTitles[q.id] = q
-            })
-            setQuestDetails(questTitles)
-            
-            const allParticipations = []
-            for (const quest of quests) {
-              const participations = await getQuestParticipations(quest.id)
-              allParticipations.push(...participations)
-            }
-            setQuestParticipations(allParticipations)
-            const pending = await listPendingSelfVerifications(season.id)
-            setPendingSelfVerifications(pending)
-          } else {
-            setQuestParticipations([])
-            setPendingSelfVerifications([])
-          }
         } else if (activeTab === TABS.VOUCHERS) {
           const active = await getActiveSeason()
           setActiveSeason(active)
@@ -1263,21 +1089,29 @@ export default function LGUDashboardPage() {
     fetchData()
   }, [user, activeTab, isUserAdmin, selectedSeasonFilter])
 
+  useEffect(() => {
+    if (!user || !isUserAdmin || activeTab !== TABS.QUESTS) return
+    async function loadParticipations() {
+      const filterId = selectedSeasonFilter || activeSeason?.id
+      if (!filterId) return
+      const questList = await listQuestsBySeason(filterId)
+      const questTitles = {}
+      questList.forEach(q => { questTitles[q.id] = q })
+      setQuestDetails(questTitles)
+      const allParticipations = []
+      for (const quest of questList) {
+        const participations = await getQuestParticipations(quest.id)
+        allParticipations.push(...participations)
+      }
+      setQuestParticipations(allParticipations)
+    }
+    loadParticipations()
+  }, [user, isUserAdmin, activeTab, selectedSeasonFilter, activeSeason])
+
   const showToast = (message, type = 'success') => {
     setToast({ message, type })
     setTimeout(() => setToast(null), 3000)
   }
-
-  const ensureTokensForQuest = useCallback(
-    async (questId) => {
-      if (!user) throw new Error('Sign in as admin to generate verification codes.')
-      return ensureQuestVerificationTokensAdmin(questId, {
-        uid: user.uid,
-        email: user.email,
-      })
-    },
-    [user]
-  )
 
   async function loadData() {
     setLoading(true)
@@ -1339,28 +1173,6 @@ export default function LGUDashboardPage() {
           setQuests([])
           setSeasonImpactTotals({})
           setQuestImpactTotals({})
-        }
-      } else if (activeTab === TABS.QUEST_VERIFICATIONS) {
-        const season = await getActiveSeason()
-        if (season) {
-          const quests = await listActiveQuests(season.id)
-          const questTitles = {}
-          quests.forEach(q => {
-            questTitles[q.id] = q
-          })
-          setQuestDetails(questTitles)
-          
-          const allParticipations = []
-          for (const quest of quests) {
-            const participations = await getQuestParticipations(quest.id)
-            allParticipations.push(...participations)
-          }
-          setQuestParticipations(allParticipations)
-          const pending = await listPendingSelfVerifications(season.id)
-          setPendingSelfVerifications(pending)
-        } else {
-          setQuestParticipations([])
-          setPendingSelfVerifications([])
         }
       } else if (activeTab === TABS.VOUCHERS) {
         const active = await getActiveSeason()
@@ -1589,43 +1401,6 @@ export default function LGUDashboardPage() {
     }
   }
 
-  const handleApprovePendingVerification = async (participation) => {
-    setActionLoading(true)
-    try {
-      await approvePendingVerification({
-        uid: participation.uid,
-        questId: participation.questId,
-        adminUser: { uid: user.uid, email: user.email },
-      })
-      showToast('Approved — points released.')
-      loadData()
-    } catch (error) {
-      showToast(error.message, 'error')
-    } finally {
-      setActionLoading(false)
-    }
-  }
-
-  const handleRejectPendingVerification = async (participation) => {
-    const reason = window.prompt('Rejection reason (optional):', 'Could not verify attendance')
-    if (reason === null) return
-    setActionLoading(true)
-    try {
-      await rejectPendingVerification({
-        uid: participation.uid,
-        questId: participation.questId,
-        adminUser: { uid: user.uid, email: user.email },
-        reason,
-      })
-      showToast('Submission rejected. User can verify again.')
-      loadData()
-    } catch (error) {
-      showToast(error.message, 'error')
-    } finally {
-      setActionLoading(false)
-    }
-  }
-
   const handleCreateSeason = async (formData) => {
     setActionLoading(true)
     try {
@@ -1698,16 +1473,19 @@ export default function LGUDashboardPage() {
     }
   }
 
-  const handleToggleQuestStatus = async (questId, currentStatus) => {
+  const handleToggleClick = (quest) => {
+    setConfirmToggle(quest)
+  }
+
+  const confirmToggleAction = async () => {
+    if (!confirmToggle) return
+    const quest = confirmToggle
+    const isActive = quest.status === 'active'
+    setConfirmToggle(null)
     setActionLoading(true)
     try {
-      if (currentStatus === 'active') {
-        await deactivateQuest(questId, { uid: user.uid, email: user.email })
-        showToast('Quest deactivated!')
-      } else {
-        await activateQuest(questId, { uid: user.uid, email: user.email })
-        showToast('Quest activated!')
-      }
+      await updateQuestActive(quest.id, !isActive)
+      showToast(!isActive ? `"${quest.title}" is now LIVE!` : `"${quest.title}" moved to Draft.`)
       loadData()
     } catch (error) {
       showToast(error.message, 'error')
@@ -1716,143 +1494,49 @@ export default function LGUDashboardPage() {
     }
   }
 
-  const [showSeedConfirm, setShowSeedConfirm] = useState(false)
-  const [seedLoading, setSeedLoading] = useState(false)
-  const [showSeedVouchersConfirm, setShowSeedVouchersConfirm] = useState(false)
-  const [seedVouchersLoading, setSeedVouchersLoading] = useState(false)
-  const [showSeedPercentOffConfirm, setShowSeedPercentOffConfirm] = useState(false)
-  const [seedPercentOffLoading, setSeedPercentOffLoading] = useState(false)
-  const [showSeedVisitBuyConfirm, setShowSeedVisitBuyConfirm] = useState(false)
-  const [seedVisitBuyLoading, setSeedVisitBuyLoading] = useState(false)
-
-  const handleSeedSampleQuests = async () => {
-    setSeedLoading(true)
-    try {
-      const result = await seedSampleQuestsForActiveSeason()
-      showToast(`Seeded ${result.count} sample quests!`)
-      setShowSeedConfirm(false)
-      loadData()
-    } catch (error) {
-      showToast(error.message, 'error')
-    } finally {
-      setSeedLoading(false)
-    }
+  const getQuestIsActive = (quest) => {
+    return quest.isActive || quest.status === 'active'
   }
 
-  const handleSeedVisitBuyQuests = async () => {
-    setSeedVisitBuyLoading(true)
-    try {
-      const result = await seedVisitAndBuyQuestsForActiveSeason({ uid: user?.uid, email: user?.email })
-      showToast(`Seeded ${result.visitCount} VISIT and ${result.buyCount} BUY quests!`)
-      setShowSeedVisitBuyConfirm(false)
-      loadData()
-    } catch (error) {
-      showToast(error.message, 'error')
-    } finally {
-      setSeedVisitBuyLoading(false)
-    }
-  }
-
-  const handleSeedSampleVouchers = async () => {
-    setSeedVouchersLoading(true)
-    try {
-      const result = await seedSampleVouchersForActiveSeason({ uid: user?.uid, email: user?.email })
-      showToast(`Seeded ${result.count} vouchers.`)
-      setShowSeedVouchersConfirm(false)
-      loadData()
-    } catch (error) {
-      showToast(error.message, 'error')
-    } finally {
-      setSeedVouchersLoading(false)
-    }
-  }
-
-  const handleSeedPercentOffVouchers = async () => {
-    setSeedPercentOffLoading(true)
-    try {
-      const result = await seedPercentOffVouchersForActiveSeason({ uid: user?.uid, email: user?.email })
-      showToast(`Seeded ${result.count} %OFF vouchers.`)
-      setShowSeedPercentOffConfirm(false)
-      loadData()
-    } catch (error) {
-      showToast(error.message, 'error')
-    } finally {
-      setSeedPercentOffLoading(false)
-    }
-  }
-
-  const handleBackfillQuestLocations = async () => {
+  const handleRepairCounts = async () => {
     const seasonId = selectedSeasonFilter || activeSeason?.id
     if (!seasonId) {
-      showToast('Please select a season first.', 'error')
+      showToast('No season selected.', 'error')
       return
     }
-    setBackfillLocationsLoading(true)
+    const confirmed = window.confirm(
+      'This will recalculate reserved counts for all quests in this season based on actual joined participations. Continue?'
+    )
+    if (!confirmed) return
+    setRepairLoading(true)
     try {
-      const result = await backfillQuestLocationsForSeason(seasonId, { uid: user?.uid, email: user?.email })
-      showToast(`Backfilled locations for ${result.updated} quest${result.updated === 1 ? '' : 's'}.`)
+      const { repairedCount } = await repairQuestReservedCounts(seasonId)
+      if (repairedCount === 0) {
+        showToast('All quest counts are already accurate.')
+      } else {
+        showToast(`Repaired ${repairedCount} quest(s).`)
+      }
       loadData()
-    } catch (error) {
-      showToast(error.message, 'error')
+    } catch (err) {
+      showToast(`Repair failed: ${err.message}`, 'error')
     } finally {
-      setBackfillLocationsLoading(false)
-    }
-  }
-
-  const handleRescheduleDemoQuests = async () => {
-    const seasonId = selectedSeasonFilter || activeSeason?.id
-    if (!seasonId) {
-      showToast('Please select a season first.', 'error')
-      return
-    }
-    setRescheduleDemoLoading(true)
-    try {
-      const result = await rescheduleDemoQuestsForSeason(seasonId, { uid: user?.uid, email: user?.email })
-      showToast(`Rescheduled ${result.updated} demo quest${result.updated === 1 ? '' : 's'}.`)
-      loadData()
-    } catch (error) {
-      showToast(error.message, 'error')
-    } finally {
-      setRescheduleDemoLoading(false)
-    }
-  }
-
-  const handleBackfillVerificationTokens = async () => {
-    const seasonId = selectedSeasonFilter || activeSeason?.id
-    if (!seasonId) {
-      showToast('Please select a season first.', 'error')
-      return
-    }
-    setBackfillVerificationLoading(true)
-    try {
-      const result = await backfillQuestVerificationTokensForSeason(seasonId, {
-        uid: user?.uid,
-        email: user?.email,
-      })
-      showToast(
-        result.updated > 0
-          ? `Generated codes/QR for ${result.updated} quest${result.updated === 1 ? '' : 's'}.`
-          : 'All quests already have verification codes or QR.'
-      )
-      loadData()
-    } catch (error) {
-      showToast(error.message, 'error')
-    } finally {
-      setBackfillVerificationLoading(false)
+      setRepairLoading(false)
     }
   }
 
   const handleMarkVoucherUsed = async (redemptionId) => {
-    if (!activeSeason?.id || !user) return
     setMarkingVoucherUsedId(redemptionId)
     try {
-      await adminMarkVoucherUsed({
-        seasonId: activeSeason.id,
-        redemptionId,
-        adminUser: { uid: user.uid, email: user.email },
+      const result = await adminMarkVoucherUsed(redemptionId, {
+        uid: user?.uid,
+        email: user?.email,
       })
-      showToast('Voucher marked as used.')
-      loadData()
+      if (result.success) {
+        showToast('Voucher marked as used.')
+        loadData()
+      } else {
+        showToast(result.error || 'Failed to mark voucher as used', 'error')
+      }
     } catch (error) {
       showToast(error.message, 'error')
     } finally {
@@ -1860,910 +1544,1070 @@ export default function LGUDashboardPage() {
     }
   }
 
-  const handleToggleQuestStats = async (questId) => {
-    if (expandedQuestStats[questId]) {
-      const newStats = { ...expandedQuestStats }
-      delete newStats[questId]
-      setExpandedQuestStats(newStats)
-      return
-    }
+  const handleVerifyLookup = async () => {
+    if (!verifyCode.trim() || !activeSeason) return
 
-    setLoadingQuestStats(questId)
+    setVerifySearching(true)
+    setVerifyError(null)
+    setVerifyResult(null)
+
     try {
-      const participations = await getQuestParticipations(questId)
-      const now = new Date()
-      
-      let pendingCount = 0
-      let completedCount = 0
-      let expiredCount = 0
-      let cancelledCount = 0
-
-      participations.forEach(p => {
-        if (p.status === 'completed') {
-          completedCount++
-        } else if (p.status === 'cancelled') {
-          cancelledCount++
-        } else if (p.status === 'expired') {
-          expiredCount++
-        } else if (p.status === 'joined') {
-          if (p.expiresAt && new Date(p.expiresAt) < now) {
-            expiredCount++
-          } else {
-            pendingCount++
-          }
-        }
+      await logAudit({
+        action: 'voucher_verified_lookup',
+        targetType: 'voucher_redemption',
+        targetId: verifyCode.trim(),
+        adminUid: user.uid,
+        adminEmail: user.email,
+        meta: { code: verifyCode.trim(), seasonId: activeSeason.id },
       })
 
-      setExpandedQuestStats({
-        ...expandedQuestStats,
-        [questId]: {
-          pendingCount,
-          completedCount,
-          expiredCount,
-          cancelledCount,
-          total: participations.length
-        }
+      const result = await findRedemptionByCode({
+        seasonId: activeSeason.id,
+        code: verifyCode.trim()
       })
 
-    } catch {
-      showToast('Error loading stats', 'error')
+      if (!result) {
+        setVerifyError('No voucher found with that code.')
+      } else {
+        setVerifyResult(result)
+      }
+    } catch (err) {
+      setVerifyError(err.message || 'Failed to lookup voucher')
     } finally {
-      setLoadingQuestStats(null)
+      setVerifySearching(false)
     }
   }
 
-  const [showCleanupConfirm, setShowCleanupConfirm] = useState(false)
-  const [cleanupLoading, setCleanupLoading] = useState(false)
+  const handleVerifyMarkUsed = async () => {
+    if (!verifyResult || !activeSeason) return
+
+    setVerifyMarkLoading(true)
+    try {
+      await adminMarkVoucherUsed({
+        seasonId: activeSeason.id,
+        redemptionId: verifyResult.id,
+        adminUser: user,
+      })
+
+      const updated = await findRedemptionByCode({
+        seasonId: activeSeason.id,
+        code: verifyResult.code
+      })
+      setVerifyResult(updated)
+      showToast('Voucher marked as used!')
+    } catch (err) {
+      showToast(err.message || 'Failed to mark voucher as used', 'error')
+    } finally {
+      setVerifyMarkLoading(false)
+    }
+  }
+
+  const getVerifyDisplayStatus = () => {
+    if (!verifyResult) return null
+    if (verifyResult.status === 'used') return 'used'
+
+    const expiresAt = verifyResult.voucherSnapshot?.expiresAt
+    const isExpired = expiresAt && (expiresAt.toDate ? expiresAt.toDate() : new Date(expiresAt)) < new Date()
+    if (isExpired) return 'expired'
+
+    return 'unused'
+  }
 
   const handleRunCleanup = async () => {
     setCleanupLoading(true)
     try {
       const result = await expireAllStaleParticipations()
-      showToast(`Expired ${result.expiredCount} participations, freed ${result.freedSlots} slots`)
+      showToast(`Expired ${result?.expiredCount || 0} stale participations.`)
       setShowCleanupConfirm(false)
       loadData()
     } catch (error) {
-      showToast('Error running cleanup: ' + error.message, 'error')
+      showToast(error.message, 'error')
     } finally {
       setCleanupLoading(false)
     }
   }
 
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-gray-50">
-        <Navbar />
-        <main className="flex-1 flex items-center justify-center px-4 py-20">
-          <div className="text-center">
-            <p className="text-gray-600 mb-4">Please sign in to access the LGU Dashboard.</p>
-            <Link to="/" className="text-emerald-600 hover:underline">Go to Home</Link>
-          </div>
-        </main>
-        <Footer />
-      </div>
-    )
-  }
-
   if (checkingAdmin) {
     return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-600 border-t-transparent" />
+      </div>
+    )
+  }
+
+  if (!user || !isUserAdmin) {
+    return (
       <div className="min-h-screen bg-gray-50">
         <Navbar />
         <main className="flex-1 flex items-center justify-center px-4 py-20">
-          <div className="text-center">
-            <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-600 border-t-transparent"></div>
-            <p className="text-gray-600 mt-2">Checking admin access...</p>
+          <div className="text-center max-w-md">
+            <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+              <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+            </div>
+            <h1 className="text-2xl font-bold text-gray-900 mb-2">Access Denied</h1>
+            <p className="text-gray-600 mb-6">
+              You are not authorized to access the LGU Dashboard. Please contact your administrator.
+            </p>
+            <Link
+              to="/"
+              className="inline-flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium"
+            >
+              Back to Home
+            </Link>
           </div>
         </main>
         <Footer />
       </div>
     )
-  }
-
-  if (!isUserAdmin) {
-    return <NotAuthorized />
   }
 
   const newSubmissions = submissions.filter(s => s.status === 'new' || s.status === 'pending').length
   const newReports = reports.filter(r => r.status === 'new').length
-  const pendingQuests = questParticipations.filter(p => p.status === 'joined').length
 
-  const IMPACT_UNIT_CONFIG = {
-    kg_trash: { label: 'Kg of waste collected', short: 'kg trash' },
-    trees: { label: 'Trees planted', short: 'trees' },
-    hours: { label: 'Volunteer hours', short: 'hours' },
-    kg_plastic: { label: 'Kg of plastic avoided', short: 'kg plastic' },
-    co2_kg: { label: 'Kg of CO₂ avoided', short: 'kg CO₂' },
+  const moderationItems = MODERATION_ITEMS.map(item => ({
+    ...item,
+    count: item.key === TABS.SUBMISSIONS ? newSubmissions : item.key === TABS.REPORTS ? newReports : pendingReviews.length,
+  }))
+
+  const allItemsFlat = [...moderationItems, ...TOURISM_ITEMS, ...TOOLS_ITEMS]
+  const activeItemMeta = allItemsFlat.find(t => t.key === activeTab)
+
+  const EMPTY_STATES = {
+    [TABS.SUBMISSIONS]: { icon: '📭', title: 'No submissions yet', desc: 'User-submitted businesses and destinations will appear here for review.' },
+    [TABS.REPORTS]: { icon: '🚩', title: 'No reports', desc: 'User-submitted issue reports will appear here.' },
+    [TABS.REVIEWS]: { icon: '⭐', title: 'No pending reviews', desc: 'User reviews waiting for moderation will appear here.' },
+    [TABS.SEASONS]: { icon: '🗓️', title: 'No seasons yet', desc: 'Create a season to start the tourism program.' },
+    [TABS.QUESTS]: { icon: '🎯', title: 'No quests found', desc: 'Quests for the selected season will appear here.' },
+    [TABS.VOUCHERS]: { icon: '🎟️', title: 'No active season', desc: 'Activate a season to manage vouchers and redemptions.' },
+    [TABS.CHECKIN]: { icon: '✅', title: 'Quest Check-in', desc: 'Mark participants as completed for quests.' },
   }
 
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar />
-      
+
       <main className="flex-1 pb-mobile-nav">
-        <div className="max-w-6xl mx-auto px-4 py-8">
-          <div className="mb-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+          <header className="mb-6">
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">LGU Dashboard</h1>
-            <p className="text-gray-600 mt-1">Manage submissions and reports for SMARTDCABIAO</p>
-            <p className="text-sm text-gray-500 mt-1">Signed in as: {user.email}</p>
-          </div>
+            <p className="text-sm text-gray-500 mt-1">
+              Manage submissions, reports, seasons, quests, and vouchers
+            </p>
+            <p className="text-xs text-gray-400 mt-2">
+              Signed in as: <span className="font-mono">{user?.email}</span>
+            </p>
+          </header>
 
-          <div className="flex gap-2 mb-6 flex-wrap">
-            <TabButton 
-              active={activeTab === TABS.SUBMISSIONS} 
-              onClick={() => setActiveTab(TABS.SUBMISSIONS)}
-              count={newSubmissions}
-            >
-              Submissions
-            </TabButton>
-            <TabButton 
-              active={activeTab === TABS.REPORTS} 
-              onClick={() => setActiveTab(TABS.REPORTS)}
-              count={newReports}
-            >
-              Reports
-            </TabButton>
-            <TabButton 
-              active={activeTab === TABS.REVIEWS} 
-              onClick={() => setActiveTab(TABS.REVIEWS)}
-              count={pendingReviews.length}
-            >
-              Reviews
-            </TabButton>
-            <TabButton 
-              active={activeTab === TABS.SEASONS} 
-              onClick={() => setActiveTab(TABS.SEASONS)}
-            >
-              Seasons
-            </TabButton>
-            <TabButton 
-              active={activeTab === TABS.QUESTS} 
-              onClick={() => setActiveTab(TABS.QUESTS)}
-            >
-              Quests
-            </TabButton>
-            <TabButton 
-              active={activeTab === TABS.QUEST_VERIFICATIONS} 
-              onClick={() => setActiveTab(TABS.QUEST_VERIFICATIONS)}
-              count={pendingQuests}
-            >
-              Verifications
-            </TabButton>
-            <TabButton 
-              active={activeTab === TABS.VOUCHERS} 
-              onClick={() => setActiveTab(TABS.VOUCHERS)}
-            >
-              Vouchers
-            </TabButton>
-            <Link
-              to="/lgu/places"
-              className="flex-1 py-3 px-4 font-medium text-sm rounded-lg transition-colors bg-white text-gray-600 hover:bg-gray-100 border border-gray-200 text-center"
-            >
-              Places
-            </Link>
-            <Link
-              to="/lgu/checkin"
-              className="flex-1 py-3 px-4 font-medium text-sm rounded-lg transition-colors bg-emerald-600 text-white hover:bg-emerald-700 text-center"
-            >
-              Check-in
-            </Link>
-            <Link
-              to="/lgu/voucher-verify"
-              className="flex-1 py-3 px-4 font-medium text-sm rounded-lg transition-colors bg-blue-600 text-white hover:bg-blue-700 text-center"
-            >
-              Verify Voucher
-            </Link>
-          </div>
-
-          {loading ? (
-            <div className="text-center py-12">
-              <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-600 border-t-transparent"></div>
-              <p className="text-gray-600 mt-2">Loading...</p>
-            </div>
-          ) : activeTab === TABS.SUBMISSIONS ? (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-              {submissions.length === 0 ? (
-                <div className="text-center py-12 text-gray-500">
-                  No submissions found
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-50 border-b border-gray-200">
-                      <tr>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Name</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Type</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Category</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Barangay</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Date</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200">
-                      {submissions.map(sub => (
-                        <tr 
-                          key={sub.id} 
-                          onClick={() => setSelectedSubmission(sub)}
-                          className={`hover:bg-gray-50 cursor-pointer ${
-                            sub.type === 'business' ? 'bg-emerald-50/50' : ''
-                          }`}
-                        >
-                          <td className="px-4 py-3 font-medium text-gray-900">
-                            <div className="flex items-center gap-2">
-                              {sub.type === 'business' && (
-                                <span className="text-xs px-1.5 py-0.5 bg-emerald-100 text-emerald-800 rounded font-medium">
-                                  🏪
-                                </span>
-                              )}
-                              {getSubmissionDisplayName(sub)}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-gray-600">
-                            {sub.type === 'business' ? 'Business Registration' : (sub.entryType || 'business')}
-                          </td>
-                          <td className="px-4 py-3 text-gray-600">
-                            {sub.type === 'business' ? getCategoryLabel(sub.category) : (sub.category || '-')}
-                          </td>
-                          <td className="px-4 py-3 text-gray-600">{sub.barangay || '-'}</td>
-                          <td className="px-4 py-3 text-gray-600 text-sm">
-                            {sub.createdAt ? new Date(sub.createdAt).toLocaleDateString() : '-'}
-                          </td>
-                          <td className="px-4 py-3">
-                            <StatusBadge status={sub.status} />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          ) : activeTab === TABS.REVIEWS ? (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-              {pendingReviews.length === 0 ? (
-                <div className="text-center py-12 text-gray-500">
-                  No pending reviews to review
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-50 border-b border-gray-200">
-                      <tr>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Place</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Type</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">User</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Rating</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Review</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Date</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200">
-                      {pendingReviews.map(review => (
-                        <tr 
-                          key={review.id} 
-                          onClick={() => setSelectedReview(review)}
-                          className="hover:bg-gray-50 cursor-pointer"
-                        >
-                          <td className="px-4 py-3 font-medium text-gray-900">{review.targetId}</td>
-                          <td className="px-4 py-3 text-gray-600 capitalize">{review.targetType}</td>
-                          <td className="px-4 py-3 text-gray-600 text-sm">
-                            {review.userDisplayName || review.userEmail || 'Anonymous'}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className="flex items-center gap-1">
-                              <span className="text-yellow-400">★</span>
-                              <span className="font-medium">{review.rating}</span>
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-gray-600 text-sm max-w-xs truncate">
-                            {review.text}
-                          </td>
-                          <td className="px-4 py-3 text-gray-600 text-sm">
-                            {review.createdAt ? new Date(review.createdAt).toLocaleDateString() : '-'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          ) : activeTab === TABS.SEASONS ? (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-              <div className="p-4 border-b border-gray-200 flex justify-between items-center">
-                <h3 className="text-lg font-semibold">Seasons</h3>
-                <button
-                  onClick={() => setShowSeasonModal(true)}
-                  className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm font-medium"
-                >
-                  + Create Season
-                </button>
+          <div className="flex flex-col lg:flex-row gap-6">
+            <aside className="hidden lg:block w-64 shrink-0">
+              <div className="sticky top-20 bg-white rounded-2xl border border-gray-200 p-3">
+                <SidebarSection title="Moderation" items={moderationItems} activeKey={activeTab} onSelect={setActiveTab} />
+                <SidebarSection title="Tourism Program" items={TOURISM_ITEMS} activeKey={activeTab} onSelect={setActiveTab} />
+                <SidebarSection title="Tools" items={TOOLS_ITEMS} activeKey={activeTab} onSelect={setActiveTab} />
               </div>
-              {seasons.length === 0 ? (
-                <div className="text-center py-12 text-gray-500">
-                  No seasons found. Create one to get started.
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-50 border-b border-gray-200">
-                      <tr>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Name</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Start</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">End</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200">
-                      {seasons.map(season => (
-                        <tr key={season.id} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 font-medium text-gray-900">{season.name}</td>
-                          <td className="px-4 py-3 text-gray-600 text-sm">
-                            {season.startAt ? new Date(season.startAt).toLocaleDateString() : '-'}
-                          </td>
-                          <td className="px-4 py-3 text-gray-600 text-sm">
-                            {season.endAt ? new Date(season.endAt).toLocaleDateString() : '-'}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              season.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                            }`}>
-                              {season.isActive ? 'ACTIVE' : 'INACTIVE'}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex gap-2">
-                              {!season.isActive && (
-                                <button
-                                  onClick={() => handleActivateSeason(season.id)}
-                                  disabled={actionLoading}
-                                  className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
-                                >
-                                  Activate
-                                </button>
-                              )}
-                              {season.isActive && (
-                                <button
-                                  onClick={() => handleCloseSeason(season.id)}
-                                  disabled={actionLoading}
-                                  className="px-3 py-1 bg-red-600 text-white rounded text-xs hover:bg-red-700"
-                                >
-                                  Close
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {Object.keys(seasonImpactTotals).length > 0 && activeSeason && activeSeason.id === (selectedSeasonFilter || activeSeason.id) && (
-                    <div className="border-t border-gray-200 px-4 py-4 bg-gray-50">
-                      <h4 className="text-sm font-semibold text-gray-900 mb-2">Season Impact Summary (selected season)</h4>
-                      <div className="flex flex-wrap gap-3">
-                        {Object.entries(seasonImpactTotals).map(([unit, amount]) => {
-                          const config = IMPACT_UNIT_CONFIG[unit] || { label: unit, short: unit }
-                          return (
-                            <div key={unit} className="bg-white rounded-lg px-3 py-2 shadow-sm text-sm">
-                              <p className="text-gray-500 text-xs uppercase">{config.label}</p>
-                              <p className="text-gray-900 font-semibold">{amount}</p>
-                            </div>
-                          )
-                        })}
+            </aside>
+
+            <div className="lg:hidden">
+              <MobileTabSelector
+                activeTab={activeTab}
+                onChange={setActiveTab}
+                moderationItems={moderationItems}
+                tourismItems={TOURISM_ITEMS}
+                toolsItems={TOOLS_ITEMS}
+                navigate={navigate}
+                counts={{ newSubmissions, newReports, pendingReviews: pendingReviews.length }}
+              />
+            </div>
+
+            <main className="flex-1 min-w-0">
+              <div className="bg-white rounded-2xl border border-gray-200 p-5 sm:p-6">
+                {activeTab === TABS.SUBMISSIONS && (
+                  <>
+                    <div className="flex items-center gap-2 mb-4">
+                      <span className="text-xl">📥</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Submissions</h2>
+                        <p className="text-sm text-gray-500">Review business and destination suggestions from users</p>
                       </div>
                     </div>
-                  )}
-                </div>
-              )}
-
-              {activeSeason && (
-                <div className="mt-6 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                  <div className="border-b border-gray-200 px-6 py-4">
-                    <h3 className="text-lg font-semibold">Leaderboard - {activeSeason.name}</h3>
-                    <p className="text-sm text-gray-500">Top performers this season</p>
-                  </div>
-
-                  <div className="border-b border-gray-200 px-4 py-3">
-                    <div className="flex gap-2 flex-wrap">
+                    <div className="border-b border-gray-200 pb-4 mb-4 flex gap-2 overflow-x-auto">
                       <button
-                        onClick={() => setLeaderboardTab('points')}
-                        className={`px-3 py-1.5 rounded font-medium text-sm transition ${
-                          leaderboardTab === 'points'
+                        onClick={() => setSubmissionTypeFilter('all')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition whitespace-nowrap ${
+                          submissionTypeFilter === 'all'
                             ? 'bg-emerald-600 text-white'
                             : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                         }`}
                       >
-                        Points
+                        All ({submissions.length})
                       </button>
-                      {IMPACT_UNITS.slice(0, 3).map(unit => (
-                        <button
-                          key={unit.value}
-                          onClick={() => {
-                            setLeaderboardTab('impact')
-                            setLeaderboardUnit(unit.value)
-                          }}
-                          className={`px-3 py-1.5 rounded font-medium text-sm transition ${
-                            leaderboardTab === 'impact' && leaderboardUnit === unit.value
-                              ? 'bg-emerald-600 text-white'
-                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                          }`}
-                        >
-                          {unit.icon} {unit.label}
-                        </button>
-                      ))}
+                      <button
+                        onClick={() => setSubmissionTypeFilter('business')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition whitespace-nowrap ${
+                          submissionTypeFilter === 'business'
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }`}
+                      >
+                        Businesses ({submissions.filter(s => s.type === 'business').length})
+                      </button>
+                      <button
+                        onClick={() => setSubmissionTypeFilter('destination')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition whitespace-nowrap ${
+                          submissionTypeFilter === 'destination'
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }`}
+                      >
+                        Destinations ({submissions.filter(s => s.type === 'destination').length})
+                      </button>
                     </div>
-                  </div>
-
-                  <div className="p-4">
-                    {leaderboardData.length === 0 ? (
-                      <p className="text-center text-gray-500 py-4">No leaderboard data yet</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {leaderboardData.slice(0, 5).map(entry => (
-                          <div key={entry.uid} className="flex items-center gap-3 p-2 rounded hover:bg-gray-50">
-                            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                              entry.rank <= 3 ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-600'
-                            }`}>
-                              {entry.rank}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="font-medium text-gray-900 truncate">{entry.name}</p>
-                              <p className="text-xs text-gray-500">{entry.completedQuestsCount} quests</p>
-                            </div>
-                            <div className="text-right">
-                              <p className="font-bold text-gray-900">
-                                {leaderboardTab === 'points' ? `${entry.pointsTotal} pts` : entry.impact}
-                              </p>
-                            </div>
-                          </div>
-                        ))}
+                    {loading ? (
+                      <div className="text-center py-12">
+                        <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-600 border-t-transparent" />
                       </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : activeTab === TABS.QUESTS ? (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-              <div className="p-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                <h3 className="text-lg font-semibold">Quests</h3>
-                <div className="flex gap-2 w-full sm:w-auto flex-wrap">
-                  <select
-                    value={selectedSeasonFilter || activeSeason?.id || ''}
-                    onChange={(e) => setSelectedSeasonFilter(e.target.value)}
-                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                  >
-                    <option value="">Select Season</option>
-                    {seasons.map(s => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                  </select>
-                  <button
-                    onClick={() => setShowSeedConfirm(true)}
-                    className="px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium"
-                  >
-                    Seed 10 Sample Quests
-                  </button>
-                  <button
-                    onClick={() => setShowSeedVisitBuyConfirm(true)}
-                    className="px-3 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 text-sm font-medium"
-                  >
-                    Seed Visit & Buy Quests (20)
-                  </button>
-                  <button
-                    onClick={() => setShowCleanupConfirm(true)}
-                    className="px-3 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 text-sm font-medium"
-                  >
-                    Run Cleanup
-                  </button>
-                  <button
-                    onClick={handleBackfillQuestLocations}
-                    disabled={backfillLocationsLoading || (!selectedSeasonFilter && !activeSeason)}
-                    className="px-3 py-2 bg-sky-600 text-white rounded-lg hover:bg-sky-700 text-sm font-medium disabled:bg-gray-300"
-                  >
-                    {backfillLocationsLoading ? 'Backfilling…' : 'Backfill Quest Locations'}
-                  </button>
-                  <button
-                    onClick={handleRescheduleDemoQuests}
-                    disabled={rescheduleDemoLoading || (!selectedSeasonFilter && !activeSeason)}
-                    className="px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm font-medium disabled:bg-gray-300"
-                  >
-                    {rescheduleDemoLoading ? 'Rescheduling…' : 'Reschedule Demo Quests'}
-                  </button>
-                  <button
-                    onClick={handleBackfillVerificationTokens}
-                    disabled={backfillVerificationLoading || (!selectedSeasonFilter && !activeSeason)}
-                    className="px-3 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm font-medium disabled:bg-gray-300"
-                  >
-                    {backfillVerificationLoading ? 'Generating…' : 'Generate Missing Codes/QR'}
-                  </button>
-                  <button
-                    onClick={() => setShowQuestModal(true)}
-                    disabled={!selectedSeasonFilter && !activeSeason}
-                    className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm font-medium disabled:bg-gray-300"
-                  >
-                    + Create Quest
-                  </button>
-                </div>
-              </div>
-              {quests.length === 0 ? (
-                <div className="text-center py-12 text-gray-500">
-                  No quests found for this season.
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-50 border-b border-gray-200">
-                      <tr>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Title</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Category</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Points</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Capacity</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Reserved</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Slots Left</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Completions</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Total Impact</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200">
-                      {quests.map(quest => {
-                        const reservedCount = quest.reservedCount || 0
-                        const slotsLeft = (quest.capacity || 0) - reservedCount
-                        const isFull = slotsLeft <= 0
-                        const isExpanded = expandedQuestStats[quest.id]
-                        const stats = expandedQuestStats[quest.id]
-                        const isLoadingStats = loadingQuestStats === quest.id
-                        const impactForQuest = questImpactTotals[quest.id]
-
-                        return (
-                          <>
-                            <tr key={quest.id} className="hover:bg-gray-50">
-                              <td className="px-4 py-3 font-medium text-gray-900">{quest.title}</td>
-                              <td className="px-4 py-3 text-gray-600 text-sm">{quest.category || '-'}</td>
-                              <td className="px-4 py-3 text-gray-600">{quest.points}</td>
-                              <td className="px-4 py-3 text-gray-600">{quest.capacity}</td>
-                              <td className="px-4 py-3 text-gray-600">{reservedCount}</td>
-                              <td className="px-4 py-3">
-                                {isFull ? (
-                                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                                    Full
-                                  </span>
-                                ) : (
-                                  <span className={slotsLeft <= 2 ? 'text-orange-600 font-medium' : ''}>
-                                    {slotsLeft}
-                                  </span>
-                                )}
-                              </td>
-                              <td className="px-4 py-3 text-gray-600">
-                                {impactForQuest?.totalCompletions || 0}
-                              </td>
-                              <td className="px-4 py-3 text-gray-600 text-sm">
-                                {impactForQuest && impactForQuest.byUnit
-                                  ? Object.entries(impactForQuest.byUnit).map(([unit, amount]) => {
-                                      const config = IMPACT_UNIT_CONFIG[unit] || { short: unit }
-                                      return `${amount} ${config.short}`
-                                    }).join(', ')
-                                  : '—'}
-                              </td>
-                              <td className="px-4 py-3">
-                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                  quest.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                                }`}>
-                                  {quest.status?.toUpperCase() || 'ACTIVE'}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3">
-                                <div className="flex gap-2 flex-wrap">
-                                  <button
-                                    onClick={() => handleToggleQuestStats(quest.id)}
-                                    disabled={isLoadingStats}
-                                    className="px-3 py-1 bg-purple-600 text-white rounded text-xs hover:bg-purple-700 disabled:bg-gray-300"
-                                  >
-                                    {isLoadingStats ? 'Loading...' : isExpanded ? 'Hide Stats' : 'View Stats'}
-                                  </button>
-                                  <button
-                                    onClick={() => setSelectedQuest(quest)}
-                                    className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
-                                  >
-                                    Edit
-                                  </button>
-                                  <button
-                                    onClick={() => handleToggleQuestStatus(quest.id, quest.status)}
-                                    disabled={actionLoading}
-                                    className={`px-3 py-1 rounded text-xs ${
-                                      quest.status === 'active' 
-                                        ? 'bg-gray-200 text-gray-700 hover:bg-gray-300' 
-                                        : 'bg-green-600 text-white hover:bg-green-700'
-                                    }`}
-                                  >
-                                    {quest.status === 'active' ? 'Deactivate' : 'Activate'}
-                                  </button>
-                                </div>
-                              </td>
+                    ) : submissions.length === 0 ? (
+                      <div className="text-center py-12">
+                        <div className="text-5xl mb-3">{EMPTY_STATES[TABS.SUBMISSIONS].icon}</div>
+                        <h3 className="font-semibold text-gray-800">{EMPTY_STATES[TABS.SUBMISSIONS].title}</h3>
+                        <p className="text-sm text-gray-500 mt-1">{EMPTY_STATES[TABS.SUBMISSIONS].desc}</p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead className="bg-gray-50 border-b border-gray-200">
+                            <tr>
+                              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Name</th>
+                              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Type</th>
+                              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Category</th>
+                              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Barangay</th>
+                              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Date</th>
+                              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
                             </tr>
-                            {isExpanded && (
-                              <tr key={`${quest.id}-stats`} className="bg-purple-50">
-                                <td colSpan={10} className="px-4 py-4">
-                                  <div className="flex flex-wrap gap-4 mb-4">
-                                    <div className="bg-white rounded-lg px-4 py-2 shadow-sm">
-                                      <p className="text-xs text-gray-500 uppercase">Total</p>
-                                      <p className="text-lg font-bold text-gray-900">{stats?.total || 0}</p>
-                                    </div>
-                                    <div className="bg-white rounded-lg px-4 py-2 shadow-sm">
-                                      <p className="text-xs text-gray-500 uppercase">Pending</p>
-                                      <p className="text-lg font-bold text-blue-600">{stats?.pendingCount || 0}</p>
-                                    </div>
-                                    <div className="bg-white rounded-lg px-4 py-2 shadow-sm">
-                                      <p className="text-xs text-gray-500 uppercase">Completed</p>
-                                      <p className="text-lg font-bold text-green-600">{stats?.completedCount || 0}</p>
-                                    </div>
-                                    <div className="bg-white rounded-lg px-4 py-2 shadow-sm">
-                                      <p className="text-xs text-gray-500 uppercase">Expired</p>
-                                      <p className="text-lg font-bold text-red-600">{stats?.expiredCount || 0}</p>
-                                    </div>
-                                    <div className="bg-white rounded-lg px-4 py-2 shadow-sm">
-                                      <p className="text-xs text-gray-500 uppercase">Cancelled</p>
-                                      <p className="text-lg font-bold text-gray-600">{stats?.cancelledCount || 0}</p>
-                                    </div>
-                                    <div className="bg-white rounded-lg px-4 py-2 shadow-sm">
-                                      <p className="text-xs text-gray-500 uppercase">Verify</p>
-                                      <p className="text-sm font-medium text-gray-900">
-                                        {getEffectiveVerificationMethod(quest).toUpperCase()}
-                                      </p>
-                                    </div>
+                          </thead>
+                          <tbody className="divide-y divide-gray-200">
+                            {submissions
+                              .filter(sub => submissionTypeFilter === 'all' || sub.type === submissionTypeFilter)
+                              .map(sub => (
+                              <tr 
+                                key={sub.id} 
+                                onClick={() => setSelectedSubmission(sub)}
+                                className={`hover:bg-gray-50 cursor-pointer ${
+                                  sub.type === 'business' ? 'bg-emerald-50/50' : sub.type === 'destination' ? 'bg-blue-50/50' : ''
+                                }`}
+                              >
+                                <td className="px-4 py-3 font-medium text-gray-900">
+                                  <div className="flex items-center gap-2">
+                                    {sub.type === 'business' && (
+                                      <span className="text-xs px-1.5 py-0.5 bg-emerald-100 text-emerald-800 rounded font-medium">🏪</span>
+                                    )}
+                                    {sub.type === 'destination' && (
+                                      <span className="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-800 rounded font-medium">🌴</span>
+                                    )}
+                                    {getSubmissionDisplayName(sub)}
                                   </div>
-                                  <QuestVerificationSetup
-                                    quest={quest}
-                                    ensureTokensForQuest={ensureTokensForQuest}
-                                    onError={(msg) => showToast(msg, 'error')}
-                                    onQuestUpdated={(updated) => {
-                                      setQuests((prev) =>
-                                        prev.map((q) =>
-                                          q.id === quest.id ? { ...q, ...updated, id: quest.id } : q
-                                        )
-                                      )
-                                    }}
-                                  />
+                                </td>
+                                <td className="px-4 py-3 text-gray-600">
+                                  {sub.type === 'business' ? 'Business Registration' : sub.type === 'destination' ? 'Destination' : (sub.entryType || 'other')}
+                                </td>
+                                <td className="px-4 py-3 text-gray-600">
+                                  {sub.type === 'business' ? getCategoryLabel(sub.category) : (sub.category || '-')}
+                                </td>
+                                <td className="px-4 py-3 text-gray-600">{sub.barangay || '-'}</td>
+                                <td className="px-4 py-3 text-gray-600 text-sm">
+                                  {sub.createdAt ? new Date(sub.createdAt).toLocaleDateString() : '-'}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <StatusBadge status={sub.status} />
                                 </td>
                               </tr>
-                            )}
-                          </>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          ) : activeTab === TABS.QUEST_VERIFICATIONS ? (
-            <div className="space-y-6">
-            {pendingSelfVerifications.length > 0 && (
-              <div className="bg-white rounded-xl shadow-sm border border-amber-200 overflow-hidden">
-                <div className="px-4 py-3 border-b border-amber-100 bg-amber-50">
-                  <h3 className="font-semibold text-amber-900">
-                    📋 Self-verified — pending approval ({pendingSelfVerifications.length})
-                  </h3>
-                </div>
-                <div className="divide-y divide-gray-100">
-                  {pendingSelfVerifications.map((p) => (
-                    <div key={p.id} className="p-4 flex flex-col sm:flex-row gap-4 sm:items-start">
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-gray-900">{p.userEmail || p.uid}</p>
-                        <p className="text-sm text-gray-600">
-                          {questDetails[p.questId]?.title || p.questId}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          Via {p.verificationMethod} ·{' '}
-                          {p.verifiedAt ? new Date(p.verifiedAt).toLocaleString() : '—'}
-                        </p>
-                        {p.verificationMethod === 'qr' && p.verificationData?.distanceFromQuestMeters != null && (
-                          <p className="text-xs text-gray-600 mt-1">
-                            📍 {Math.round(p.verificationData.distanceFromQuestMeters)}m from venue
-                          </p>
-                        )}
-                        {p.verificationMethod === 'code' && p.verificationData?.photoURL && (
-                          <img
-                            src={p.verificationData.photoURL}
-                            alt="Verification"
-                            className="mt-2 w-32 h-32 object-cover rounded-lg border border-gray-200"
-                          />
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {activeTab === TABS.REPORTS && (
+                  <>
+                    <div className="flex items-center gap-2 mb-4">
+                      <span className="text-xl">🚩</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Reports</h2>
+                        <p className="text-sm text-gray-500">User-submitted issue reports about places</p>
+                      </div>
+                    </div>
+                    {loading ? (
+                      <div className="text-center py-12">
+                        <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-600 border-t-transparent" />
+                      </div>
+                    ) : reports.length === 0 ? (
+                      <div className="text-center py-12">
+                        <div className="text-5xl mb-3">{EMPTY_STATES[TABS.REPORTS].icon}</div>
+                        <h3 className="font-semibold text-gray-800">{EMPTY_STATES[TABS.REPORTS].title}</h3>
+                        <p className="text-sm text-gray-500 mt-1">{EMPTY_STATES[TABS.REPORTS].desc}</p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead className="bg-gray-50 border-b border-gray-200">
+                            <tr>
+                              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Reporter</th>
+                              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Reason</th>
+                              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Target</th>
+                              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Date</th>
+                              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-200">
+                            {reports.map(report => (
+                              <tr 
+                                key={report.id} 
+                                onClick={() => setSelectedReport(report)}
+                                className="hover:bg-gray-50 cursor-pointer"
+                              >
+                                <td className="px-4 py-3 font-medium text-gray-900">{report.reporterEmail || 'Anonymous'}</td>
+                                <td className="px-4 py-3 text-gray-600 max-w-xs truncate">{report.reason}</td>
+                                <td className="px-4 py-3 text-gray-600 capitalize">{report.targetType}</td>
+                                <td className="px-4 py-3 text-gray-600 text-sm">
+                                  {report.createdAt ? new Date(report.createdAt).toLocaleDateString() : '-'}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <StatusBadge status={report.status} />
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {activeTab === TABS.REVIEWS && (
+                  <>
+                    <div className="flex items-center gap-2 mb-4">
+                      <span className="text-xl">⭐</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Reviews</h2>
+                        <p className="text-sm text-gray-500">Moderate user-submitted reviews</p>
+                      </div>
+                    </div>
+                    {loading ? (
+                      <div className="text-center py-12">
+                        <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-600 border-t-transparent" />
+                      </div>
+                    ) : pendingReviews.length === 0 ? (
+                      <div className="text-center py-12">
+                        <div className="text-5xl mb-3">{EMPTY_STATES[TABS.REVIEWS].icon}</div>
+                        <h3 className="font-semibold text-gray-800">{EMPTY_STATES[TABS.REVIEWS].title}</h3>
+                        <p className="text-sm text-gray-500 mt-1">{EMPTY_STATES[TABS.REVIEWS].desc}</p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead className="bg-gray-50 border-b border-gray-200">
+                            <tr>
+                              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">User</th>
+                              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Type</th>
+                              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Rating</th>
+                              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Review</th>
+                              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Date</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-200">
+                            {pendingReviews.map(review => (
+                              <tr 
+                                key={review.id} 
+                                onClick={() => setSelectedReview(review)}
+                                className="hover:bg-gray-50 cursor-pointer"
+                              >
+                                <td className="px-4 py-3 font-medium text-gray-900">{review.userDisplayName || review.userEmail || 'Anonymous'}</td>
+                                <td className="px-4 py-3 text-gray-600 capitalize">{review.targetType}</td>
+                                <td className="px-4 py-3">
+                                  <span className="flex items-center gap-1">
+                                    <span className="text-yellow-400">★</span>
+                                    <span className="font-medium">{review.rating}</span>
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 text-gray-600 text-sm max-w-xs truncate">{review.text || review.review}</td>
+                                <td className="px-4 py-3 text-gray-600 text-sm">
+                                  {review.createdAt ? new Date(review.createdAt).toLocaleDateString() : '-'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {activeTab === TABS.SEASONS && (
+                  <>
+                    <div className="flex items-center justify-between gap-4 mb-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">🗓️</span>
+                        <div>
+                          <h2 className="text-lg font-semibold text-gray-900">Seasons</h2>
+                          <p className="text-sm text-gray-500">Create and manage tourism seasons</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setShowSeasonModal(true)}
+                        className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm font-medium shrink-0"
+                      >
+                        + Create Season
+                      </button>
+                    </div>
+                    {loading ? (
+                      <div className="text-center py-12">
+                        <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-600 border-t-transparent" />
+                      </div>
+                    ) : seasons.length === 0 ? (
+                      <div className="text-center py-12">
+                        <div className="text-5xl mb-3">{EMPTY_STATES[TABS.SEASONS].icon}</div>
+                        <h3 className="font-semibold text-gray-800">{EMPTY_STATES[TABS.SEASONS].title}</h3>
+                        <p className="text-sm text-gray-500 mt-1">{EMPTY_STATES[TABS.SEASONS].desc}</p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead className="bg-gray-50 border-b border-gray-200">
+                            <tr>
+                              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Name</th>
+                              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Start</th>
+                              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">End</th>
+                              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
+                              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-200">
+                            {seasons.map(season => (
+                              <tr key={season.id} className="hover:bg-gray-50">
+                                <td className="px-4 py-3 font-medium text-gray-900">{season.name}</td>
+                                <td className="px-4 py-3 text-gray-600 text-sm">
+                                  {season.startAt?.toDate ? season.startAt.toDate().toLocaleDateString() : (season.startAt || '-')}
+                                </td>
+                                <td className="px-4 py-3 text-gray-600 text-sm">
+                                  {season.endAt?.toDate ? season.endAt.toDate().toLocaleDateString() : (season.endAt || '-')}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <StatusBadge status={season.status} />
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="flex gap-2">
+                                    {season.status === 'inactive' ? (
+                                      <button
+                                        onClick={() => handleActivateSeason(season.id)}
+                                        disabled={actionLoading}
+                                        className="text-sm font-medium text-emerald-600 hover:text-emerald-700 disabled:opacity-50"
+                                      >
+                                        Activate
+                                      </button>
+                                    ) : season.status === 'active' ? (
+                                      <button
+                                        onClick={() => handleCloseSeason(season.id)}
+                                        disabled={actionLoading}
+                                        className="text-sm font-medium text-red-600 hover:text-red-700 disabled:opacity-50"
+                                      >
+                                        Close
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {activeSeason && (
+                      <div className="mt-8 pt-8 border-t border-gray-200">
+                        <div className="flex items-center justify-between mb-4">
+                          <h3 className="text-md font-semibold text-gray-900">Leaderboard — {activeSeason.name}</h3>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => setLeaderboardTab('points')}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-medium ${
+                                leaderboardTab === 'points' ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-600'
+                              }`}
+                            >
+                              Points
+                            </button>
+                            <button
+                              onClick={() => setLeaderboardTab('impact')}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-medium ${
+                                leaderboardTab === 'impact' ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-600'
+                              }`}
+                            >
+                              Impact
+                            </button>
+                          </div>
+                        </div>
+                        {leaderboardData.length > 0 ? (
+                          <div className="space-y-2">
+                            {leaderboardData.map((entry, i) => (
+                              <div key={entry.uid || i} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
+                                  i === 0 ? 'bg-yellow-100 text-yellow-700' : i === 1 ? 'bg-gray-200 text-gray-700' : i === 2 ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-600'
+                                }`}>
+                                  {entry.rank}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-medium text-gray-900 truncate">{entry.name}</p>
+                                  <p className="text-xs text-gray-500">{entry.completedQuestsCount} quests</p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="font-bold text-gray-900">
+                                    {leaderboardTab === 'points' ? `${entry.pointsTotal} pts` : entry.impact}
+                                  </p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-gray-500 text-center py-4">No leaderboard data yet.</p>
                         )}
                       </div>
-                      <div className="flex flex-col gap-2 shrink-0">
-                        <button
-                          type="button"
-                          disabled={actionLoading}
-                          onClick={() => handleApprovePendingVerification(p)}
-                          className="px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
+                    )}
+                  </>
+                )}
+
+                {activeTab === TABS.QUESTS && (
+                  <>
+                    <div className="flex items-center justify-between gap-4 mb-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">🎯</span>
+                        <div>
+                          <h2 className="text-lg font-semibold text-gray-900">Quests</h2>
+                          <p className="text-sm text-gray-500">Manage quests within the active season</p>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <select
+                          value={selectedSeasonFilter || activeSeason?.id || ''}
+                          onChange={(e) => setSelectedSeasonFilter(e.target.value)}
+                          className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
                         >
-                          ✅ Approve
-                        </button>
+                          <option value="">Select Season</option>
+                          {seasons.map(s => (
+                            <option key={s.id} value={s.id}>{s.name}</option>
+                          ))}
+                        </select>
                         <button
-                          type="button"
-                          disabled={actionLoading}
-                          onClick={() => handleRejectPendingVerification(p)}
-                          className="px-3 py-2 bg-red-100 text-red-700 rounded-lg text-sm font-medium hover:bg-red-200 disabled:opacity-50"
+                          onClick={() => setShowQuestModal(true)}
+                          disabled={!selectedSeasonFilter && !activeSeason}
+                          className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm font-medium disabled:bg-gray-300 shrink-0"
                         >
-                          ❌ Reject
+                          + Create Quest
                         </button>
                       </div>
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-              {questParticipations.length === 0 ? (
-                <div className="text-center py-12 text-gray-500">
-                  No quest participations found
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-50 border-b border-gray-200">
-                      <tr>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Quest</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">User</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Points</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Joined</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Reward</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200">
-                      {questParticipations.map(part => (
-                        <tr 
-                          key={part.id} 
-                          onClick={() => setSelectedParticipation(part)}
-                          className="hover:bg-gray-50 cursor-pointer"
-                        >
-                          <td className="px-4 py-3 font-medium text-gray-900">
-                            {questDetails[part.questId]?.title || part.questId}
-                          </td>
-                          <td className="px-4 py-3 text-gray-600 text-sm">
-                            {part.userEmail || (part.uid ? part.uid.substring(0, 8) + '...' : '-')}
-                          </td>
-                          <td className="px-4 py-3 text-gray-600">
-                            {questDetails[part.questId]?.points || 0} pts
-                          </td>
-                          <td className="px-4 py-3 text-gray-600 text-sm">
-                            {part.joinedAt ? new Date(part.joinedAt).toLocaleDateString() : '-'}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              part.status === 'joined' ? 'bg-blue-100 text-blue-800' :
-                              part.status === 'completed' ? 'bg-green-100 text-green-800' :
-                              part.status === 'expired' ? 'bg-red-100 text-red-800' :
-                              'bg-gray-100 text-gray-800'
-                            }`}>
-                              {part.status?.toUpperCase() || 'UNKNOWN'}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              part.rewardStatus === 'released' ? 'bg-green-100 text-green-800' :
-                              part.rewardStatus === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                              part.rewardStatus === 'expired' ? 'bg-red-100 text-red-800' :
-                              'bg-gray-100 text-gray-800'
-                            }`}>
-                              {part.rewardStatus?.toUpperCase() || 'PENDING'}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-            </div>
-          ) : activeTab === TABS.VOUCHERS ? (
-            <div className="space-y-6">
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden p-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-2">Voucher Store (Active Season)</h2>
-                <p className="text-gray-600 text-sm mb-6">
-                  Seed sample vouchers for the active season so the Voucher Store page shows available vouchers.
-                </p>
-                {isUserAdmin ? (
-                  <div className="flex flex-wrap gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setShowSeedVouchersConfirm(true)}
-                      className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium"
-                    >
-                      Seed Sample Vouchers
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowSeedPercentOffConfirm(true)}
-                      className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium"
-                    >
-                      Seed 10 %OFF Vouchers
-                    </button>
+
+                    <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 mb-4 text-sm">
+                      <p className="font-semibold text-gray-700 mb-2">Status Guide:</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-gray-600">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> LIVE
+                          </span>
+                          <span>Visible to users, can be joined</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                            <span className="w-1.5 h-1.5 rounded-full bg-gray-400" /> DRAFT
+                          </span>
+                          <span>Hidden from users (work in progress)</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 mb-4">
+                      <button
+                        onClick={() => setShowCleanupConfirm(true)}
+                        className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 font-medium"
+                      >
+                        Expire Stale Participations
+                      </button>
+                      <button
+                        onClick={handleRepairCounts}
+                        disabled={repairLoading}
+                        className="px-3 py-2 text-sm border border-amber-300 bg-amber-50 text-amber-800 rounded-lg hover:bg-amber-100 font-medium disabled:opacity-50"
+                        title="Recalculates reserved counts based on actual participations. Fixes negative numbers."
+                      >
+                        {repairLoading ? 'Repairing...' : 'Repair Reserved Counts'}
+                      </button>
+                    </div>
+
+                    {loading ? (
+                      <div className="text-center py-12">
+                        <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-600 border-t-transparent" />
+                      </div>
+                    ) : quests.length === 0 ? (
+                      <div className="text-center py-12">
+                        <div className="text-5xl mb-3">{EMPTY_STATES[TABS.QUESTS].icon}</div>
+                        <h3 className="font-semibold text-gray-800">{EMPTY_STATES[TABS.QUESTS].title}</h3>
+                        <p className="text-sm text-gray-500 mt-1">{EMPTY_STATES[TABS.QUESTS].desc}</p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full whitespace-nowrap">
+                          <thead className="bg-gray-50 border-b border-gray-200">
+                            <tr>
+                              <th className="text-left px-2 sm:px-3 py-3 text-xs font-medium text-gray-500 uppercase">Title</th>
+                              <th className="text-left px-2 sm:px-3 py-3 text-xs font-medium text-gray-500 uppercase">Category</th>
+                              <th className="text-left px-2 sm:px-3 py-3 text-xs font-medium text-gray-500 uppercase">Pts</th>
+                              <th className="text-left px-2 sm:px-3 py-3 text-xs font-medium text-gray-500 uppercase">Cap</th>
+                              <th className="text-left px-2 sm:px-3 py-3 text-xs font-medium text-gray-500 uppercase">Resv</th>
+                              <th className="text-left px-2 sm:px-3 py-3 text-xs font-medium text-gray-500 uppercase">Slots</th>
+                              <th className="text-left px-2 sm:px-3 py-3 text-xs font-medium text-gray-500 uppercase">Compl</th>
+                              <th className="text-left px-2 sm:px-3 py-3 text-xs font-medium text-gray-500 uppercase">Impact</th>
+                              <th className="text-left px-2 sm:px-3 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
+                              <th className="text-left px-2 sm:px-3 py-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-200">
+                            {quests.map(quest => {
+                              const isActive = getQuestIsActive(quest)
+                              const reservedCount = quest.reservedCount || 0
+                              const slotsLeft = (quest.capacity || 0) - reservedCount
+                              const isFull = slotsLeft <= 0
+                              const isExpanded = expandedQuestStats[quest.id]
+                              const stats = expandedQuestStats[quest.id]
+                              const isLoadingStats = loadingQuestStats === quest.id
+                              const impactForQuest = questImpactTotals[quest.id]
+
+                              return (
+                                <Fragment key={quest.id}>
+                                  <tr className="hover:bg-gray-50">
+                                    <td className="px-2 sm:px-3 py-3 font-medium text-gray-900 text-sm truncate max-w-[160px]">{quest.title}</td>
+                                    <td className="px-2 sm:px-3 py-3 text-gray-600 text-xs">{quest.category || '-'}</td>
+                                    <td className="px-2 sm:px-3 py-3 text-gray-600 text-sm">{quest.points}</td>
+                                    <td className="px-2 sm:px-3 py-3 text-gray-600 text-sm">{quest.capacity}</td>
+                                    <td className="px-2 sm:px-3 py-3 text-sm">
+                                      <span className={quest.reservedCount < 0 ? 'text-red-600 font-semibold' : 'text-gray-600'}>
+                                        {quest.reservedCount}
+                                        {quest.reservedCount < 0 && (
+                                          <span className="ml-1 text-xs" title="Negative count detected - click Repair Counts to fix">⚠️</span>
+                                        )}
+                                      </span>
+                                    </td>
+                                    <td className="px-2 sm:px-3 py-3 text-sm">
+                                      <span className={isFull ? 'text-red-600 font-medium' : 'text-gray-600'}>
+                                        {isFull ? 'Full' : slotsLeft}
+                                      </span>
+                                    </td>
+                                    <td className="px-2 sm:px-3 py-3 text-gray-600 text-sm">{quest.completedCount || 0}</td>
+                                    <td className="px-2 sm:px-3 py-3 text-gray-600 text-xs">
+                                      {impactForQuest ? (
+                                        <button
+                                          onClick={() => {
+                                            if (isExpanded) {
+                                              setExpandedQuestStats(prev => ({ ...prev, [quest.id]: null }))
+                                            } else {
+                                              setLoadingQuestStats(quest.id)
+                                              setTimeout(() => {
+                                                setExpandedQuestStats(prev => ({ ...prev, [quest.id]: impactForQuest }))
+                                                setLoadingQuestStats(null)
+                                              }, 300)
+                                            }
+                                          }}
+                                          className="text-emerald-600 hover:underline"
+                                        >
+                                          {impactForQuest.totalCompletions}
+                                        </button>
+                                      ) : (
+                                        <span className="text-gray-400">—</span>
+                                      )}
+                                    </td>
+                                    <td className="px-2 sm:px-3 py-3 whitespace-nowrap">
+                                      <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full ${
+                                        isActive
+                                          ? 'bg-emerald-100 text-emerald-700'
+                                          : 'bg-gray-100 text-gray-600'
+                                      }`}>
+                                        <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+                                        {isActive ? 'LIVE' : 'DRAFT'}
+                                      </span>
+                                    </td>
+                                    <td className="px-2 sm:px-3 py-3 whitespace-nowrap">
+                                      <div className="flex items-center gap-3">
+                                        <div className="flex items-center gap-2 group relative">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleToggleClick(quest)}
+                                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                                              isActive ? 'bg-emerald-600' : 'bg-gray-300'
+                                            }`}
+                                            role="switch"
+                                            aria-checked={isActive}
+                                            aria-label={isActive ? 'Deactivate quest' : 'Activate quest'}
+                                          >
+                                            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                              isActive ? 'translate-x-6' : 'translate-x-1'
+                                            }`} />
+                                          </button>
+                                          <span className={`text-xs font-semibold ${isActive ? 'text-emerald-700' : 'text-gray-500'}`}>
+                                            {isActive ? 'Live' : 'Draft'}
+                                          </span>
+                                          <div className="invisible group-hover:visible absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 bg-gray-900 text-white text-xs rounded-lg p-2 shadow-lg z-10">
+                                            {isActive
+                                              ? 'Live quests are visible and joinable by all users.'
+                                              : 'Draft quests are hidden from users. Toggle to publish.'}
+                                            <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-gray-900 rotate-45" />
+                                          </div>
+                                        </div>
+                                        <button
+                                          onClick={() => setSelectedQuest(quest)}
+                                          className="px-3 py-1.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 rounded-lg transition"
+                                        >
+                                          Edit
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                  {isExpanded && (
+                                    <tr>
+                                      <td colSpan={10} className="px-4 py-3 bg-gray-50">
+                                        <div className="flex flex-wrap gap-4">
+                                          {impactForQuest?.byUnit && Object.entries(impactForQuest.byUnit).map(([unit, amount]) => (
+                                            <div key={unit} className="bg-white rounded-lg px-3 py-2 border border-gray-200">
+                                              <p className="text-xs text-gray-500">{unit}</p>
+                                              <p className="font-semibold text-gray-900">{amount}</p>
+                                            </div>
+                                          ))}
+                                          {(!impactForQuest?.byUnit || Object.keys(impactForQuest.byUnit).length === 0) && (
+                                            <p className="text-sm text-gray-500">No impact data.</p>
+                                          )}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  )}
+                                </Fragment>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {questParticipations.length > 0 && (
+                      <div className="mt-8 pt-8 border-t border-gray-200">
+                        <h3 className="text-md font-semibold text-gray-900 mb-4">Quest Participations</h3>
+                        <div className="overflow-x-auto">
+                          <table className="w-full">
+                            <thead className="bg-gray-50 border-b border-gray-200">
+                              <tr>
+                                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Quest</th>
+                                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">User</th>
+                                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Points</th>
+                                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Joined</th>
+                                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
+                                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Reward</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200">
+                              {questParticipations.map(part => (
+                                <tr 
+                                  key={part.id} 
+                                  onClick={() => setSelectedParticipation(part)}
+                                  className="hover:bg-gray-50 cursor-pointer"
+                                >
+                                  <td className="px-4 py-3 font-medium text-gray-900">
+                                    {questDetails[part.questId]?.title || part.questId}
+                                  </td>
+                                  <td className="px-4 py-3 text-gray-600 text-sm">
+                                    {part.userEmail || (part.uid ? part.uid.substring(0, 8) + '...' : '-')}
+                                  </td>
+                                  <td className="px-4 py-3 text-gray-600">
+                                    {questDetails[part.questId]?.points || 0} pts
+                                  </td>
+                                  <td className="px-4 py-3 text-gray-600 text-sm">
+                                    {part.joinedAt ? new Date(part.joinedAt).toLocaleDateString() : '-'}
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                      part.status === 'joined' ? 'bg-blue-100 text-blue-800' :
+                                      part.status === 'completed' ? 'bg-green-100 text-green-800' :
+                                      part.status === 'expired' ? 'bg-red-100 text-red-800' :
+                                      'bg-gray-100 text-gray-800'
+                                    }`}>
+                                      {part.status?.toUpperCase() || 'UNKNOWN'}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                      part.rewardStatus === 'released' ? 'bg-green-100 text-green-800' :
+                                      part.rewardStatus === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                                      part.rewardStatus === 'expired' ? 'bg-red-100 text-red-800' :
+                                      'bg-gray-100 text-gray-800'
+                                    }`}>
+                                      {part.rewardStatus?.toUpperCase() || 'PENDING'}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {activeTab === TABS.CHECKIN && (
+                  <>
+                    <div className="flex items-center gap-2 mb-4">
+                      <span className="text-xl">✅</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Quest Check-in</h2>
+                        <p className="text-sm text-gray-500">Quickly mark participants as completed</p>
+                      </div>
+                    </div>
+                    <CheckInPanel user={user} showToast={showToast} />
+                  </>
+                )}
+
+                {activeTab === TABS.VOUCHERS && (
+                  <div className="space-y-6">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">🎟️</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Vouchers</h2>
+                        <p className="text-sm text-gray-500 mt-1">Look up voucher codes and manage the redemption log.</p>
+                      </div>
+                    </div>
+
+                    {loading ? (
+                      <div className="text-center py-12">
+                        <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-600 border-t-transparent" />
+                      </div>
+                    ) : !activeSeason ? (
+                      <div className="text-center py-12">
+                        <div className="text-5xl mb-3">{EMPTY_STATES[TABS.VOUCHERS].icon}</div>
+                        <h3 className="font-semibold text-gray-800">{EMPTY_STATES[TABS.VOUCHERS].title}</h3>
+                        <p className="text-sm text-gray-500 mt-1">{EMPTY_STATES[TABS.VOUCHERS].desc}</p>
+                      </div>
+                    ) : (
+                      <>
+                        {/* ===== VERIFY VOUCHER SECTION ===== */}
+                        <section className="border border-gray-200 rounded-2xl p-5 bg-gray-50">
+                          <h3 className="font-semibold text-gray-800 flex items-center gap-2 mb-1">
+                            🔍 Verify a Voucher
+                          </h3>
+                          <p className="text-sm text-gray-500 mb-4">
+                            Enter a voucher code to look it up and mark it as used.
+                          </p>
+
+                          <div className="flex flex-col sm:flex-row gap-2">
+                            <input
+                              type="text"
+                              value={verifyCode}
+                              onChange={(e) => setVerifyCode(e.target.value.toUpperCase())}
+                              placeholder="e.g., CAB-XYZ123ABC"
+                              className="flex-1 px-4 py-2.5 rounded-xl border border-gray-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 focus:outline-none font-mono text-sm tracking-wider bg-white"
+                              onKeyDown={(e) => e.key === 'Enter' && handleVerifyLookup()}
+                            />
+                            <button
+                              onClick={handleVerifyLookup}
+                              disabled={!verifyCode.trim() || verifySearching}
+                              className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition"
+                            >
+                              {verifySearching ? 'Looking up...' : 'Lookup'}
+                            </button>
+                          </div>
+
+                          {verifyError && (
+                            <div className="mt-3 bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 text-sm">
+                              {verifyError}
+                            </div>
+                          )}
+
+                          {verifyResult && (() => {
+                            const displayStatus = getVerifyDisplayStatus()
+                            const isExpired = displayStatus === 'expired'
+                            return (
+                              <div className="mt-4 bg-white border border-emerald-200 rounded-xl p-4">
+                                <div className="flex items-start justify-between gap-3 mb-3">
+                                  <div>
+                                    <p className="text-xs text-gray-500 uppercase font-semibold">Voucher</p>
+                                    <p className="font-bold text-gray-900">{verifyResult.voucherSnapshot?.title || 'Voucher'}</p>
+                                    {verifyResult.voucherSnapshot?.partnerName && (
+                                      <p className="text-sm text-gray-500">{verifyResult.voucherSnapshot.partnerName}</p>
+                                    )}
+                                  </div>
+                                  <span className={`text-xs font-semibold px-3 py-1 rounded-full ${
+                                    displayStatus === 'used' ? 'bg-gray-100 text-gray-600' :
+                                    displayStatus === 'expired' ? 'bg-red-100 text-red-700' :
+                                    'bg-emerald-100 text-emerald-700'
+                                  }`}>
+                                    {displayStatus === 'expired' ? 'EXPIRED' : displayStatus?.toUpperCase()}
+                                  </span>
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                                  <div>
+                                    <p className="text-xs text-gray-500">Code</p>
+                                    <p className="font-mono">{verifyResult.code}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-xs text-gray-500">Points Cost</p>
+                                    <p className="font-semibold">{verifyResult.pointsCost ?? 0} pts</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-xs text-gray-500">Redeemed By</p>
+                                    <p>{verifyResult.userEmail || verifyResult.uid}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-xs text-gray-500">Redeemed</p>
+                                    <p>{verifyResult.redeemedAt?.toDate?.().toLocaleString() || '\u2014'}</p>
+                                  </div>
+                                  {verifyResult.usedAt && (
+                                    <div>
+                                      <p className="text-xs text-gray-500">Used At</p>
+                                      <p>{verifyResult.usedAt.toDate().toLocaleString()}</p>
+                                    </div>
+                                  )}
+                                  {verifyResult.usedByEmail && (
+                                    <div>
+                                      <p className="text-xs text-gray-500">Used By</p>
+                                      <p>{verifyResult.usedByEmail}</p>
+                                    </div>
+                                  )}
+                                  <div>
+                                    <p className="text-xs text-gray-500">Expires</p>
+                                    <p>{verifyResult.voucherSnapshot?.expiresAt?.toDate?.().toLocaleDateString() || 'No expiry'}</p>
+                                  </div>
+                                </div>
+
+                                {displayStatus === 'unused' && !isExpired && (
+                                  <div className="mt-4 pt-4 border-t border-gray-100">
+                                    <button
+                                      onClick={handleVerifyMarkUsed}
+                                      disabled={verifyMarkLoading}
+                                      className="w-full sm:w-auto px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold transition"
+                                    >
+                                      {verifyMarkLoading ? 'Marking...' : 'Mark as Used'}
+                                    </button>
+                                  </div>
+                                )}
+
+                                {displayStatus === 'used' && (
+                                  <p className="mt-3 text-sm text-gray-500">
+                                    This voucher was already used on {verifyResult.usedAt?.toDate?.toLocaleString() || 'unknown date'}.
+                                  </p>
+                                )}
+
+                                {isExpired && (
+                                  <p className="mt-3 text-sm text-red-600">
+                                    Expired \u2014 cannot use
+                                  </p>
+                                )}
+                              </div>
+                            )
+                          })()}
+                        </section>
+
+                        {/* ===== REDEMPTION LOG SECTION ===== */}
+                        <section>
+                          <div className="flex items-center justify-between mb-4">
+                            <div>
+                              <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                                📋 Redemption Log
+                              </h3>
+                              <p className="text-sm text-gray-500 mt-1">
+                                All voucher redemptions from users.
+                              </p>
+                            </div>
+
+                            <div className="flex items-center gap-2 text-sm">
+                              <label htmlFor="status-filter" className="text-gray-600">Filter:</label>
+                              <select
+                                id="status-filter"
+                                value={redemptionStatusFilter}
+                                onChange={(e) => setRedemptionStatusFilter(e.target.value)}
+                                className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white"
+                              >
+                                <option value="all">All</option>
+                                <option value="unused">Unused</option>
+                                <option value="used">Used</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          {seasonRedemptions.length === 0 ? (
+                            <div className="text-center py-8">
+                              <p className="text-gray-500">No redemptions for this season yet.</p>
+                            </div>
+                          ) : (
+                            <div className="w-full overflow-x-auto">
+                              <table className="min-w-[700px] w-full text-sm">
+                                <thead className="bg-gray-50 border-b border-gray-200">
+                                  <tr>
+                                    <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase">Code</th>
+                                    <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase">User</th>
+                                    <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase">Voucher</th>
+                                    <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase">Redeemed</th>
+                                    <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
+                                    <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase">Action</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-200">
+                                  {seasonRedemptions
+                                    .filter((r) => redemptionStatusFilter === 'all' || r.status === redemptionStatusFilter)
+                                    .map((r) => (
+                                      <tr key={r.id} className="hover:bg-gray-50">
+                                        <td className="px-3 py-3 font-mono text-sm">{r.code}</td>
+                                        <td className="px-3 py-3 text-sm text-gray-600">{r.userEmail || r.uid || '\u2014'}</td>
+                                        <td className="px-3 py-3 text-sm">
+                                          {r.voucherSnapshot?.title || r.voucherId || '\u2014'}
+                                        </td>
+                                        <td className="px-3 py-3 text-sm text-gray-600">
+                                          {r.redeemedAt?.toDate ? r.redeemedAt.toDate().toLocaleString() : '\u2014'}
+                                        </td>
+                                        <td className="px-3 py-3">
+                                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                                            r.status === 'used' ? 'bg-gray-100 text-gray-700' : 'bg-emerald-100 text-emerald-700'
+                                          }`}>
+                                            {r.status === 'used' ? 'Used' : 'Unused'}
+                                          </span>
+                                        </td>
+                                        <td className="px-3 py-3">
+                                          {r.status === 'unused' ? (
+                                            <button
+                                              type="button"
+                                              disabled={markingVoucherUsedId === r.id}
+                                              onClick={() => handleMarkVoucherUsed(r.id)}
+                                              className="text-sm font-medium text-indigo-600 hover:text-indigo-700 disabled:opacity-50"
+                                            >
+                                              {markingVoucherUsedId === r.id ? '\u2026' : 'Mark Used'}
+                                            </button>
+                                          ) : (
+                                            <span className="text-sm text-gray-400">\u2014</span>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                          <p className="text-xs text-gray-400 mt-4">
+                            To view merchant insights, click a partner name in the voucher list from the merchant detail page.
+                          </p>
+                        </section>
+                      </>
+                    )}
                   </div>
-                ) : (
-                  <p className="text-gray-500 text-sm">Admin access required to seed vouchers.</p>
                 )}
               </div>
-
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                <div className="border-b border-gray-200 px-6 py-4 flex flex-wrap items-center justify-between gap-3">
-                  <h2 className="text-lg font-semibold text-gray-900">Redemptions</h2>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-gray-600">Filter:</span>
-                    <select
-                      value={redemptionStatusFilter}
-                      onChange={(e) => setRedemptionStatusFilter(e.target.value)}
-                      className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
-                    >
-                      <option value="all">All</option>
-                      <option value="unused">Unused</option>
-                      <option value="used">Used</option>
-                    </select>
-                  </div>
-                </div>
-                <div className="overflow-x-auto">
-                  {!activeSeason ? (
-                    <div className="p-6 text-center text-gray-500">No active season.</div>
-                  ) : seasonRedemptions.length === 0 ? (
-                    <div className="p-6 text-center text-gray-500">No redemptions for this season yet.</div>
-                  ) : (
-                    <table className="w-full">
-                      <thead className="bg-gray-50 border-b border-gray-200">
-                        <tr>
-                          <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Code</th>
-                          <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">User</th>
-                          <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Voucher</th>
-                          <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Redeemed</th>
-                          <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
-                          <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-200">
-                        {seasonRedemptions
-                          .filter((r) => redemptionStatusFilter === 'all' || r.status === redemptionStatusFilter)
-                          .map((r) => (
-                            <tr key={r.id} className="hover:bg-gray-50">
-                              <td className="px-4 py-3 font-mono text-sm">{r.code}</td>
-                              <td className="px-4 py-3 text-sm text-gray-600">{r.userEmail || r.uid || '—'}</td>
-                              <td className="px-4 py-3 text-sm">
-                                {r.voucherSnapshot?.title || r.voucherId || '—'}
-                              </td>
-                              <td className="px-4 py-3 text-sm text-gray-600">
-                                {r.redeemedAt?.toDate ? r.redeemedAt.toDate().toLocaleString() : '—'}
-                              </td>
-                              <td className="px-4 py-3">
-                                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                                  r.status === 'used' ? 'bg-gray-100 text-gray-700' : 'bg-emerald-100 text-emerald-700'
-                                }`}>
-                                  {r.status === 'used' ? 'Used' : 'Unused'}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3">
-                                {r.status === 'unused' ? (
-                                  <button
-                                    type="button"
-                                    disabled={markingVoucherUsedId === r.id}
-                                    onClick={() => handleMarkVoucherUsed(r.id)}
-                                    className="text-sm font-medium text-indigo-600 hover:text-indigo-700 disabled:opacity-50"
-                                  >
-                                    {markingVoucherUsedId === r.id ? '…' : 'Mark Used'}
-                                  </button>
-                                ) : (
-                                  '—'
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
-              </div>
-            </div>
-          ) : null}
+            </main>
+          </div>
         </div>
       </main>
 
@@ -2874,138 +2718,8 @@ export default function LGUDashboardPage() {
         />
       )}
 
-      {showSeedVouchersConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl max-w-md w-full p-6">
-            <h3 className="text-lg font-bold text-gray-900 mb-2">Seed Sample Vouchers</h3>
-            <p className="text-gray-600 mb-4">
-              This will create 12 sample vouchers for the currently active season (seed_v1 … seed_v12).
-              Existing vouchers will be updated without resetting stock remaining.
-            </p>
-            <p className="text-sm text-yellow-600 mb-6">
-              Running this again is safe and will not create duplicates.
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowSeedVouchersConfirm(false)}
-                disabled={seedVouchersLoading}
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSeedSampleVouchers}
-                disabled={seedVouchersLoading}
-                className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-300"
-              >
-                {seedVouchersLoading ? 'Seeding...' : 'Seed 12 Vouchers'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showSeedPercentOffConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl max-w-md w-full p-6">
-            <h3 className="text-lg font-bold text-gray-900 mb-2">Seed 10 %OFF Vouchers</h3>
-            <p className="text-gray-600 mb-4">
-              Creates/updates 10 percent-off vouchers for partner stores (seed_pct_01 … seed_pct_10).
-              Each voucher is tied to a real business from the database.
-            </p>
-            <p className="text-sm text-yellow-600 mb-6">
-              Running this again is safe - existing stock remaining will not be reset.
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowSeedPercentOffConfirm(false)}
-                disabled={seedPercentOffLoading}
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSeedPercentOffVouchers}
-                disabled={seedPercentOffLoading}
-                className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:bg-gray-300"
-              >
-                {seedPercentOffLoading ? 'Seeding...' : 'Seed 10 %OFF Vouchers'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showSeedConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl max-w-md w-full p-6">
-            <h3 className="text-lg font-bold text-gray-900 mb-2">Seed Sample Quests</h3>
-            <p className="text-gray-600 mb-4">
-              This will create 10 sample quests for the currently active season. 
-              If quests with IDs seed-q1 through seed-q10 already exist, they will be updated.
-            </p>
-            <p className="text-sm text-yellow-600 mb-6">
-              Running this again is safe - it will not create duplicates.
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowSeedConfirm(false)}
-                disabled={seedLoading}
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSeedSampleQuests}
-                disabled={seedLoading}
-                className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-300"
-              >
-                {seedLoading ? 'Seeding...' : 'Seed 10 Quests'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showSeedVisitBuyConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl max-w-md w-full p-6">
-            <h3 className="text-lg font-bold text-gray-900 mb-2">Seed Visit & Buy Quests</h3>
-            <p className="text-gray-600 mb-4">
-              This will create 20 new quests for the currently active season:
-            </p>
-            <ul className="text-sm text-gray-600 mb-2 list-disc list-inside">
-              <li>10 VISIT quests - Stay at a location for X minutes</li>
-              <li>10 BUY quests - Buy a product at a local business</li>
-            </ul>
-            <p className="text-sm text-gray-600 mb-4">
-              Quest IDs: seed_visit_01 to seed_visit_10, seed_buy_01 to seed_buy_10
-            </p>
-            <p className="text-sm text-yellow-600 mb-6">
-              Running this again is safe - it will update existing quests without creating duplicates.
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowSeedVisitBuyConfirm(false)}
-                disabled={seedVisitBuyLoading}
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSeedVisitBuyQuests}
-                disabled={seedVisitBuyLoading}
-                className="flex-1 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:bg-gray-300"
-              >
-                {seedVisitBuyLoading ? 'Seeding...' : 'Seed 20 Quests'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showCleanupConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      {showCleanupConfirm && createPortal(
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl max-w-md w-full p-6">
             <h3 className="text-lg font-bold text-gray-900 mb-2">Run Expiration Cleanup</h3>
             <p className="text-gray-600 mb-4">
@@ -3032,7 +2746,60 @@ export default function LGUDashboardPage() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
+      )}
+
+      {confirmToggle && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/60" onClick={() => setConfirmToggle(null)} />
+          <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl p-6">
+            <div className="flex items-start gap-4 mb-4">
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center text-2xl shrink-0 ${
+                confirmToggle.status !== 'active' ? 'bg-emerald-100' : 'bg-amber-100'
+              }`}>
+                {confirmToggle.status !== 'active' ? '🚀' : '📝'}
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-lg text-gray-900">
+                  {confirmToggle.status !== 'active' ? 'Publish this quest?' : 'Move to Draft?'}
+                </h3>
+                <p className="text-sm text-gray-600 mt-1">
+                  <strong>&ldquo;{confirmToggle.title}&rdquo;</strong>
+                </p>
+              </div>
+            </div>
+            <div className={`rounded-xl p-3 text-sm mb-5 ${
+              confirmToggle.status !== 'active' ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'
+            }`}>
+              {confirmToggle.status !== 'active' ? (
+                <>This quest will become <strong>visible to all users</strong> on the Events page and they can join it to earn points.</>
+              ) : (
+                <>This quest will be <strong>hidden from users</strong>. Existing participants keep their progress, but no new joins are allowed.</>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                onClick={() => setConfirmToggle(null)}
+                className="px-5 py-2.5 rounded-xl border border-gray-300 bg-white text-gray-700 font-semibold hover:bg-gray-50 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmToggleAction}
+                disabled={actionLoading}
+                className={`px-5 py-2.5 rounded-xl text-white font-semibold transition ${
+                  confirmToggle.status !== 'active'
+                    ? 'bg-emerald-600 hover:bg-emerald-700'
+                    : 'bg-amber-600 hover:bg-amber-700'
+                } disabled:opacity-50`}
+              >
+                {confirmToggle.status !== 'active' ? 'Yes, publish' : 'Yes, move to Draft'}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
 
       {toast && (

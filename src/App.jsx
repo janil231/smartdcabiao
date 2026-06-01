@@ -20,12 +20,8 @@ import PrivacyPolicyPage from './pages/PrivacyPolicyPage'
 import TermsPage from './pages/TermsPage'
 import DataDeletionPage from './pages/DataDeletionPage'
 import AboutPage from './pages/AboutPage'
-import SuggestPlacePage from './pages/SuggestPlacePage'
+import SuggestDestinationPage from './pages/SuggestDestinationPage'
 import LGUDashboardPage from './pages/LGUDashboardPage'
-import LGUPlacesPage from './pages/lgu/LGUPlacesPage'
-import LGUPlaceFormPage from './pages/lgu/LGUPlaceFormPage'
-import LGUCheckinPage from './pages/lgu/LGUCheckinPage'
-import LGUVoucherVerifyPage from './pages/lgu/LGUVoucherVerifyPage'
 import LGUMerchantInsightsPage from './pages/lgu/LGUMerchantInsightsPage'
 import ProfilePage from './pages/ProfilePage'
 import RegisterBusinessPage from './pages/RegisterBusinessPage'
@@ -54,15 +50,10 @@ function App() {
                   <Route path="/terms" element={<TermsPage />} />
                   <Route path="/data-deletion" element={<DataDeletionPage />} />
                   <Route path="/about" element={<AboutPage />} />
-                  <Route path="/suggest" element={<SuggestPlacePage />} />
+                  <Route path="/suggest-destination" element={<SuggestDestinationPage />} />
                   <Route path="/profile" element={<ProfilePage />} />
                   <Route path="/register-business" element={<RegisterBusinessPage />} />
                   <Route path="/lgu" element={<LGUDashboardPage />} />
-                  <Route path="/lgu/places" element={<LGUPlacesPage />} />
-                  <Route path="/lgu/places/:type/new" element={<LGUPlaceFormPage />} />
-                  <Route path="/lgu/places/:type/:id/edit" element={<LGUPlaceFormPage />} />
-                  <Route path="/lgu/checkin" element={<LGUCheckinPage />} />
-                  <Route path="/lgu/voucher-verify" element={<LGUVoucherVerifyPage />} />
                   <Route path="/lgu/merchant/:businessId" element={<LGUMerchantInsightsPage />} />
                 </Routes>
               </PageTransition>

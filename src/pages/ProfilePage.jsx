@@ -10,7 +10,7 @@ import { getMySeasonStats, getUserSeasonWithActive, IMPACT_UNIT_CONFIG } from '.
 import { computeBadges } from '../features/badges/badgesEngine'
 import { BADGE_CATALOG } from '../features/badges/badgesCatalog'
 import { getUserSeasonStats, updateUserLeaderboardSettings } from '../services/leaderboard.service'
-import { getMyBusinessSubmissions } from '../services/submissions.service'
+import { getMyBusinessSubmissions, getMyDestinationSubmissions } from '../services/submissions.service'
 
 function StatusBadge({ status }) {
   const styles = {
@@ -86,8 +86,11 @@ export default function ProfilePage() {
   
   const [submissions, setSubmissions] = useState([])
   const [businessSubmissions, setBusinessSubmissions] = useState([])
+  const [destinationSubmissions, setDestinationSubmissions] = useState([])
   const [businessSubmissionLoading, setBusinessSubmissionLoading] = useState(true)
+  const [destinationSubmissionLoading, setDestinationSubmissionLoading] = useState(true)
   const [showAllBusinessSubmissions, setShowAllBusinessSubmissions] = useState(false)
+  const [showAllDestinationSubmissions, setShowAllDestinationSubmissions] = useState(false)
   const [loading, setLoading] = useState(true)
   const [statsLoading, setStatsLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('overview')
@@ -123,16 +126,23 @@ export default function ProfilePage() {
         if (mounted) {
           setBusinessSubmissions(bizSubs)
         }
+
+        const destSubs = await getMyDestinationSubmissions(user.uid)
+        if (mounted) {
+          setDestinationSubmissions(destSubs)
+        }
       } catch (error) {
         console.error('Error loading submissions:', error)
         if (mounted) {
           setSubmissions([])
           setBusinessSubmissions([])
+          setDestinationSubmissions([])
         }
       } finally {
         if (mounted) {
           setLoading(false)
           setBusinessSubmissionLoading(false)
+          setDestinationSubmissionLoading(false)
         }
       }
     }
@@ -343,7 +353,7 @@ export default function ProfilePage() {
                 </Link>
 
                 <Link 
-                  to="/suggest"
+                  to="/suggest-destination"
                   className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:border-emerald-300 transition-colors"
                 >
                   <div className="flex items-center gap-4">
@@ -353,8 +363,8 @@ export default function ProfilePage() {
                       </svg>
                     </div>
                     <div>
-                      <h2 className="font-semibold text-gray-900">Suggest a Place</h2>
-                      <p className="text-sm text-gray-500">Add a new business or destination</p>
+                      <h2 className="font-semibold text-gray-900">Suggest a Destination</h2>
+                      <p className="text-sm text-gray-500">Add a new destination to Cabiao</p>
                     </div>
                   </div>
                 </Link>
@@ -562,7 +572,7 @@ export default function ProfilePage() {
                 <div className="p-8 text-center">
                   <p className="text-gray-500 mb-4">You haven't submitted any places yet.</p>
                   <Link 
-                    to="/suggest"
+                    to="/suggest-destination"
                     className="text-emerald-600 hover:underline font-medium"
                   >
                     Suggest your first place
@@ -602,7 +612,7 @@ export default function ProfilePage() {
           )}
         </div>
 
-        <div className="max-w-4xl mx-auto px-4 pb-8">
+        <div className="max-w-4xl mx-auto px-4 pb-8 space-y-6">
           <div className="rounded-2xl border border-gray-200 bg-white p-6">
             <div className="flex items-start gap-4">
               <div className="text-3xl shrink-0">🏪</div>
@@ -694,6 +704,95 @@ export default function ProfilePage() {
                   {businessSubmissions.length > 0
                     ? t('registerBusiness.addAnotherBusiness')
                     : `+ ${t('registerBusiness.listMyBusiness')}`}
+                </Link>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-gray-200 bg-white p-6">
+            <div className="flex items-start gap-4">
+              <div className="text-3xl shrink-0">🌴</div>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-lg font-semibold text-gray-900">{t('suggestDestination.title')}</h2>
+                <p className="text-sm text-gray-600 mt-1">{t('suggestDestination.subtitle')}</p>
+
+                {destinationSubmissionLoading ? (
+                  <p className="text-sm text-gray-500 mt-4">{t('common.loading')}</p>
+                ) : destinationSubmissions.length > 0 ? (
+                  <div className="mt-5">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">
+                      — {t('suggestDestination.yourDestinationSubmissions')} —
+                    </p>
+                    <ul className="space-y-3">
+                      {(showAllDestinationSubmissions
+                        ? destinationSubmissions
+                        : destinationSubmissions.slice(0, 3)
+                      ).map((sub) => (
+                        <li
+                          key={sub.id}
+                          className="rounded-xl bg-gray-50 p-4 border border-gray-100"
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="font-medium text-gray-900 truncate">
+                                • {sub.name || 'Destination'}
+                              </p>
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                {sub.status === 'approved' ? (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700">
+                                    ✅ {t('registerBusiness.statusListed')}
+                                  </span>
+                                ) : sub.status === 'rejected' ? (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-700">
+                                    ❌ {t('registerBusiness.statusNotApproved')}
+                                    {sub.rejectionReason && (
+                                      <span className="font-normal"> · &ldquo;{sub.rejectionReason}&rdquo;</span>
+                                    )}
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700">
+                                    ⏳ {t('registerBusiness.statusUnderReview')}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="shrink-0">
+                              {sub.status === 'rejected' ? (
+                                <Link
+                                  to="/suggest-destination"
+                                  className="text-sm font-medium text-emerald-600 hover:text-emerald-700 transition-colors"
+                                >
+                                  {t('registerBusiness.submitAgain')} →
+                                </Link>
+                              ) : null}
+                            </div>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                    {destinationSubmissions.length > 3 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowAllDestinationSubmissions((v) => !v)}
+                        className="mt-3 text-sm font-medium text-emerald-600 hover:text-emerald-700 transition-colors"
+                      >
+                        {showAllDestinationSubmissions
+                          ? 'Show less'
+                          : `${t('suggestDestination.showAll')} (${destinationSubmissions.length})`}
+                      </button>
+                    )}
+                    <div className="border-t border-gray-200 my-5" />
+                  </div>
+                ) : null}
+
+                <Link
+                  to="/suggest-destination"
+                  className="inline-flex items-center justify-center gap-2 w-full sm:w-auto min-h-[44px] mt-4 px-6 py-3 bg-emerald-600 text-white rounded-xl text-sm font-semibold shadow-sm hover:bg-emerald-700 transition-all duration-200"
+                >
+                  <span aria-hidden>+</span>
+                  {destinationSubmissions.length > 0
+                    ? t('suggestDestination.submitAnother')
+                    : `+ ${t('suggestDestination.title')}`}
                 </Link>
               </div>
             </div>

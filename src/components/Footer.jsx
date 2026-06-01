@@ -48,10 +48,10 @@ export default function Footer() {
                 About SMARTDCABIAO
               </Link>
               <Link 
-                to="/suggest" 
+                to="/suggest-destination" 
                 className="block text-sm text-emerald-600 hover:text-emerald-700 underline"
               >
-                Suggest a Place
+                Suggest a Destination
               </Link>
             </div>
             </div>

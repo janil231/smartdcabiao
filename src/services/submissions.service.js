@@ -132,3 +132,86 @@ export async function submitBusinessRegistration(uid, user, formData, photoFiles
 
   return docRef.id
 }
+
+export async function submitDestinationSuggestion(uid, user, formData, location, photoFiles = []) {
+  if (!uid || !user) {
+    throw new Error('You must be signed in to suggest a destination')
+  }
+
+  const { lat, lng } = location || {}
+  if (lat == null || lng == null || !isWithinCabiaoBounds(lat, lng)) {
+    throw new Error('Please pin a valid location within Cabiao on the map')
+  }
+
+  let photoURLs = []
+  const files = Array.isArray(photoFiles) ? photoFiles.filter(Boolean) : []
+
+  if (files.length > 0) {
+    for (const file of files) {
+      if (!ALLOWED_TYPES.includes(file.type)) {
+        throw new Error('Invalid photo type. Allowed: jpg, jpeg, png, webp')
+      }
+      if (file.size > MAX_PHOTO_SIZE) {
+        throw new Error('One or more photos exceed 3MB. Please remove or compress them.')
+      }
+    }
+
+    try {
+      const uploadPromises = files.map(async (file) => {
+        const compressed = await compressImage(file, 1024, 0.75)
+        return uploadToCloudinary(compressed)
+      })
+      photoURLs = await Promise.all(uploadPromises)
+    } catch (err) {
+      console.error('Photo upload failed:', err)
+      throw new Error('One or more photos failed to upload. Please try again.')
+    }
+  }
+
+  const docRef = await addDoc(collection(db, SUBMISSIONS_COLLECTION), {
+    type: 'destination',
+    status: 'pending',
+    submittedBy: uid,
+    submitterEmail: user.email || '',
+    submitterDisplayName: user.displayName || '',
+    createdAt: serverTimestamp(),
+    name: formData.name.trim(),
+    category: formData.category,
+    tagline: formData.tagline?.trim() || '',
+    description: sanitizeDescription(formData.description),
+    bestTime: formData.bestTime?.trim() || '',
+    activities: formData.activities?.trim() || '',
+    entranceFee: formData.entranceFee || 'free',
+    barangay: formData.barangay,
+    landmark: formData.landmark?.trim() || '',
+    location: { lat, lng },
+    position: [lat, lng],
+    photoURLs,
+    photoURL: photoURLs[0] || '',
+    reviewedBy: null,
+    reviewedAt: null,
+    rejectionReason: null,
+    approvedDestinationId: null,
+  })
+
+  return docRef.id
+}
+
+export async function getMyDestinationSubmissions(uid) {
+  if (!uid) return []
+
+  try {
+    const q = query(
+      collection(db, SUBMISSIONS_COLLECTION),
+      where('submittedBy', '==', uid),
+      where('type', '==', 'destination')
+    )
+    const snap = await getDocs(q)
+    return sortByCreatedDesc(
+      snap.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
+    )
+  } catch (error) {
+    console.error('Error fetching destination submissions:', error)
+    return []
+  }
+}

@@ -178,8 +178,8 @@ export default function LGUMerchantInsightsPage() {
       <main className="flex-1 pb-mobile-nav">
         <div className="max-w-6xl mx-auto px-4 py-8">
           <div className="mb-4">
-            <Link to="/lgu/places" className="text-sm text-emerald-600 hover:underline">
-              ← Back to Places
+            <Link to="/lgu" className="text-sm text-emerald-600 hover:underline">
+              ← Back to Dashboard
             </Link>
           </div>
 
