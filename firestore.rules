@@ -13,51 +13,62 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
-    function isAdmin() {
+    function getUserRole(uid) {
+      return get(/databases/$(database)/documents/admins/$(uid)).data.role;
+    }
+
+    function hasLguAccess() {
       return isSignedIn() &&
              exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
 
-    // ============ ADMINS ============
+    function isMasterAdmin() {
+      return isSignedIn() &&
+             exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+             (getUserRole(request.auth.uid) == null ||  // backward compat: missing role = master
+              getUserRole(request.auth.uid) == 'master');
+    }
+
+    // ============ ADMINS (master only) ============
 
     match /admins/{uid} {
-      allow read: if isOwner(uid) || isAdmin();
-      allow write: if isAdmin();
+      allow read: if isOwner(uid) || hasLguAccess();
+      allow write: if isMasterAdmin();
     }
 
     // ============ PUBLIC TOURISM DATA ============
 
     match /businesses/{businessId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isMasterAdmin();
     }
 
     match /destinations/{destinationId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isMasterAdmin();
     }
 
     // ============ SEASONS & SUBCOLLECTIONS ============
 
     match /seasons/{seasonId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isMasterAdmin();
 
       // Voucher catalog - PUBLIC READ
       match /vouchers/{voucherId} {
         allow read: if true;
-        allow write: if isAdmin();
+        allow write: if isMasterAdmin();
       }
 
       // Voucher redemptions - user reads own, admin reads all
       match /voucherRedemptions/{redemptionId} {
-        allow get: if isAdmin() ||
+        allow get: if hasLguAccess() ||
                     (isSignedIn() && resource.data.uid == request.auth.uid);
-        allow list: if isAdmin() ||
+        allow list: if hasLguAccess() ||
                      (isSignedIn() && request.query.uid == request.auth.uid);
         allow create: if isSignedIn() &&
                       request.resource.data.uid == request.auth.uid;
-        allow update: if isAdmin();
+        allow update: if isMasterAdmin();
         allow delete: if false;
       }
     }
@@ -66,40 +77,40 @@ service cloud.firestore {
 
     match /quests/{questId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create, update, delete: if isMasterAdmin();
     }
 
     // ============ PARTICIPATIONS ============
 
     match /participations/{participationId} {
-      allow read: if isSignedIn();
+      allow read: if hasLguAccess() ||
+                  (isSignedIn() && resource.data.uid == request.auth.uid);
       allow create: if isSignedIn() &&
                     request.resource.data.uid == request.auth.uid &&
                     request.resource.data.questId is string &&
                     request.resource.data.seasonId is string;
-      allow update: if isAdmin() ||
+      allow update: if hasLguAccess() ||
                     (isSignedIn() && resource.data.uid == request.auth.uid);
-      allow delete: if false;
+      allow delete: if isMasterAdmin();
     }
 
     // ============ POINTS LEDGER ============
 
     match /pointsLedger/{entryId} {
-      allow read: if isAdmin() ||
+      allow read: if hasLguAccess() ||
                   (isSignedIn() && resource.data.uid == request.auth.uid);
-      allow create: if isSignedIn() &&
-                    request.resource.data.uid == request.auth.uid;
+      allow create: if isSignedIn();
       allow update, delete: if false;
     }
 
     // ============ SEASON BALANCES ============
 
     match /seasonBalances/{balanceId} {
-      allow read: if isAdmin() ||
+      allow read: if hasLguAccess() ||
                   (isSignedIn() && balanceId.matches('.*_' + request.auth.uid + '$'));
       allow create: if isSignedIn() &&
                     request.resource.data.uid == request.auth.uid;
-      allow update: if isAdmin() ||
+      allow update: if hasLguAccess() ||
                     (isSignedIn() && request.resource.data.uid == request.auth.uid);
       allow delete: if false;
     }
@@ -107,9 +118,9 @@ service cloud.firestore {
     // ============ IMPACT LEDGER ============
 
     match /impactLedger/{entryId} {
-      allow read: if isAdmin() ||
+      allow read: if hasLguAccess() ||
                   (isSignedIn() && resource.data.uid == request.auth.uid);
-      allow create: if isAdmin() ||
+      allow create: if hasLguAccess() ||
                     (isSignedIn() &&
                      request.resource.data.uid == request.auth.uid &&
                      request.resource.data.reason == 'quest_completed');
@@ -120,7 +131,7 @@ service cloud.firestore {
 
     match /seasonUserStats/{statsId} {
       allow read: if true;
-      allow create, update: if isAdmin() || isSignedIn();
+      allow create, update: if hasLguAccess() || isSignedIn();
       allow delete: if false;
     }
 
@@ -136,17 +147,17 @@ service cloud.firestore {
           !('createdByUid' in request.resource.data)
           || request.resource.data.createdByUid == request.auth.uid
         );
-      allow read: if isAdmin() || isSignedIn();
-      allow update, delete: if isAdmin();
+      allow read: if hasLguAccess() || isSignedIn();
+      allow update, delete: if isMasterAdmin();
     }
 
     // ============ REPORTS ============
 
     match /reports/{reportId} {
       allow create: if isSignedIn();
-      allow read: if isAdmin()
+      allow read: if hasLguAccess()
         || (isSignedIn() && resource.data.createdByUid == request.auth.uid);
-      allow update, delete: if isAdmin();
+      allow update, delete: if isMasterAdmin();
     }
 
     // ============ REVIEWS ============
@@ -154,33 +165,42 @@ service cloud.firestore {
     match /reviews/{reviewId} {
       allow read: if resource.data.status == 'approved'
         || (isSignedIn() && resource.data.uid == request.auth.uid)
-        || isAdmin();
+        || hasLguAccess();
       allow create: if isSignedIn()
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.status == 'pending';
       allow update: if isSignedIn()
         && resource.data.uid == request.auth.uid
         && resource.data.status == 'pending'
-        || isAdmin();
+        || isMasterAdmin();
       allow delete: if false;
     }
 
-    // ============ USER SETTINGS ============
+    // ============ USERS COLLECTION ============
+    // Auto-populated on sign-in by upsertUserProfile()
+    // Used by Manage Admins panel for searchable user list
 
-    match /users/{userId} {
-      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    match /users/{uid} {
+      // READ: Allowed if you are the user OR if you have any admin doc
+      allow read: if request.auth != null && (
+        request.auth.uid == uid ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+
+      // CREATE: A signed-in user can create their own profile doc
+      allow create: if request.auth != null && request.auth.uid == uid;
+
+      // UPDATE: A signed-in user can update their own profile doc
+      allow update: if request.auth != null && request.auth.uid == uid;
+
+      // DELETE: Only allowed via Firebase Console (admin SDK)
+      allow delete: if false;
     }
 
     // ============ ADMIN & AUDIT ============
 
-    match /admins/{adminId} {
-      allow get: if isSignedIn() && request.auth.uid == adminId;
-      allow list: if isAdmin();
-      allow write: if false;
-    }
-
     match /auditLogs/{logId} {
-      allow read, create: if isAdmin();
+      allow read, create: if hasLguAccess();
       allow update, delete: if false;
     }
   }

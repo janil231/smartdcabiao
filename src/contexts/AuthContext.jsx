@@ -10,6 +10,7 @@ import {
   sendPasswordResetEmail,
 } from 'firebase/auth'
 import { auth } from '../lib/firebase'
+import { upsertUserProfile } from '../services/users.service'
 
 const AuthContext = createContext(null)
 
@@ -18,9 +19,17 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
+    const unsub = onAuthStateChanged(auth, async (u) => {
       setUser(u)
       setLoading(false)
+      if (u) {
+        try {
+          await upsertUserProfile(u)
+          console.log('[Auth] User profile upserted:', u.email)
+        } catch (err) {
+          console.warn('[Auth] Failed to upsert user profile:', err)
+        }
+      }
     })
     return unsub
   }, [])

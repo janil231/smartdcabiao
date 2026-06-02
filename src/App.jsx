@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { FavoritesProvider } from './contexts/FavoritesContext'
 import { AuthProvider } from './contexts/AuthContext'
 import { LanguageProvider } from './contexts/LanguageContext'
@@ -26,6 +26,40 @@ import LGUMerchantInsightsPage from './pages/lgu/LGUMerchantInsightsPage'
 import ProfilePage from './pages/ProfilePage'
 import RegisterBusinessPage from './pages/RegisterBusinessPage'
 
+function AppLayout() {
+  const { pathname } = useLocation()
+  const isLguRoute = pathname.startsWith('/lgu')
+
+  return (
+    <>
+      <PageTransition>
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/map" element={<MapPage />} />
+          <Route path="/businesses" element={<BusinessesPage />} />
+          <Route path="/businesses/:id" element={<BusinessDetailPage />} />
+          <Route path="/destinations" element={<DestinationsPage />} />
+          <Route path="/destinations/:id" element={<DestinationDetails />} />
+          <Route path="/favorites" element={<FavoritesPage />} />
+          <Route path="/events" element={<CommunityActivitiesPage />} />
+          <Route path="/rewards" element={<RewardsPreviewPage />} />
+          <Route path="/vouchers" element={<VoucherStorePage />} />
+          <Route path="/privacy" element={<PrivacyPolicyPage />} />
+          <Route path="/terms" element={<TermsPage />} />
+          <Route path="/data-deletion" element={<DataDeletionPage />} />
+          <Route path="/about" element={<AboutPage />} />
+          <Route path="/suggest-destination" element={<SuggestDestinationPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/register-business" element={<RegisterBusinessPage />} />
+          <Route path="/lgu" element={<LGUDashboardPage />} />
+          <Route path="/lgu/merchant/:businessId" element={<LGUMerchantInsightsPage />} />
+        </Routes>
+      </PageTransition>
+      {!isLguRoute && <BottomNav />}
+    </>
+  )
+}
+
 function App() {
   return (
     <ErrorBoundary>
@@ -34,30 +68,7 @@ function App() {
           <LanguageProvider>
             <BrowserRouter>
               <ScrollManager />
-              <PageTransition>
-                <Routes>
-                  <Route path="/" element={<HomePage />} />
-                  <Route path="/map" element={<MapPage />} />
-                  <Route path="/businesses" element={<BusinessesPage />} />
-                  <Route path="/businesses/:id" element={<BusinessDetailPage />} />
-                  <Route path="/destinations" element={<DestinationsPage />} />
-                  <Route path="/destinations/:id" element={<DestinationDetails />} />
-                  <Route path="/favorites" element={<FavoritesPage />} />
-                  <Route path="/events" element={<CommunityActivitiesPage />} />
-                  <Route path="/rewards" element={<RewardsPreviewPage />} />
-                  <Route path="/vouchers" element={<VoucherStorePage />} />
-                  <Route path="/privacy" element={<PrivacyPolicyPage />} />
-                  <Route path="/terms" element={<TermsPage />} />
-                  <Route path="/data-deletion" element={<DataDeletionPage />} />
-                  <Route path="/about" element={<AboutPage />} />
-                  <Route path="/suggest-destination" element={<SuggestDestinationPage />} />
-                  <Route path="/profile" element={<ProfilePage />} />
-                  <Route path="/register-business" element={<RegisterBusinessPage />} />
-                  <Route path="/lgu" element={<LGUDashboardPage />} />
-                  <Route path="/lgu/merchant/:businessId" element={<LGUMerchantInsightsPage />} />
-                </Routes>
-              </PageTransition>
-              <BottomNav />
+              <AppLayout />
             </BrowserRouter>
           </LanguageProvider>
         </FavoritesProvider>

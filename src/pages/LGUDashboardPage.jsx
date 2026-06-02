@@ -1,11 +1,12 @@
-import { useState, useEffect, Fragment } from 'react'
+import { useState, useEffect, useMemo, Fragment } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useNavigate } from 'react-router-dom'
 import { MapContainer, TileLayer, Marker } from 'react-leaflet'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
 import { useAuth } from '../contexts/AuthContext'
-import { isAdmin } from '../services/adminRole.service'
+import { getUserRole } from '../services/adminRole.service'
+import ManageAdminsPanel from './lgu/panels/ManageAdminsPanel'
 import { 
   listSubmissions, 
   approveSubmissionAndPublish, 
@@ -35,14 +36,17 @@ import {
   updateQuestActive,
   repairQuestReservedCounts,
 } from '../services/quests.service'
-import { getQuestParticipations, adminMarkCompleted, expireAllStaleParticipations } from '../services/participations.service'
+import { expireAllStaleParticipations } from '../services/participations.service'
 import { listPendingReviews, setReviewStatus } from '../services/reviews.service'
 import { listTopByPoints, listTopByImpact, IMPACT_UNITS } from '../services/leaderboard.service'
 import { isWithinCabiaoBounds, CABIAO_BOUNDS } from '../constants/cabiaoGeo'
 import { listSeasonImpact, sumImpactByUnit } from '../services/impactLedger.service'
 import { listSeasonRedemptions, findRedemptionByCode, adminMarkVoucherUsed } from '../services/voucherRedemptions.service'
 import { logAudit } from '../services/audit.service'
-import CheckInPanel from '../panels/CheckInPanel'
+import { rotateEventCode } from '../services/questVerification.service'
+import CheckInModal from '../components/quest/CheckInModal'
+import QRDisplayModal from '../components/quest/QRDisplayModal'
+import QuestDetailsModal from '../components/quest/QuestDetailsModal'
 
 const TABS = {
   SUBMISSIONS: 'submissions',
@@ -51,7 +55,7 @@ const TABS = {
   SEASONS: 'seasons',
   QUESTS: 'quests',
   VOUCHERS: 'vouchers',
-  CHECKIN: 'checkin',
+  MANAGE_ADMINS: 'manage-admins',
 }
 
 const MODERATION_ITEMS = [
@@ -64,10 +68,6 @@ const TOURISM_ITEMS = [
   { key: TABS.SEASONS, icon: '🗓️', label: 'Seasons' },
   { key: TABS.QUESTS, icon: '🎯', label: 'Quests' },
   { key: TABS.VOUCHERS, icon: '🎟️', label: 'Vouchers' },
-]
-
-const TOOLS_ITEMS = [
-  { key: 'checkin', icon: '✅', label: 'Check-In' },
 ]
 
 function StatusBadge({ status }) {
@@ -139,10 +139,10 @@ function SidebarSection({ title, items, activeKey, onSelect, navigate }) {
   )
 }
 
-function MobileTabSelector({ activeTab, onChange, moderationItems, tourismItems, toolsItems, navigate, counts }) {
+function MobileTabSelector({ activeTab, onChange, moderationItems, tourismItems, settingsItems, navigate, counts }) {
   const [open, setOpen] = useState(false)
 
-  const allItems = [...moderationItems, ...tourismItems]
+  const allItems = [...moderationItems, ...tourismItems, ...(settingsItems || [])]
   const activeItem = allItems.find((t) => t.key === activeTab)
 
   return (
@@ -190,19 +190,23 @@ function MobileTabSelector({ activeTab, onChange, moderationItems, tourismItems,
               </button>
             ))}
 
-            <p className="text-xs font-semibold uppercase text-gray-500 mt-3 mb-2 px-2">Tools</p>
-            {toolsItems.map((item) => (
-              <button
-                key={item.key}
-                onClick={() => { onChange(item.key); setOpen(false) }}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-left ${
-                  activeTab === item.key ? 'bg-emerald-50 text-emerald-700' : 'hover:bg-gray-100'
-                }`}
-              >
-                <span>{item.icon}</span>
-                <span className="flex-1 font-medium text-sm">{item.label}</span>
-              </button>
-            ))}
+            {settingsItems && settingsItems.length > 0 && (
+              <>
+                <p className="text-xs font-semibold uppercase text-gray-500 mt-3 mb-2 px-2">Settings</p>
+                {settingsItems.map((item) => (
+                  <button
+                    key={item.key}
+                    onClick={() => { onChange(item.key); setOpen(false) }}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-left ${
+                      activeTab === item.key ? 'bg-emerald-50 text-emerald-700' : 'hover:bg-gray-100'
+                    }`}
+                  >
+                    <span>{item.icon}</span>
+                    <span className="flex-1 font-medium text-sm">{item.label}</span>
+                  </button>
+                ))}
+              </>
+            )}
           </div>
         </>
       )}
@@ -672,55 +676,6 @@ function ReviewModal({ review, onClose, onApprove, onReject, isLoading }) {
   )
 }
 
-function QuestVerificationModal({ participation, quest, onClose, onMarkCompleted, isLoading }) {
-  if (!participation) return null
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
-        <h3 className="text-lg font-bold text-gray-900 mb-2">Quest Participation</h3>
-        <div className="space-y-3">
-          <div>
-            <p className="text-sm font-medium text-gray-500">Quest</p>
-            <p className="text-gray-900">{quest?.title || participation.questId}</p>
-          </div>
-          <div>
-            <p className="text-sm font-medium text-gray-500">User</p>
-            <p className="text-gray-900">{participation.userEmail || participation.uid}</p>
-          </div>
-          <div>
-            <p className="text-sm font-medium text-gray-500">Status</p>
-            <StatusBadge status={participation.status} />
-          </div>
-          {participation.joinedAt && (
-            <div>
-              <p className="text-sm font-medium text-gray-500">Joined</p>
-              <p className="text-gray-900 text-sm">{new Date(participation.joinedAt).toLocaleString()}</p>
-            </div>
-          )}
-        </div>
-        <div className="mt-6 flex gap-3">
-          <button
-            onClick={onClose}
-            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
-          >
-            Close
-          </button>
-          {participation.status !== 'completed' && (
-            <button
-              onClick={onMarkCompleted}
-              disabled={isLoading}
-              className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:bg-gray-300 font-medium"
-            >
-              {isLoading ? 'Processing...' : 'Mark Completed'}
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 function SeasonFormModal({ onClose, onSubmit, isLoading }) {
   const [form, setForm] = useState({ name: '', startAt: '', endAt: '' })
 
@@ -950,25 +905,22 @@ export default function LGUDashboardPage() {
   const [quests, setQuests] = useState([])
   const [activeSeason, setActiveSeason] = useState(null)
   const [selectedSeasonFilter, setSelectedSeasonFilter] = useState('')
-  const [questParticipations, setQuestParticipations] = useState([])
   const [questDetails, setQuestDetails] = useState({})
   const [loading, setLoading] = useState(true)
   const [checkingAdmin, setCheckingAdmin] = useState(true)
-  const [isUserAdmin, setIsUserAdmin] = useState(false)
+  const [role, setRole] = useState(null)
   const [submissionTypeFilter, setSubmissionTypeFilter] = useState('all')
   const [selectedSubmission, setSelectedSubmission] = useState(null)
   const [showRejectModal, setShowRejectModal] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
   const [selectedReport, setSelectedReport] = useState(null)
   const [selectedReview, setSelectedReview] = useState(null)
-  const [selectedParticipation, setSelectedParticipation] = useState(null)
   const [selectedQuest, setSelectedQuest] = useState(null)
   const [showSeasonModal, setShowSeasonModal] = useState(false)
   const [showQuestModal, setShowQuestModal] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
   const [toast, setToast] = useState(null)
-  const [expandedQuestStats, setExpandedQuestStats] = useState({})
-  const [loadingQuestStats, setLoadingQuestStats] = useState(null)
+
   const [seasonImpactTotals, setSeasonImpactTotals] = useState({})
   const [questImpactTotals, setQuestImpactTotals] = useState({})
   const [leaderboardTab, setLeaderboardTab] = useState('points')
@@ -987,23 +939,43 @@ export default function LGUDashboardPage() {
   const [verifyResult, setVerifyResult] = useState(null)
   const [verifyError, setVerifyError] = useState(null)
   const [verifyMarkLoading, setVerifyMarkLoading] = useState(false)
+  const [checkInQuest, setCheckInQuest] = useState(null)
+  const [qrModalQuest, setQrModalQuest] = useState(null)
+  const [questSearchQuery, setQuestSearchQuery] = useState('')
+  const [selectedQuestDetails, setSelectedQuestDetails] = useState(null)
+
+  const filteredQuests = useMemo(() => {
+    if (!questSearchQuery.trim()) return quests
+    const q = questSearchQuery.trim().toLowerCase()
+    return quests.filter((quest) => {
+      return (
+        (quest.title || '').toLowerCase().includes(q) ||
+        (quest.category || '').toLowerCase().includes(q) ||
+        (quest.eventCode || '').toLowerCase().includes(q) ||
+        (quest.verificationMethod || '').toLowerCase().includes(q)
+      )
+    })
+  }, [quests, questSearchQuery])
 
   useEffect(() => {
     async function checkAdminStatus() {
       if (!user) {
         setCheckingAdmin(false)
-        setIsUserAdmin(false)
+        setRole(null)
         return
       }
-      const adminStatus = await isAdmin(user.uid)
-      setIsUserAdmin(adminStatus)
+      const r = await getUserRole(user.uid)
+      setRole(r)
+      if (r === 'admin') setActiveTab(TABS.QUESTS)
       setCheckingAdmin(false)
     }
     checkAdminStatus()
   }, [user])
 
+  const isMaster = role === 'master'
+
   useEffect(() => {
-    if (!user || !isUserAdmin) {
+    if (!user || !role) {
       setLoading(false)
       return
     }
@@ -1087,26 +1059,7 @@ export default function LGUDashboardPage() {
     }
 
     fetchData()
-  }, [user, activeTab, isUserAdmin, selectedSeasonFilter])
-
-  useEffect(() => {
-    if (!user || !isUserAdmin || activeTab !== TABS.QUESTS) return
-    async function loadParticipations() {
-      const filterId = selectedSeasonFilter || activeSeason?.id
-      if (!filterId) return
-      const questList = await listQuestsBySeason(filterId)
-      const questTitles = {}
-      questList.forEach(q => { questTitles[q.id] = q })
-      setQuestDetails(questTitles)
-      const allParticipations = []
-      for (const quest of questList) {
-        const participations = await getQuestParticipations(quest.id)
-        allParticipations.push(...participations)
-      }
-      setQuestParticipations(allParticipations)
-    }
-    loadParticipations()
-  }, [user, isUserAdmin, activeTab, selectedSeasonFilter, activeSeason])
+  }, [user, activeTab, role, selectedSeasonFilter])
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type })
@@ -1378,29 +1331,6 @@ export default function LGUDashboardPage() {
     }
   }
 
-  const handleMarkQuestCompleted = async () => {
-    if (!selectedParticipation) return
-    setActionLoading(true)
-    try {
-      const result = await adminMarkCompleted({
-        uid: selectedParticipation.uid,
-        questId: selectedParticipation.questId,
-        adminUser: { uid: user.uid, email: user.email }
-      })
-      if (result.success) {
-        showToast('Quest marked as completed! Reward released.')
-        setSelectedParticipation(null)
-        loadData()
-      } else {
-        showToast(result.error || 'Failed to complete', 'error')
-      }
-    } catch (error) {
-      showToast(error.message, 'error')
-    } finally {
-      setActionLoading(false)
-    }
-  }
-
   const handleCreateSeason = async (formData) => {
     setActionLoading(true)
     try {
@@ -1635,7 +1565,7 @@ export default function LGUDashboardPage() {
     )
   }
 
-  if (!user || !isUserAdmin) {
+  if (!user || !role) {
     return (
       <div className="min-h-screen bg-gray-50">
         <Navbar />
@@ -1671,7 +1601,8 @@ export default function LGUDashboardPage() {
     count: item.key === TABS.SUBMISSIONS ? newSubmissions : item.key === TABS.REPORTS ? newReports : pendingReviews.length,
   }))
 
-  const allItemsFlat = [...moderationItems, ...TOURISM_ITEMS, ...TOOLS_ITEMS]
+  const settingsItems = isMaster ? [{ key: TABS.MANAGE_ADMINS, icon: '🛡️', label: 'Manage Admins' }] : []
+  const allItemsFlat = [...moderationItems, ...TOURISM_ITEMS, ...settingsItems]
   const activeItemMeta = allItemsFlat.find(t => t.key === activeTab)
 
   const EMPTY_STATES = {
@@ -1681,91 +1612,106 @@ export default function LGUDashboardPage() {
     [TABS.SEASONS]: { icon: '🗓️', title: 'No seasons yet', desc: 'Create a season to start the tourism program.' },
     [TABS.QUESTS]: { icon: '🎯', title: 'No quests found', desc: 'Quests for the selected season will appear here.' },
     [TABS.VOUCHERS]: { icon: '🎟️', title: 'No active season', desc: 'Activate a season to manage vouchers and redemptions.' },
-    [TABS.CHECKIN]: { icon: '✅', title: 'Quest Check-in', desc: 'Mark participants as completed for quests.' },
   }
 
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar />
 
-      <main className="flex-1 pb-mobile-nav">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-          <header className="mb-6">
+      <div className="h-[calc(100vh-64px)] bg-gray-50 overflow-hidden">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 h-full flex flex-col">
+          <header className="shrink-0">
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">LGU Dashboard</h1>
             <p className="text-sm text-gray-500 mt-1">
-              Manage submissions, reports, seasons, quests, and vouchers
+              {isMaster ? 'Full access — manage everything' : 'Admin (Event Helper) — view quests and run check-ins'}
             </p>
             <p className="text-xs text-gray-400 mt-2">
               Signed in as: <span className="font-mono">{user?.email}</span>
+              {' · '}
+              <span className={`font-semibold ${isMaster ? 'text-emerald-600' : 'text-blue-600'}`}>
+                {isMaster ? '🛡️ Master Admin' : '👤 Admin (Event Helper)'}
+              </span>
             </p>
           </header>
 
-          <div className="flex flex-col lg:flex-row gap-6">
-            <aside className="hidden lg:block w-64 shrink-0">
-              <div className="sticky top-20 bg-white rounded-2xl border border-gray-200 p-3">
-                <SidebarSection title="Moderation" items={moderationItems} activeKey={activeTab} onSelect={setActiveTab} />
-                <SidebarSection title="Tourism Program" items={TOURISM_ITEMS} activeKey={activeTab} onSelect={setActiveTab} />
-                <SidebarSection title="Tools" items={TOOLS_ITEMS} activeKey={activeTab} onSelect={setActiveTab} />
+          <div className="flex-1 flex flex-col lg:flex-row gap-6 min-h-0 overflow-hidden pt-4">
+            <aside className="hidden lg:block w-64 shrink-0 overflow-y-auto">
+              <div className="bg-white rounded-2xl border border-gray-200 p-3">
+                {isMaster && (
+                  <SidebarSection title="Moderation" items={moderationItems} activeKey={activeTab} onSelect={setActiveTab} />
+                )}
+                <SidebarSection
+                  title="Tourism Program"
+                  items={isMaster ? TOURISM_ITEMS : TOURISM_ITEMS.filter(i => i.key === TABS.QUESTS)}
+                  activeKey={activeTab}
+                  onSelect={setActiveTab}
+                />
+                {isMaster && settingsItems.length > 0 && (
+                  <SidebarSection title="Settings" items={settingsItems} activeKey={activeTab} onSelect={setActiveTab} />
+                )}
               </div>
             </aside>
 
-            <div className="lg:hidden">
+            <div className="lg:hidden shrink-0">
               <MobileTabSelector
                 activeTab={activeTab}
                 onChange={setActiveTab}
-                moderationItems={moderationItems}
-                tourismItems={TOURISM_ITEMS}
-                toolsItems={TOOLS_ITEMS}
+                moderationItems={isMaster ? moderationItems : []}
+                tourismItems={isMaster ? TOURISM_ITEMS : TOURISM_ITEMS.filter(i => i.key === TABS.QUESTS)}
+                settingsItems={settingsItems}
                 navigate={navigate}
                 counts={{ newSubmissions, newReports, pendingReviews: pendingReviews.length }}
               />
             </div>
 
-            <main className="flex-1 min-w-0">
-              <div className="bg-white rounded-2xl border border-gray-200 p-5 sm:p-6">
-                {activeTab === TABS.SUBMISSIONS && (
-                  <>
-                    <div className="flex items-center gap-2 mb-4">
-                      <span className="text-xl">📥</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">Submissions</h2>
-                        <p className="text-sm text-gray-500">Review business and destination suggestions from users</p>
+            <main className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden">
+              <div className="bg-white rounded-2xl border border-gray-200 p-5 sm:p-6 flex-1 flex flex-col min-h-0 overflow-hidden">
+                {isMaster && activeTab === TABS.SUBMISSIONS && (
+                  <div className="h-full flex flex-col min-h-0">
+                    <div className="shrink-0">
+                      <div className="flex items-center gap-2 mb-4">
+                        <span className="text-xl">📥</span>
+                        <div>
+                          <h2 className="text-lg font-semibold text-gray-900">Submissions</h2>
+                          <p className="text-sm text-gray-500">Review business and destination suggestions from users</p>
+                        </div>
+                      </div>
+                      <div className="border-b border-gray-200 pb-4 mb-4 flex gap-2 overflow-x-auto">
+                        <button
+                          onClick={() => setSubmissionTypeFilter('all')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition whitespace-nowrap ${
+                            submissionTypeFilter === 'all'
+                              ? 'bg-emerald-600 text-white'
+                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          }`}
+                        >
+                          All ({submissions.length})
+                        </button>
+                        <button
+                          onClick={() => setSubmissionTypeFilter('business')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition whitespace-nowrap ${
+                            submissionTypeFilter === 'business'
+                              ? 'bg-emerald-600 text-white'
+                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          }`}
+                        >
+                          Businesses ({submissions.filter(s => s.type === 'business').length})
+                        </button>
+                        <button
+                          onClick={() => setSubmissionTypeFilter('destination')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition whitespace-nowrap ${
+                            submissionTypeFilter === 'destination'
+                              ? 'bg-emerald-600 text-white'
+                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          }`}
+                        >
+                          Destinations ({submissions.filter(s => s.type === 'destination').length})
+                        </button>
                       </div>
                     </div>
-                    <div className="border-b border-gray-200 pb-4 mb-4 flex gap-2 overflow-x-auto">
-                      <button
-                        onClick={() => setSubmissionTypeFilter('all')}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition whitespace-nowrap ${
-                          submissionTypeFilter === 'all'
-                            ? 'bg-emerald-600 text-white'
-                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                        }`}
-                      >
-                        All ({submissions.length})
-                      </button>
-                      <button
-                        onClick={() => setSubmissionTypeFilter('business')}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition whitespace-nowrap ${
-                          submissionTypeFilter === 'business'
-                            ? 'bg-emerald-600 text-white'
-                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                        }`}
-                      >
-                        Businesses ({submissions.filter(s => s.type === 'business').length})
-                      </button>
-                      <button
-                        onClick={() => setSubmissionTypeFilter('destination')}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition whitespace-nowrap ${
-                          submissionTypeFilter === 'destination'
-                            ? 'bg-emerald-600 text-white'
-                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                        }`}
-                      >
-                        Destinations ({submissions.filter(s => s.type === 'destination').length})
-                      </button>
-                    </div>
+                    <div className="flex-1 min-h-0 overflow-y-auto">
                     {loading ? (
-                      <div className="text-center py-12">
+                      <div className="flex items-center justify-center py-12">
                         <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-600 border-t-transparent" />
                       </div>
                     ) : submissions.length === 0 ? (
@@ -1828,20 +1774,24 @@ export default function LGUDashboardPage() {
                         </table>
                       </div>
                     )}
-                  </>
+                    </div>
+                  </div>
                 )}
 
-                {activeTab === TABS.REPORTS && (
-                  <>
-                    <div className="flex items-center gap-2 mb-4">
-                      <span className="text-xl">🚩</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">Reports</h2>
-                        <p className="text-sm text-gray-500">User-submitted issue reports about places</p>
+                {isMaster && activeTab === TABS.REPORTS && (
+                  <div className="h-full flex flex-col min-h-0">
+                    <div className="shrink-0">
+                      <div className="flex items-center gap-2 mb-4">
+                        <span className="text-xl">🚩</span>
+                        <div>
+                          <h2 className="text-lg font-semibold text-gray-900">Reports</h2>
+                          <p className="text-sm text-gray-500">User-submitted issue reports about places</p>
+                        </div>
                       </div>
                     </div>
+                    <div className="flex-1 min-h-0 overflow-y-auto">
                     {loading ? (
-                      <div className="text-center py-12">
+                      <div className="flex items-center justify-center py-12">
                         <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-600 border-t-transparent" />
                       </div>
                     ) : reports.length === 0 ? (
@@ -1884,20 +1834,24 @@ export default function LGUDashboardPage() {
                         </table>
                       </div>
                     )}
-                  </>
+                    </div>
+                  </div>
                 )}
 
-                {activeTab === TABS.REVIEWS && (
-                  <>
-                    <div className="flex items-center gap-2 mb-4">
-                      <span className="text-xl">⭐</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">Reviews</h2>
-                        <p className="text-sm text-gray-500">Moderate user-submitted reviews</p>
+                {isMaster && activeTab === TABS.REVIEWS && (
+                  <div className="h-full flex flex-col min-h-0">
+                    <div className="shrink-0">
+                      <div className="flex items-center gap-2 mb-4">
+                        <span className="text-xl">⭐</span>
+                        <div>
+                          <h2 className="text-lg font-semibold text-gray-900">Reviews</h2>
+                          <p className="text-sm text-gray-500">Moderate user-submitted reviews</p>
+                        </div>
                       </div>
                     </div>
+                    <div className="flex-1 min-h-0 overflow-y-auto">
                     {loading ? (
-                      <div className="text-center py-12">
+                      <div className="flex items-center justify-center py-12">
                         <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-600 border-t-transparent" />
                       </div>
                     ) : pendingReviews.length === 0 ? (
@@ -1943,28 +1897,32 @@ export default function LGUDashboardPage() {
                         </table>
                       </div>
                     )}
-                  </>
+                    </div>
+                  </div>
                 )}
 
-                {activeTab === TABS.SEASONS && (
-                  <>
-                    <div className="flex items-center justify-between gap-4 mb-4">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xl">🗓️</span>
-                        <div>
-                          <h2 className="text-lg font-semibold text-gray-900">Seasons</h2>
-                          <p className="text-sm text-gray-500">Create and manage tourism seasons</p>
+                {isMaster && activeTab === TABS.SEASONS && (
+                  <div className="h-full flex flex-col min-h-0">
+                    <div className="shrink-0">
+                      <div className="flex items-center justify-between gap-4 mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xl">🗓️</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">Seasons</h2>
+                            <p className="text-sm text-gray-500">Create and manage tourism seasons</p>
+                          </div>
                         </div>
+                        <button
+                          onClick={() => setShowSeasonModal(true)}
+                          className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm font-medium shrink-0"
+                        >
+                          + Create Season
+                        </button>
                       </div>
-                      <button
-                        onClick={() => setShowSeasonModal(true)}
-                        className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm font-medium shrink-0"
-                      >
-                        + Create Season
-                      </button>
                     </div>
+                    <div className="flex-1 min-h-0 overflow-y-auto">
                     {loading ? (
-                      <div className="text-center py-12">
+                      <div className="flex items-center justify-center py-12">
                         <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-600 border-t-transparent" />
                       </div>
                     ) : seasons.length === 0 ? (
@@ -2075,316 +2033,255 @@ export default function LGUDashboardPage() {
                         )}
                       </div>
                     )}
-                  </>
+                    </div>
+                  </div>
                 )}
 
                 {activeTab === TABS.QUESTS && (
-                  <>
-                    <div className="flex items-center justify-between gap-4 mb-4">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xl">🎯</span>
-                        <div>
-                          <h2 className="text-lg font-semibold text-gray-900">Quests</h2>
-                          <p className="text-sm text-gray-500">Manage quests within the active season</p>
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <select
-                          value={selectedSeasonFilter || activeSeason?.id || ''}
-                          onChange={(e) => setSelectedSeasonFilter(e.target.value)}
-                          className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                        >
-                          <option value="">Select Season</option>
-                          {seasons.map(s => (
-                            <option key={s.id} value={s.id}>{s.name}</option>
-                          ))}
-                        </select>
-                        <button
-                          onClick={() => setShowQuestModal(true)}
-                          disabled={!selectedSeasonFilter && !activeSeason}
-                          className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm font-medium disabled:bg-gray-300 shrink-0"
-                        >
-                          + Create Quest
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 mb-4 text-sm">
-                      <p className="font-semibold text-gray-700 mb-2">Status Guide:</p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-gray-600">
+                  <div className="h-full flex flex-col min-h-0">
+                    <div className="shrink-0">
+                      <div className="flex items-center justify-between gap-4 mb-4">
                         <div className="flex items-center gap-2">
-                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> LIVE
-                          </span>
-                          <span>Visible to users, can be joined</span>
+                          <span className="text-xl">🎯</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">Quests</h2>
+                            <p className="text-sm text-gray-500">Manage quests within the active season</p>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
-                            <span className="w-1.5 h-1.5 rounded-full bg-gray-400" /> DRAFT
-                          </span>
-                          <span>Hidden from users (work in progress)</span>
+                        <div className="flex gap-2">
+                          <select
+                            value={selectedSeasonFilter || activeSeason?.id || ''}
+                            onChange={(e) => setSelectedSeasonFilter(e.target.value)}
+                            className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                          >
+                            <option value="">Select Season</option>
+                            {seasons.map(s => (
+                              <option key={s.id} value={s.id}>{s.name}</option>
+                            ))}
+                          </select>
+                          {isMaster && (
+                            <button
+                              onClick={() => setShowQuestModal(true)}
+                              disabled={!selectedSeasonFilter && !activeSeason}
+                              className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm font-medium disabled:bg-gray-300 shrink-0"
+                            >
+                              + Create Quest
+                            </button>
+                          )}
                         </div>
+                      </div>
+
+                      <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 mb-3 text-sm">
+                        <p className="font-semibold text-gray-700 mb-2">Status Guide:</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-gray-600">
+                          <div className="flex items-center gap-2">
+                            <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> LIVE
+                            </span>
+                            <span>Visible to users, can be joined</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                              <span className="w-1.5 h-1.5 rounded-full bg-gray-400" /> DRAFT
+                            </span>
+                            <span>Hidden from users (work in progress)</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-3">
+                        <div className="relative flex-1 max-w-md">
+                          <input
+                            type="text"
+                            value={questSearchQuery}
+                            onChange={(e) => setQuestSearchQuery(e.target.value)}
+                            placeholder="🔍 Search by title, category, or code..."
+                            className="w-full pl-4 pr-10 py-2.5 rounded-xl border border-gray-300 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 focus:outline-none bg-white"
+                          />
+                          {questSearchQuery && (
+                            <button
+                              type="button"
+                              onClick={() => setQuestSearchQuery('')}
+                              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 w-6 h-6 flex items-center justify-center"
+                              aria-label="Clear search"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                        <p className="text-sm text-gray-500 shrink-0">
+                          {filteredQuests.length} of {quests.length} quests
+                          {questSearchQuery && ` matching "${questSearchQuery}"`}
+                        </p>
+                        {isMaster && (
+                          <div className="flex gap-2 sm:ml-auto">
+                            <button
+                              onClick={() => setShowCleanupConfirm(true)}
+                              className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 font-medium"
+                            >
+                              ⏰ Expire Stale
+                            </button>
+                            <button
+                              onClick={handleRepairCounts}
+                              disabled={repairLoading}
+                              className="px-3 py-2 text-sm border border-amber-300 bg-amber-50 text-amber-800 rounded-lg hover:bg-amber-100 font-medium disabled:opacity-50"
+                              title="Recalculates reserved counts based on actual participations. Fixes negative numbers."
+                            >
+                              {repairLoading ? 'Repairing...' : '🔧 Repair Counts'}
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2 mb-4">
-                      <button
-                        onClick={() => setShowCleanupConfirm(true)}
-                        className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 font-medium"
-                      >
-                        Expire Stale Participations
-                      </button>
-                      <button
-                        onClick={handleRepairCounts}
-                        disabled={repairLoading}
-                        className="px-3 py-2 text-sm border border-amber-300 bg-amber-50 text-amber-800 rounded-lg hover:bg-amber-100 font-medium disabled:opacity-50"
-                        title="Recalculates reserved counts based on actual participations. Fixes negative numbers."
-                      >
-                        {repairLoading ? 'Repairing...' : 'Repair Reserved Counts'}
-                      </button>
-                    </div>
-
-                    {loading ? (
-                      <div className="text-center py-12">
-                        <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-600 border-t-transparent" />
-                      </div>
-                    ) : quests.length === 0 ? (
-                      <div className="text-center py-12">
-                        <div className="text-5xl mb-3">{EMPTY_STATES[TABS.QUESTS].icon}</div>
-                        <h3 className="font-semibold text-gray-800">{EMPTY_STATES[TABS.QUESTS].title}</h3>
-                        <p className="text-sm text-gray-500 mt-1">{EMPTY_STATES[TABS.QUESTS].desc}</p>
-                      </div>
-                    ) : (
-                      <div className="overflow-x-auto">
-                        <table className="w-full whitespace-nowrap">
-                          <thead className="bg-gray-50 border-b border-gray-200">
-                            <tr>
-                              <th className="text-left px-2 sm:px-3 py-3 text-xs font-medium text-gray-500 uppercase">Title</th>
-                              <th className="text-left px-2 sm:px-3 py-3 text-xs font-medium text-gray-500 uppercase">Category</th>
-                              <th className="text-left px-2 sm:px-3 py-3 text-xs font-medium text-gray-500 uppercase">Pts</th>
-                              <th className="text-left px-2 sm:px-3 py-3 text-xs font-medium text-gray-500 uppercase">Cap</th>
-                              <th className="text-left px-2 sm:px-3 py-3 text-xs font-medium text-gray-500 uppercase">Resv</th>
-                              <th className="text-left px-2 sm:px-3 py-3 text-xs font-medium text-gray-500 uppercase">Slots</th>
-                              <th className="text-left px-2 sm:px-3 py-3 text-xs font-medium text-gray-500 uppercase">Compl</th>
-                              <th className="text-left px-2 sm:px-3 py-3 text-xs font-medium text-gray-500 uppercase">Impact</th>
-                              <th className="text-left px-2 sm:px-3 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
-                              <th className="text-left px-2 sm:px-3 py-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-200">
-                            {quests.map(quest => {
-                              const isActive = getQuestIsActive(quest)
-                              const reservedCount = quest.reservedCount || 0
-                              const slotsLeft = (quest.capacity || 0) - reservedCount
-                              const isFull = slotsLeft <= 0
-                              const isExpanded = expandedQuestStats[quest.id]
-                              const stats = expandedQuestStats[quest.id]
-                              const isLoadingStats = loadingQuestStats === quest.id
-                              const impactForQuest = questImpactTotals[quest.id]
-
-                              return (
-                                <Fragment key={quest.id}>
-                                  <tr className="hover:bg-gray-50">
-                                    <td className="px-2 sm:px-3 py-3 font-medium text-gray-900 text-sm truncate max-w-[160px]">{quest.title}</td>
-                                    <td className="px-2 sm:px-3 py-3 text-gray-600 text-xs">{quest.category || '-'}</td>
-                                    <td className="px-2 sm:px-3 py-3 text-gray-600 text-sm">{quest.points}</td>
-                                    <td className="px-2 sm:px-3 py-3 text-gray-600 text-sm">{quest.capacity}</td>
-                                    <td className="px-2 sm:px-3 py-3 text-sm">
-                                      <span className={quest.reservedCount < 0 ? 'text-red-600 font-semibold' : 'text-gray-600'}>
-                                        {quest.reservedCount}
-                                        {quest.reservedCount < 0 && (
-                                          <span className="ml-1 text-xs" title="Negative count detected - click Repair Counts to fix">⚠️</span>
+                    <div className="flex-1 min-h-0 border border-gray-200 rounded-xl overflow-hidden flex flex-col">
+                      {loading ? (
+                        <div className="flex-1 flex items-center justify-center">
+                          <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-600 border-t-transparent" />
+                        </div>
+                      ) : quests.length === 0 ? (
+                        <div className="flex-1 flex items-center justify-center">
+                          <div className="text-center">
+                            <div className="text-5xl mb-3">{EMPTY_STATES[TABS.QUESTS].icon}</div>
+                            <h3 className="font-semibold text-gray-800">{EMPTY_STATES[TABS.QUESTS].title}</h3>
+                            <p className="text-sm text-gray-500 mt-1">{EMPTY_STATES[TABS.QUESTS].desc}</p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex-1 overflow-y-auto">
+                          <table className="w-full text-sm">
+                            <thead className="bg-gray-50 sticky top-0 z-10 border-b border-gray-200">
+                              <tr>
+                                <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase">Title</th>
+                                <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
+                                <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200">
+                              {filteredQuests.length === 0 ? (
+                                <tr>
+                                  <td colSpan={3} className="py-12 text-center">
+                                    <div className="text-4xl mb-2">🔍</div>
+                                    <p className="text-gray-500">No quests match "{questSearchQuery}"</p>
+                                    <button
+                                      onClick={() => setQuestSearchQuery('')}
+                                      className="mt-2 text-sm text-emerald-600 hover:text-emerald-700 font-semibold"
+                                    >
+                                      Clear search
+                                    </button>
+                                  </td>
+                                </tr>
+                              ) : (
+                                filteredQuests.map(quest => {
+                                  const isActive = getQuestIsActive(quest)
+                                  return (
+                                    <tr key={quest.id} className="hover:bg-gray-50">
+                                      <td className="py-3 px-3 min-w-[220px] max-w-[420px]">
+                                        <div className="font-medium text-gray-900 text-sm leading-snug">{quest.title}</div>
+                                        {quest.description && (
+                                          <div className="text-xs text-gray-500 mt-0.5 truncate max-w-md">{quest.description}</div>
                                         )}
-                                      </span>
-                                    </td>
-                                    <td className="px-2 sm:px-3 py-3 text-sm">
-                                      <span className={isFull ? 'text-red-600 font-medium' : 'text-gray-600'}>
-                                        {isFull ? 'Full' : slotsLeft}
-                                      </span>
-                                    </td>
-                                    <td className="px-2 sm:px-3 py-3 text-gray-600 text-sm">{quest.completedCount || 0}</td>
-                                    <td className="px-2 sm:px-3 py-3 text-gray-600 text-xs">
-                                      {impactForQuest ? (
-                                        <button
-                                          onClick={() => {
-                                            if (isExpanded) {
-                                              setExpandedQuestStats(prev => ({ ...prev, [quest.id]: null }))
-                                            } else {
-                                              setLoadingQuestStats(quest.id)
-                                              setTimeout(() => {
-                                                setExpandedQuestStats(prev => ({ ...prev, [quest.id]: impactForQuest }))
-                                                setLoadingQuestStats(null)
-                                              }, 300)
-                                            }
-                                          }}
-                                          className="text-emerald-600 hover:underline"
-                                        >
-                                          {impactForQuest.totalCompletions}
-                                        </button>
-                                      ) : (
-                                        <span className="text-gray-400">—</span>
-                                      )}
-                                    </td>
-                                    <td className="px-2 sm:px-3 py-3 whitespace-nowrap">
-                                      <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full ${
-                                        isActive
-                                          ? 'bg-emerald-100 text-emerald-700'
-                                          : 'bg-gray-100 text-gray-600'
-                                      }`}>
-                                        <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-500' : 'bg-gray-400'}`} />
-                                        {isActive ? 'LIVE' : 'DRAFT'}
-                                      </span>
-                                    </td>
-                                    <td className="px-2 sm:px-3 py-3 whitespace-nowrap">
-                                      <div className="flex items-center gap-3">
-                                        <div className="flex items-center gap-2 group relative">
-                                          <button
-                                            type="button"
-                                            onClick={() => handleToggleClick(quest)}
-                                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                                              isActive ? 'bg-emerald-600' : 'bg-gray-300'
-                                            }`}
-                                            role="switch"
-                                            aria-checked={isActive}
-                                            aria-label={isActive ? 'Deactivate quest' : 'Activate quest'}
-                                          >
-                                            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                                              isActive ? 'translate-x-6' : 'translate-x-1'
-                                            }`} />
-                                          </button>
-                                          <span className={`text-xs font-semibold ${isActive ? 'text-emerald-700' : 'text-gray-500'}`}>
-                                            {isActive ? 'Live' : 'Draft'}
-                                          </span>
-                                          <div className="invisible group-hover:visible absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 bg-gray-900 text-white text-xs rounded-lg p-2 shadow-lg z-10">
-                                            {isActive
-                                              ? 'Live quests are visible and joinable by all users.'
-                                              : 'Draft quests are hidden from users. Toggle to publish.'}
-                                            <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-gray-900 rotate-45" />
-                                          </div>
-                                        </div>
-                                        <button
-                                          onClick={() => setSelectedQuest(quest)}
-                                          className="px-3 py-1.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 rounded-lg transition"
-                                        >
-                                          Edit
-                                        </button>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                  {isExpanded && (
-                                    <tr>
-                                      <td colSpan={10} className="px-4 py-3 bg-gray-50">
-                                        <div className="flex flex-wrap gap-4">
-                                          {impactForQuest?.byUnit && Object.entries(impactForQuest.byUnit).map(([unit, amount]) => (
-                                            <div key={unit} className="bg-white rounded-lg px-3 py-2 border border-gray-200">
-                                              <p className="text-xs text-gray-500">{unit}</p>
-                                              <p className="font-semibold text-gray-900">{amount}</p>
+                                      </td>
+                                      <td className="px-2 sm:px-3 py-3 whitespace-nowrap">
+                                        {isMaster ? (
+                                          <div className="flex items-center gap-2 group relative">
+                                            <button
+                                              type="button"
+                                              onClick={() => handleToggleClick(quest)}
+                                              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                                                isActive ? 'bg-emerald-600' : 'bg-gray-300'
+                                              }`}
+                                              role="switch"
+                                              aria-checked={isActive}
+                                              aria-label={isActive ? 'Deactivate quest' : 'Activate quest'}
+                                            >
+                                              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                                isActive ? 'translate-x-6' : 'translate-x-1'
+                                              }`} />
+                                            </button>
+                                            <span className={`text-xs font-semibold ${isActive ? 'text-emerald-700' : 'text-gray-500'}`}>
+                                              {isActive ? 'Live' : 'Draft'}
+                                            </span>
+                                            <div className="invisible group-hover:visible absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 bg-gray-900 text-white text-xs rounded-lg p-2 shadow-lg z-10">
+                                              {isActive
+                                                ? 'Live quests are visible and joinable by all users.'
+                                                : 'Draft quests are hidden from users. Toggle to publish.'}
+                                              <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-gray-900 rotate-45" />
                                             </div>
-                                          ))}
-                                          {(!impactForQuest?.byUnit || Object.keys(impactForQuest.byUnit).length === 0) && (
-                                            <p className="text-sm text-gray-500">No impact data.</p>
+                                          </div>
+                                        ) : (
+                                          <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full ${
+                                            isActive
+                                              ? 'bg-emerald-100 text-emerald-700'
+                                              : 'bg-gray-100 text-gray-600'
+                                          }`}>
+                                            <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+                                            {isActive ? 'LIVE' : 'DRAFT'}
+                                          </span>
+                                        )}
+                                      </td>
+                                      <td className="px-2 sm:px-3 py-3 whitespace-nowrap">
+                                        <div className="flex items-center gap-1">
+                                          <button
+                                            onClick={() => {
+                                              const impactForQuest = questImpactTotals[quest.id]
+                                              setSelectedQuestDetails({ quest, impactForQuest, participations: [] })
+                                            }}
+                                            className="px-2 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg whitespace-nowrap"
+                                          >
+                                            View Details
+                                          </button>
+                                          <button
+                                            onClick={() => setCheckInQuest(quest)}
+                                            className="px-2 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg whitespace-nowrap"
+                                            title="Check in participants"
+                                          >
+                                            ✅ Check In
+                                          </button>
+                                          {isMaster && (
+                                            <button
+                                              onClick={() => setSelectedQuest(quest)}
+                                              className="px-2 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-100 rounded-lg"
+                                            >
+                                              Edit
+                                            </button>
                                           )}
                                         </div>
                                       </td>
                                     </tr>
-                                  )}
-                                </Fragment>
-                              )
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-
-                    {questParticipations.length > 0 && (
-                      <div className="mt-8 pt-8 border-t border-gray-200">
-                        <h3 className="text-md font-semibold text-gray-900 mb-4">Quest Participations</h3>
-                        <div className="overflow-x-auto">
-                          <table className="w-full">
-                            <thead className="bg-gray-50 border-b border-gray-200">
-                              <tr>
-                                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Quest</th>
-                                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">User</th>
-                                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Points</th>
-                                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Joined</th>
-                                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
-                                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Reward</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-200">
-                              {questParticipations.map(part => (
-                                <tr 
-                                  key={part.id} 
-                                  onClick={() => setSelectedParticipation(part)}
-                                  className="hover:bg-gray-50 cursor-pointer"
-                                >
-                                  <td className="px-4 py-3 font-medium text-gray-900">
-                                    {questDetails[part.questId]?.title || part.questId}
-                                  </td>
-                                  <td className="px-4 py-3 text-gray-600 text-sm">
-                                    {part.userEmail || (part.uid ? part.uid.substring(0, 8) + '...' : '-')}
-                                  </td>
-                                  <td className="px-4 py-3 text-gray-600">
-                                    {questDetails[part.questId]?.points || 0} pts
-                                  </td>
-                                  <td className="px-4 py-3 text-gray-600 text-sm">
-                                    {part.joinedAt ? new Date(part.joinedAt).toLocaleDateString() : '-'}
-                                  </td>
-                                  <td className="px-4 py-3">
-                                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                      part.status === 'joined' ? 'bg-blue-100 text-blue-800' :
-                                      part.status === 'completed' ? 'bg-green-100 text-green-800' :
-                                      part.status === 'expired' ? 'bg-red-100 text-red-800' :
-                                      'bg-gray-100 text-gray-800'
-                                    }`}>
-                                      {part.status?.toUpperCase() || 'UNKNOWN'}
-                                    </span>
-                                  </td>
-                                  <td className="px-4 py-3">
-                                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                      part.rewardStatus === 'released' ? 'bg-green-100 text-green-800' :
-                                      part.rewardStatus === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                                      part.rewardStatus === 'expired' ? 'bg-red-100 text-red-800' :
-                                      'bg-gray-100 text-gray-800'
-                                    }`}>
-                                      {part.rewardStatus?.toUpperCase() || 'PENDING'}
-                                    </span>
-                                  </td>
-                                </tr>
-                              ))}
+                                  )
+                                })
+                              )}
                             </tbody>
                           </table>
                         </div>
-                      </div>
-                    )}
-                  </>
-                )}
-
-                {activeTab === TABS.CHECKIN && (
-                  <>
-                    <div className="flex items-center gap-2 mb-4">
-                      <span className="text-xl">✅</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">Quest Check-in</h2>
-                        <p className="text-sm text-gray-500">Quickly mark participants as completed</p>
-                      </div>
+                      )}
                     </div>
-                    <CheckInPanel user={user} showToast={showToast} />
-                  </>
+                  </div>
+                )}
+                {isMaster && activeTab === TABS.MANAGE_ADMINS && (
+                  <div className="h-full flex flex-col min-h-0">
+                    <div className="flex-1 min-h-0 overflow-y-auto">
+                      <ManageAdminsPanel currentUserUid={user.uid} />
+                    </div>
+                  </div>
                 )}
 
-                {activeTab === TABS.VOUCHERS && (
-                  <div className="space-y-6">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xl">🎟️</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">Vouchers</h2>
-                        <p className="text-sm text-gray-500 mt-1">Look up voucher codes and manage the redemption log.</p>
+                {isMaster && activeTab === TABS.VOUCHERS && (
+                  <div className="h-full flex flex-col min-h-0">
+                    <div className="shrink-0">
+                      <div className="flex items-center gap-2 mb-4">
+                        <span className="text-xl">🎟️</span>
+                        <div>
+                          <h2 className="text-lg font-semibold text-gray-900">Vouchers</h2>
+                          <p className="text-sm text-gray-500 mt-1">Look up voucher codes and manage the redemption log.</p>
+                        </div>
                       </div>
                     </div>
 
+                    <div className="flex-1 min-h-0 overflow-y-auto">
                     {loading ? (
-                      <div className="text-center py-12">
+                      <div className="flex items-center justify-center py-12">
                         <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-600 border-t-transparent" />
                       </div>
                     ) : !activeSeason ? (
@@ -2603,15 +2500,14 @@ export default function LGUDashboardPage() {
                         </section>
                       </>
                     )}
+                    </div>
                   </div>
                 )}
               </div>
             </main>
           </div>
         </div>
-      </main>
-
-      <Footer />
+      </div>
 
       {selectedSubmission && (
         <SubmissionModal
@@ -2679,16 +2575,6 @@ export default function LGUDashboardPage() {
           onClose={() => setSelectedReview(null)}
           onApprove={handleApproveReview}
           onReject={handleRejectReview}
-          isLoading={actionLoading}
-        />
-      )}
-
-      {selectedParticipation && (
-        <QuestVerificationModal
-          participation={selectedParticipation}
-          quest={questDetails[selectedParticipation.questId]}
-          onClose={() => setSelectedParticipation(null)}
-          onMarkCompleted={handleMarkQuestCompleted}
           isLoading={actionLoading}
         />
       )}
@@ -2800,6 +2686,32 @@ export default function LGUDashboardPage() {
           </div>
         </div>,
         document.body
+      )}
+
+      {checkInQuest && (
+        <CheckInModal
+          quest={checkInQuest}
+          onClose={() => setCheckInQuest(null)}
+          onSuccess={loadData}
+        />
+      )}
+
+      {qrModalQuest && (
+        <QRDisplayModal
+          quest={qrModalQuest}
+          onClose={() => setQrModalQuest(null)}
+        />
+      )}
+
+      {selectedQuestDetails && (
+        <QuestDetailsModal
+          quest={selectedQuestDetails.quest}
+          participations={selectedQuestDetails.participations}
+          impactForQuest={selectedQuestDetails.impactForQuest}
+          isMaster={isMaster}
+          questDetails={questDetails}
+          onClose={() => setSelectedQuestDetails(null)}
+        />
       )}
 
       {toast && (
