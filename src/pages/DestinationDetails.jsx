@@ -4,12 +4,12 @@ import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
 import FavoriteButton from '../components/FavoriteButton'
 import ReportIssueModal from '../components/ReportIssueModal'
-import AppImage from '../components/ui/AppImage'
+import PhotoCarousel from '../components/PhotoCarousel'
 import RatingSummary from '../components/reviews/RatingSummary'
 import ReviewsList from '../components/reviews/ReviewsList'
 import ReviewForm from '../components/reviews/ReviewForm'
 import { useAuth } from '../contexts/AuthContext'
-import { getDestinationImage } from '../utils/placeImages'
+import { getDestinationImages } from '../utils/placeImages'
 import { getDestinationById } from '../services/destinations.service'
 import { listApprovedReviews, getMyReview } from '../services/reviews.service'
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
@@ -39,7 +39,6 @@ export default function DestinationDetails() {
   const { user } = useAuth()
   const [destination, setDestination] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [shareMessage, setShareMessage] = useState('')
   const [isReportModalOpen, setIsReportModalOpen] = useState(false)
   const [reviews, setReviews] = useState([])
@@ -113,44 +112,11 @@ export default function DestinationDetails() {
     }
   }
 
-  // Create an images array for gallery (safe against null/undefined)
-  const destinationImages = useMemo(() => {
-    if (!destination) {
-      return [] // Return empty array until destination exists
-    }
-    
-    if (destination?.images?.length > 0) {
-      return destination.images
-    }
-    
-    // If destination has a single image property
-    if (destination?.image) {
-      return [destination.image]
-    }
-    
-    // Use placeholder as single image if no real images
-    return [getDestinationImage(destination)]
-  }, [destination])
-
   const getDirections = () => {
     if (destination?.position) {
       const [lat, lng] = destination.position
       const url = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`
       window.open(url, '_blank')
-    }
-  }
-
-  const nextImage = () => {
-    if (destinationImages.length > 0) {
-      setCurrentImageIndex((prev) => (prev + 1) % destinationImages.length)
-    }
-  }
-
-  const prevImage = () => {
-    if (destinationImages.length > 0) {
-      setCurrentImageIndex((prev) => 
-        prev === 0 ? destinationImages.length - 1 : prev - 1
-      )
     }
   }
 
@@ -215,9 +181,6 @@ export default function DestinationDetails() {
     )
   }
 
-  // Use the same destinationImages array for consistency
-  const images = destinationImages
-
   return (
     <div className="flex min-h-screen flex-col">
       <Navbar />
@@ -281,49 +244,7 @@ export default function DestinationDetails() {
             {/* Main Content */}
             <div className="md:col-span-2 space-y-8">
               {/* Image Gallery */}
-              <div>
-                <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-gray-100">
-                  <AppImage
-                    src={destinationImages[currentImageIndex]}
-                    alt={destination.name}
-                    className="h-full w-full"
-                    fallbackSrc={getDestinationImage(destination)}
-                  />
-                  {images.length > 1 && (
-                    <>
-                      <button
-                        onClick={prevImage}
-                        className="absolute left-4 top-1/2 -translate-y-1/2 rounded-full bg-white/80 p-2 text-gray-600 hover:bg-white hover:text-gray-900 transition"
-                      >
-                        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                        </svg>
-                      </button>
-                      <button
-                        onClick={nextImage}
-                        className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full bg-white/80 p-2 text-gray-600 hover:bg-white hover:text-gray-900 transition"
-                      >
-                        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                        </svg>
-                      </button>
-                    </>
-                  )}
-                </div>
-                  {destinationImages.length > 1 && (
-                    <div className="mt-4 flex justify-center gap-2">
-                      {destinationImages.map((_, index) => (
-                      <button
-                        key={index}
-                        onClick={() => setCurrentImageIndex(index)}
-                        className={`h-2 w-2 rounded-full transition ${
-                          index === currentImageIndex ? 'bg-emerald-600' : 'bg-gray-300'
-                        }`}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
+              <PhotoCarousel images={getDestinationImages(destination)} alt={destination.name} mode="detail" className="aspect-video w-full overflow-hidden rounded-xl" />
 
               {/* Description */}
               <div>

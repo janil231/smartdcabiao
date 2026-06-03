@@ -1,11 +1,21 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
+import { createPortal } from 'react-dom'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
 import FavoriteButton from '../components/FavoriteButton'
-import AppImage from '../components/ui/AppImage'
+import PhotoCarousel from '../components/PhotoCarousel'
 import RatingSummary from '../components/reviews/RatingSummary'
-import { getDestinationImage } from '../utils/placeImages'
+import { getDestinationImages } from '../utils/placeImages'
+import { useAuth } from '../contexts/AuthContext'
+import { isMasterAdmin } from '../services/adminRole.service'
+import { logAudit } from '../services/audit.service'
+import {
+  archiveDestination,
+  restoreDestination,
+  permanentlyDeleteDestination,
+  isStaticDestination,
+} from '../services/destinations.service'
 
 // Consistent styling with BusinessCard
 const TYPE_STYLES = {
@@ -15,18 +25,93 @@ const TYPE_STYLES = {
   destination: 'bg-purple-500/10 text-purple-700 border-purple-200',
 }
 
-function DestinationCard({ destination }) {
+function DestinationCard({ destination, isMaster, onAction }) {
   const categoryStyle = TYPE_STYLES[destination.type] || TYPE_STYLES.destination
-  const destinationImage = getDestinationImage(destination)
+  const isArchived = destination.isActive === false
 
   return (
-    <article className="flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition hover:shadow-md">
+    <article className={`flex flex-col overflow-hidden rounded-xl border bg-white shadow-sm transition hover:shadow-md ${
+      isArchived ? 'opacity-60 ring-2 ring-amber-200 border-amber-200' : 'border-gray-200'
+    }`}>
       <div className="relative aspect-video w-full bg-gradient-to-br from-purple-50 to-pink-50">
-        <AppImage
-          src={destinationImage}
-          alt={destination.name}
-          className="h-full w-full"
-        />
+        <PhotoCarousel images={getDestinationImages(destination)} alt={destination.name} mode="card" className="h-full w-full" />
+
+        {isArchived && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10">
+            <span className="text-xs font-bold bg-amber-500 text-white px-3 py-1 rounded-full shadow-md">
+              🗂️ ARCHIVED
+            </span>
+          </div>
+        )}
+
+        {isMaster && (
+          <div className="absolute top-3 left-3 z-10 flex flex-col gap-1.5">
+              {!isArchived ? (
+              <>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    onAction({ type: "archive", id: destination.id, name: destination.name, item: destination });
+                  }}
+                  className="w-9 h-9 rounded-full bg-white/95 backdrop-blur shadow-md hover:bg-amber-50 hover:shadow-lg flex items-center justify-center text-amber-600 hover:text-amber-700 transition"
+                  title="Archive this destination (hide from public)"
+                  aria-label={`Archive ${destination.name}`}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="21 8 21 21 3 21 3 8" />
+                    <rect x="1" y="3" width="22" height="5" />
+                    <line x1="10" y1="12" x2="14" y2="12" />
+                  </svg>
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    onAction({ type: "restore", id: destination.id, name: destination.name, item: destination });
+                  }}
+                  className="w-9 h-9 rounded-full bg-white/95 backdrop-blur shadow-md hover:bg-emerald-50 hover:shadow-lg flex items-center justify-center text-emerald-600 hover:text-emerald-700 transition"
+                  title="Restore this destination (make public again)"
+                  aria-label={`Restore ${destination.name}`}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="1 4 1 10 7 10" />
+                    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                  </svg>
+                </button>
+                {!isStaticDestination(destination) && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      onAction({ type: "delete", id: destination.id, name: destination.name, item: destination });
+                    }}
+                    className="w-9 h-9 rounded-full bg-white/95 backdrop-blur shadow-md hover:bg-red-50 hover:shadow-lg flex items-center justify-center text-red-600 hover:text-red-700 transition"
+                    title="Permanently delete (cannot be undone)"
+                    aria-label={`Permanently delete ${destination.name}`}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
+                      <path d="M10 11v6" />
+                      <path d="M14 11v6" />
+                    </svg>
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {destination.isActive === false && isMaster && isStaticDestination(destination) && (
+          <div className="absolute bottom-2 left-2 right-2 z-10 bg-amber-50/95 backdrop-blur border border-amber-200 rounded-lg px-2.5 py-1.5 text-[10px] text-amber-800 font-medium leading-tight">
+            Built-in sample &mdash; archive only (cannot delete)
+          </div>
+        )}
+
         <div className="absolute top-3 right-3">
           <FavoriteButton 
             item={{ ...destination, type: destination.type || 'destination' }}
@@ -109,11 +194,122 @@ function DestinationCard({ destination }) {
 }
 
 export default function DestinationsPage() {
+  const { user } = useAuth()
   const [destinations, setDestinations] = useState([])
   const [barangays, setBarangays] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
+  const [isMaster, setIsMaster] = useState(false)
+  const [archiveFilter, setArchiveFilter] = useState("active")
+  const [confirmAction, setConfirmAction] = useState(null)
+  const [processing, setProcessing] = useState(false)
+  const [errorMsg, setErrorMsg] = useState("")
+  const [typedConfirmation, setTypedConfirmation] = useState("")
+
+  useEffect(() => {
+    if (!user?.uid) {
+      setIsMaster(false);
+      return;
+    }
+    isMasterAdmin(user.uid).then(setIsMaster).catch(() => setIsMaster(false));
+  }, [user]);
+
+  useEffect(() => {
+    if (!confirmAction) {
+      setTypedConfirmation("");
+      setErrorMsg("");
+    }
+  }, [confirmAction]);
+
+  useEffect(() => {
+    if (!confirmAction) return;
+    document.body.style.overflow = "hidden";
+    const handler = (e) => e.key === "Escape" && !processing && setConfirmAction(null);
+    window.addEventListener("keydown", handler);
+    return () => {
+      document.body.style.overflow = "";
+      window.removeEventListener("keydown", handler);
+    };
+  }, [confirmAction, processing]);
+
+  const activeCount = useMemo(
+    () => destinations.filter((d) => d.isActive !== false).length,
+    [destinations]
+  );
+
+  const archivedCount = useMemo(
+    () => destinations.filter((d) => d.isActive === false).length,
+    [destinations]
+  );
+
+  const handleConfirm = async () => {
+    if (!confirmAction) return;
+    setProcessing(true);
+    setErrorMsg("");
+
+    try {
+      if (confirmAction.type === "archive") {
+        await archiveDestination(confirmAction.id, user.uid, "", confirmAction.item || null);
+        await logAudit({
+          action: "archive_destination",
+          targetType: "destination",
+          targetId: confirmAction.id,
+          adminUid: user.uid,
+          meta: { name: confirmAction.name },
+        });
+        setDestinations((prev) =>
+          prev.map((d) =>
+            d.id === confirmAction.id
+              ? { ...d, isActive: false, archivedAt: new Date(), archivedBy: user.uid }
+              : d
+          )
+        );
+      } else if (confirmAction.type === "restore") {
+        await restoreDestination(confirmAction.id);
+        await logAudit({
+          action: "restore_destination",
+          targetType: "destination",
+          targetId: confirmAction.id,
+          adminUid: user.uid,
+          meta: { name: confirmAction.name },
+        });
+        setDestinations((prev) =>
+          prev.map((d) =>
+            d.id === confirmAction.id
+              ? { ...d, isActive: true, archivedAt: null, archivedBy: null }
+              : d
+          )
+        );
+      } else if (confirmAction.type === "delete") {
+        if (typedConfirmation !== confirmAction.name) {
+          setErrorMsg("Typed name doesn't match. Please type the exact destination name to confirm.");
+          setProcessing(false);
+          return;
+        }
+        const destinationData = confirmAction.item || destinations.find((d) => String(d.id) === String(confirmAction.id));
+        await permanentlyDeleteDestination(confirmAction.id, destinationData);
+        await logAudit({
+          action: "permanently_delete_destination",
+          targetType: "destination",
+          targetId: confirmAction.id,
+          adminUid: user.uid,
+          meta: { name: confirmAction.name },
+        });
+        setDestinations((prev) => prev.filter((d) => d.id !== confirmAction.id));
+      }
+
+      setConfirmAction(null);
+    } catch (err) {
+      if (err.code === "STATIC_ITEM_NOT_DELETABLE") {
+        setErrorMsg(err.message);
+      } else {
+        setErrorMsg(err.message || "Action failed. Please try again.");
+      }
+    } finally {
+      setProcessing(false);
+    }
+  };
 
   const loadDestinations = useCallback(async () => {
     try {
@@ -146,6 +342,16 @@ export default function DestinationsPage() {
   const filteredDestinations = useMemo(() => {
     let list = destinations
 
+    if (!isMaster) {
+      list = list.filter((d) => d.isActive !== false);
+    } else {
+      if (archiveFilter === "active") {
+        list = list.filter((d) => d.isActive !== false);
+      } else if (archiveFilter === "archived") {
+        list = list.filter((d) => d.isActive === false);
+      }
+    }
+
     if (filter !== 'all') {
       list = list.filter(d => d.barangay === filter)
     }
@@ -166,7 +372,7 @@ export default function DestinationsPage() {
     }
 
     return list
-  }, [destinations, filter, searchQuery])
+  }, [destinations, filter, searchQuery, isMaster, archiveFilter])
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -181,6 +387,47 @@ export default function DestinationsPage() {
               Explore beautiful destinations and points of interest in Cabiao. Discover natural attractions, historical sites, and local landmarks.
             </p>
           </div>
+
+          {/* Master Admin Archive Toggle */}
+          {isMaster && (
+            <div className="mb-4 flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                🛡️ Master View:
+              </span>
+              <div className="inline-flex rounded-xl border border-gray-300 bg-white overflow-hidden">
+                <button
+                  onClick={() => setArchiveFilter("active")}
+                  className={`px-3 py-1.5 text-xs font-semibold transition ${
+                    archiveFilter === "active"
+                      ? "bg-emerald-600 text-white"
+                      : "text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  Live ({activeCount})
+                </button>
+                <button
+                  onClick={() => setArchiveFilter("archived")}
+                  className={`px-3 py-1.5 text-xs font-semibold transition border-l border-gray-300 ${
+                    archiveFilter === "archived"
+                      ? "bg-amber-600 text-white"
+                      : "text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  🗂️ Archived ({archivedCount})
+                </button>
+                <button
+                  onClick={() => setArchiveFilter("all")}
+                  className={`px-3 py-1.5 text-xs font-semibold transition border-l border-gray-300 ${
+                    archiveFilter === "all"
+                      ? "bg-gray-700 text-white"
+                      : "text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  All
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Search and Filter Section - Sticky on mobile */}
           <div className="mt-6 sm:mt-8 space-y-4 sticky top-[72px] sm:top-0 z-30 -mx-4 sm:mx-0 px-4 sm:py-0 py-3 bg-white/95 sm:bg-transparent backdrop-blur-sm sm:backdrop-blur-none -top-3 sm:top-0">
@@ -260,7 +507,7 @@ export default function DestinationsPage() {
           ) : filteredDestinations.length > 0 ? (
             <div className="mt-6 sm:mt-10 grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
               {filteredDestinations.map((destination) => (
-                <DestinationCard key={destination.id} destination={destination} />
+                <DestinationCard key={destination.id} destination={destination} isMaster={isMaster} onAction={setConfirmAction} />
               ))}
             </div>
           ) : (
@@ -316,6 +563,134 @@ export default function DestinationsPage() {
         </div>
       </main>
       <Footer />
+
+      {confirmAction && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="fixed inset-0 bg-black/60"
+            onClick={() => !processing && setConfirmAction(null)}
+          />
+
+          <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl p-6 animate-fade-in">
+            {confirmAction.type === "archive" && (
+              <>
+                <div className="w-14 h-14 rounded-full bg-amber-100 flex items-center justify-center text-3xl mx-auto mb-4">
+                  🗂️
+                </div>
+                <h3 className="font-bold text-lg text-gray-900 text-center mb-2">
+                  Archive this destination?
+                </h3>
+                <p className="text-sm text-gray-600 text-center mb-1">
+                  You're about to hide:
+                </p>
+                <p className="text-base font-semibold text-gray-900 text-center mb-4">
+                  "{confirmAction.name}"
+                </p>
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-5 text-xs text-amber-800">
+                  ℹ️ The destination will be hidden from the public directory and map.
+                  User favorites and reviews remain intact. You can restore it
+                  anytime from the "Archived" filter.
+                </div>
+              </>
+            )}
+
+            {confirmAction.type === "restore" && (
+              <>
+                <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center text-3xl mx-auto mb-4">
+                  ♻️
+                </div>
+                <h3 className="font-bold text-lg text-gray-900 text-center mb-2">
+                  Restore this destination?
+                </h3>
+                <p className="text-sm text-gray-600 text-center mb-1">
+                  You're about to make this public again:
+                </p>
+                <p className="text-base font-semibold text-gray-900 text-center mb-4">
+                  "{confirmAction.name}"
+                </p>
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 mb-5 text-xs text-emerald-800">
+                  ✅ The destination will reappear on the public directory and map.
+                </div>
+              </>
+            )}
+
+            {confirmAction.type === "delete" && (
+              <>
+                <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center text-3xl mx-auto mb-4">
+                  ⚠️
+                </div>
+                <h3 className="font-bold text-lg text-gray-900 text-center mb-2">
+                  Permanently delete?
+                </h3>
+                <p className="text-sm text-gray-600 text-center mb-1">
+                  This will permanently delete:
+                </p>
+                <p className="text-base font-semibold text-gray-900 text-center mb-4">
+                  "{confirmAction.name}"
+                </p>
+                <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-4 text-xs text-red-800">
+                  🔥 <strong>This cannot be undone.</strong> The destination document
+                  will be erased from the database. Reviews and favorites pointing
+                  to it will become orphaned. Consider archiving instead.
+                </div>
+                <div className="mb-4">
+                  <label className="text-xs font-semibold text-gray-700 block mb-1">
+                    To confirm, type the destination name:
+                  </label>
+                  <input
+                    type="text"
+                    value={typedConfirmation}
+                    onChange={(e) => setTypedConfirmation(e.target.value)}
+                    placeholder={confirmAction.name}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-300 text-sm focus:border-red-500 focus:ring-2 focus:ring-red-100"
+                  />
+                </div>
+              </>
+            )}
+
+            {errorMsg && (
+              <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 text-sm mb-4">
+                {errorMsg}
+              </div>
+            )}
+
+            <div className="flex flex-col-reverse sm:flex-row gap-2 sm:gap-3">
+              <button
+                onClick={() => setConfirmAction(null)}
+                disabled={processing}
+                className="flex-1 px-5 py-2.5 rounded-xl border border-gray-300 bg-white text-gray-700 font-semibold hover:bg-gray-50 transition disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirm}
+                disabled={processing || (confirmAction.type === "delete" && typedConfirmation !== confirmAction.name)}
+                className={`flex-1 px-5 py-2.5 rounded-xl text-white font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${
+                  confirmAction.type === "archive"
+                    ? "bg-amber-600 hover:bg-amber-700"
+                    : confirmAction.type === "restore"
+                    ? "bg-emerald-600 hover:bg-emerald-700"
+                    : "bg-red-600 hover:bg-red-700"
+                }`}
+              >
+                {processing ? (
+                  <>
+                    <span className="animate-spin">⏳</span> Processing...
+                  </>
+                ) : confirmAction.type === "archive" ? (
+                  "Yes, archive"
+                ) : confirmAction.type === "restore" ? (
+                  "Yes, restore"
+                ) : (
+                  "Permanently delete"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
     </div>
   )
 }

@@ -160,6 +160,7 @@ function getPlaceKey(poi) {
 
 export default function MapPage() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { user } = useAuth()
   const { t } = useLanguage()
   const [authModalOpen, setAuthModalOpen] = useState(false)
@@ -172,6 +173,7 @@ export default function MapPage() {
   const mapRef = useRef(null)
   const markerRefs = useRef({})
   const flyTimeoutRef = useRef(null)
+  const hasAutoZoomedRef = useRef(false)
 
   const { filters, setFilter, clearFilters, hasActiveFilters } = useMapFilters()
 
@@ -192,9 +194,55 @@ export default function MapPage() {
     loadPlaces()
   }, [])
 
+  // Handle ?selected=ID&filter=TYPE: zoom to POI from spotlight carousel
+  useEffect(() => {
+    if (hasAutoZoomedRef.current) return;
+    const selectedId = searchParams.get('selected');
+    const filterParam = searchParams.get('filter');
+    if (!selectedId) return;
+    if (allPlaces.length === 0) return;
+    if (!mapRef.current) return;
+
+    const target = allPlaces.find((p) => String(p.id) === String(selectedId));
+    if (!target || !target.position) {
+      hasAutoZoomedRef.current = true;
+      return;
+    }
+
+    if (filterParam === 'destinations') {
+      setFilter('show', 'destination');
+    } else if (filterParam === 'businesses') {
+      setFilter('show', 'business');
+    }
+
+    setSelectedPOI(target);
+
+    const map = mapRef.current;
+    try {
+      if (Array.isArray(target.position)) {
+        map.flyTo(target.position, FOCUS_ZOOM, { duration: 1.2, easeLinearity: 0.25 });
+      } else if (typeof target.position.lat === 'number') {
+        map.flyTo([target.position.lat, target.position.lng], FOCUS_ZOOM, { duration: 1.2, easeLinearity: 0.25 });
+      }
+    } catch (err) {
+      console.warn('[MapPage] flyTo failed:', err);
+    }
+
+    hasAutoZoomedRef.current = true;
+
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('selected');
+      return next;
+    }, { replace: true });
+  }, [searchParams, allPlaces, setFilter, setSearchParams]);
+
   // Filter places based on current filters
   const filteredPlaces = useMemo(() => {
     let results = allPlaces
+
+    // Safety: always hide archived items on the map
+    results = results.filter(p => p.isActive !== false)
 
     // Apply show filter (all/business/destination)
     if (filters.show !== 'all') {

@@ -6,12 +6,12 @@ import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
 import FavoriteButton from '../components/FavoriteButton'
 import ReportIssueModal from '../components/ReportIssueModal'
-import AppImage from '../components/ui/AppImage'
+import PhotoCarousel from '../components/PhotoCarousel'
 import RatingSummary from '../components/reviews/RatingSummary'
 import ReviewsList from '../components/reviews/ReviewsList'
 import ReviewForm from '../components/reviews/ReviewForm'
 import { useAuth } from '../contexts/AuthContext'
-import { getBusinessImage } from '../utils/placeImages'
+import { getBusinessImages } from '../utils/placeImages'
 import { getBusinessById } from '../services/businesses.service'
 import { listApprovedReviews, getMyReview } from '../services/reviews.service'
 import { BUSINESS_TYPES } from '../data'
@@ -52,7 +52,6 @@ export default function BusinessDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { user } = useAuth()
-  const [selectedImage, setSelectedImage] = useState(0)
   const [isReportModalOpen, setIsReportModalOpen] = useState(false)
   const [business, setBusiness] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -98,16 +97,6 @@ export default function BusinessDetailPage() {
   useEffect(() => {
     loadReviews()
   }, [loadReviews])
-
-  // Create an images array for gallery - must be called before early returns
-  const businessImage = getBusinessImage(business)
-  const businessImages = useMemo(() => {
-    if (!business) return [businessImage]
-    if (business?.images?.length > 0) {
-      return business.images
-    }
-    return [businessImage]
-  }, [business, businessImage])
 
   if (loading) {
     return (
@@ -162,13 +151,6 @@ export default function BusinessDetailPage() {
 
   const categoryStyle = TYPE_STYLES[business.type] || TYPE_STYLES[BUSINESS_TYPES.shop]
   
-  const nextImage = () => {
-    setSelectedImage((prev) => (prev + 1) % businessImages.length)
-  }
-  const prevImage = () => {
-    setSelectedImage((prev) => (prev - 1 + businessImages.length) % businessImages.length)
-  }
-
   const getDirectionsUrl = () => {
     const [lat, lng] = business.position
     return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`
@@ -210,58 +192,7 @@ export default function BusinessDetailPage() {
         <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             {/* Image Gallery */}
-            <div className="space-y-4">
-              <div className="relative aspect-video overflow-hidden rounded-xl">
-                <AppImage
-                  src={businessImages[selectedImage]}
-                  alt={business.name}
-                  className="h-full w-full"
-                  fallbackSrc={businessImage}
-                />
-                {businessImages.length > 1 && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={prevImage}
-                      className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white hover:bg-black/70"
-                    >
-                      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                      </svg>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={nextImage}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white hover:bg-black/70"
-                    >
-                      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                      </svg>
-                    </button>
-                  </>
-                )}
-              </div>
-              {businessImages.length > 1 && (
-                <div className="flex gap-2 overflow-x-auto">
-                  {businessImages.map((image, index) => (
-                    <button
-                      key={index}
-                      type="button"
-                      onClick={() => setSelectedImage(index)}
-                      className={`flex-shrink-0 overflow-hidden rounded-lg border-2 ${
-                        selectedImage === index ? 'border-emerald-500' : 'border-gray-200'
-                      }`}
-                    >
-                      <img
-                        src={image}
-                        alt={`${business.name} ${index + 1}`}
-                        className="h-16 w-24 object-cover"
-                      />
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <PhotoCarousel images={getBusinessImages(business)} alt={business.name} mode="detail" className="aspect-video w-full overflow-hidden rounded-xl" />
 
             {/* Business Information */}
             <div className="space-y-6">

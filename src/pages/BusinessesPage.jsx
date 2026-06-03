@@ -1,15 +1,24 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
 import LoginModal from '../components/Auth/LoginModal'
 import FavoriteButton from '../components/FavoriteButton'
-import AppImage from '../components/ui/AppImage'
+import PhotoCarousel from '../components/PhotoCarousel'
 import Reveal from '../components/animations/Reveal'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
-import { getBusinessImage } from '../utils/placeImages'
+import { getBusinessImages } from '../utils/placeImages'
 import { BUSINESS_TYPES } from '../data'
+import { isMasterAdmin } from '../services/adminRole.service'
+import { logAudit } from '../services/audit.service'
+import {
+  archiveBusiness,
+  restoreBusiness,
+  permanentlyDeleteBusiness,
+  isStaticBusiness,
+} from '../services/businesses.service'
 
 const TYPE_STYLES = {
   [BUSINESS_TYPES.restaurant]: 'bg-amber-500/10 text-amber-700 border-amber-200',
@@ -17,14 +26,93 @@ const TYPE_STYLES = {
   [BUSINESS_TYPES.attraction]: 'bg-emerald-500/10 text-emerald-700 border-emerald-200',
 }
 
-function BusinessCard({ business }) {
+function BusinessCard({ business, isMaster, onAction }) {
   const categoryStyle = TYPE_STYLES[business.type] || 'bg-gray-100 text-gray-700 border-gray-200'
-  const img = getBusinessImage(business)
+  const isArchived = business.isActive === false
 
   return (
-    <article className="flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition-all duration-200 ease-out hover:shadow-md hover:-translate-y-0.5">
+    <article className={`flex flex-col overflow-hidden rounded-xl border bg-white shadow-sm transition-all duration-200 ease-out hover:shadow-md hover:-translate-y-0.5 ${
+      isArchived ? 'opacity-60 ring-2 ring-amber-200 border-amber-200' : 'border-gray-200'
+    }`}>
       <div className="relative aspect-video w-full overflow-hidden">
-        <AppImage src={img} alt={business.name} className="h-full w-full" />
+        <PhotoCarousel images={getBusinessImages(business)} alt={business.name} mode="card" className="h-full w-full" />
+
+        {isArchived && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10">
+            <span className="text-xs font-bold bg-amber-500 text-white px-3 py-1 rounded-full shadow-md">
+              🗂️ ARCHIVED
+            </span>
+          </div>
+        )}
+
+        {isMaster && (
+          <div className="absolute top-3 left-3 z-10 flex flex-col gap-1.5">
+              {!isArchived ? (
+              <>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    onAction({ type: "archive", id: business.id, name: business.name, item: business });
+                  }}
+                  className="w-9 h-9 rounded-full bg-white/95 backdrop-blur shadow-md hover:bg-amber-50 hover:shadow-lg flex items-center justify-center text-amber-600 hover:text-amber-700 transition"
+                  title="Archive this business (hide from public)"
+                  aria-label={`Archive ${business.name}`}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="21 8 21 21 3 21 3 8" />
+                    <rect x="1" y="3" width="22" height="5" />
+                    <line x1="10" y1="12" x2="14" y2="12" />
+                  </svg>
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    onAction({ type: "restore", id: business.id, name: business.name, item: business });
+                  }}
+                  className="w-9 h-9 rounded-full bg-white/95 backdrop-blur shadow-md hover:bg-emerald-50 hover:shadow-lg flex items-center justify-center text-emerald-600 hover:text-emerald-700 transition"
+                  title="Restore this business (make public again)"
+                  aria-label={`Restore ${business.name}`}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="1 4 1 10 7 10" />
+                    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                  </svg>
+                </button>
+                {!isStaticBusiness(business) && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      onAction({ type: "delete", id: business.id, name: business.name, item: business });
+                    }}
+                    className="w-9 h-9 rounded-full bg-white/95 backdrop-blur shadow-md hover:bg-red-50 hover:shadow-lg flex items-center justify-center text-red-600 hover:text-red-700 transition"
+                    title="Permanently delete (cannot be undone)"
+                    aria-label={`Permanently delete ${business.name}`}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
+                      <path d="M10 11v6" />
+                      <path d="M14 11v6" />
+                    </svg>
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {business.isActive === false && isMaster && isStaticBusiness(business) && (
+          <div className="absolute bottom-2 left-2 right-2 z-10 bg-amber-50/95 backdrop-blur border border-amber-200 rounded-lg px-2.5 py-1.5 text-[10px] text-amber-800 font-medium leading-tight">
+            Built-in sample &mdash; archive only (cannot delete)
+          </div>
+        )}
+
         <div className="absolute top-3 right-3">
           <FavoriteButton 
             item={{ ...business, type: business.type }}
@@ -113,6 +201,116 @@ export default function BusinessesPage() {
   const [businesses, setBusinesses] = useState([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
+  const [isMaster, setIsMaster] = useState(false)
+  const [archiveFilter, setArchiveFilter] = useState("active")
+  const [confirmAction, setConfirmAction] = useState(null)
+  const [processing, setProcessing] = useState(false)
+  const [errorMsg, setErrorMsg] = useState("")
+  const [typedConfirmation, setTypedConfirmation] = useState("")
+
+  useEffect(() => {
+    if (!user?.uid) {
+      setIsMaster(false);
+      return;
+    }
+    isMasterAdmin(user.uid).then(setIsMaster).catch(() => setIsMaster(false));
+  }, [user]);
+
+  useEffect(() => {
+    if (!confirmAction) {
+      setTypedConfirmation("");
+      setErrorMsg("");
+    }
+  }, [confirmAction]);
+
+  useEffect(() => {
+    if (!confirmAction) return;
+    document.body.style.overflow = "hidden";
+    const handler = (e) => e.key === "Escape" && !processing && setConfirmAction(null);
+    window.addEventListener("keydown", handler);
+    return () => {
+      document.body.style.overflow = "";
+      window.removeEventListener("keydown", handler);
+    };
+  }, [confirmAction, processing]);
+
+  const activeCount = useMemo(
+    () => businesses.filter((b) => b.isActive !== false).length,
+    [businesses]
+  );
+
+  const archivedCount = useMemo(
+    () => businesses.filter((b) => b.isActive === false).length,
+    [businesses]
+  );
+
+  const handleConfirm = async () => {
+    if (!confirmAction) return;
+    setProcessing(true);
+    setErrorMsg("");
+
+    try {
+      if (confirmAction.type === "archive") {
+        await archiveBusiness(confirmAction.id, user.uid, "", confirmAction.item || null);
+        await logAudit({
+          action: "archive_business",
+          targetType: "business",
+          targetId: confirmAction.id,
+          adminUid: user.uid,
+          meta: { name: confirmAction.name },
+        });
+        setBusinesses((prev) =>
+          prev.map((b) =>
+            b.id === confirmAction.id
+              ? { ...b, isActive: false, archivedAt: new Date(), archivedBy: user.uid }
+              : b
+          )
+        );
+      } else if (confirmAction.type === "restore") {
+        await restoreBusiness(confirmAction.id);
+        await logAudit({
+          action: "restore_business",
+          targetType: "business",
+          targetId: confirmAction.id,
+          adminUid: user.uid,
+          meta: { name: confirmAction.name },
+        });
+        setBusinesses((prev) =>
+          prev.map((b) =>
+            b.id === confirmAction.id
+              ? { ...b, isActive: true, archivedAt: null, archivedBy: null }
+              : b
+          )
+        );
+      } else if (confirmAction.type === "delete") {
+        if (typedConfirmation !== confirmAction.name) {
+          setErrorMsg("Typed name doesn't match. Please type the exact business name to confirm.");
+          setProcessing(false);
+          return;
+        }
+        const businessData = confirmAction.item || businesses.find((b) => String(b.id) === String(confirmAction.id));
+        await permanentlyDeleteBusiness(confirmAction.id, businessData);
+        await logAudit({
+          action: "permanently_delete_business",
+          targetType: "business",
+          targetId: confirmAction.id,
+          adminUid: user.uid,
+          meta: { name: confirmAction.name },
+        });
+        setBusinesses((prev) => prev.filter((b) => b.id !== confirmAction.id));
+      }
+
+      setConfirmAction(null);
+    } catch (err) {
+      if (err.code === "STATIC_ITEM_NOT_DELETABLE") {
+        setErrorMsg(err.message);
+      } else {
+        setErrorMsg(err.message || "Action failed. Please try again.");
+      }
+    } finally {
+      setProcessing(false);
+    }
+  };
 
   const handleAddBusiness = () => {
     if (user) {
@@ -142,6 +340,16 @@ export default function BusinessesPage() {
   const filteredBusinesses = useMemo(() => {
     let list = businesses
 
+    if (!isMaster) {
+      list = list.filter((b) => b.isActive !== false);
+    } else {
+      if (archiveFilter === "active") {
+        list = list.filter((b) => b.isActive !== false);
+      } else if (archiveFilter === "archived") {
+        list = list.filter((b) => b.isActive === false);
+      }
+    }
+
     if (filter !== 'all') {
       list = list.filter(b => b.type === filter)
     }
@@ -161,7 +369,7 @@ export default function BusinessesPage() {
     }
 
     return list
-  }, [businesses, filter, searchQuery])
+  }, [businesses, filter, searchQuery, isMaster, archiveFilter])
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -180,6 +388,47 @@ export default function BusinessesPage() {
               business location on the interactive map.
             </p>
           </Reveal>
+
+          {/* Master Admin Archive Toggle */}
+          {isMaster && (
+            <div className="mb-4 flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                🛡️ Master View:
+              </span>
+              <div className="inline-flex rounded-xl border border-gray-300 bg-white overflow-hidden">
+                <button
+                  onClick={() => setArchiveFilter("active")}
+                  className={`px-3 py-1.5 text-xs font-semibold transition ${
+                    archiveFilter === "active"
+                      ? "bg-emerald-600 text-white"
+                      : "text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  Live ({activeCount})
+                </button>
+                <button
+                  onClick={() => setArchiveFilter("archived")}
+                  className={`px-3 py-1.5 text-xs font-semibold transition border-l border-gray-300 ${
+                    archiveFilter === "archived"
+                      ? "bg-amber-600 text-white"
+                      : "text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  🗂️ Archived ({archivedCount})
+                </button>
+                <button
+                  onClick={() => setArchiveFilter("all")}
+                  className={`px-3 py-1.5 text-xs font-semibold transition border-l border-gray-300 ${
+                    archiveFilter === "all"
+                      ? "bg-gray-700 text-white"
+                      : "text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  All
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Search and Filter Section - Sticky on mobile */}
           <Reveal delay={160}>
@@ -263,7 +512,7 @@ export default function BusinessesPage() {
           ) : filteredBusinesses.length > 0 ? (
             <div className="mt-6 sm:mt-10 grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
               {filteredBusinesses.map((business) => (
-                <BusinessCard key={business.id} business={business} />
+                <BusinessCard key={business.id} business={business} isMaster={isMaster} onAction={setConfirmAction} />
               ))}
             </div>
           ) : (
@@ -326,6 +575,134 @@ export default function BusinessesPage() {
       </main>
       <Footer />
       <LoginModal isOpen={authModalOpen} onClose={() => setAuthModalOpen(false)} />
+
+      {confirmAction && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="fixed inset-0 bg-black/60"
+            onClick={() => !processing && setConfirmAction(null)}
+          />
+
+          <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl p-6 animate-fade-in">
+            {confirmAction.type === "archive" && (
+              <>
+                <div className="w-14 h-14 rounded-full bg-amber-100 flex items-center justify-center text-3xl mx-auto mb-4">
+                  🗂️
+                </div>
+                <h3 className="font-bold text-lg text-gray-900 text-center mb-2">
+                  Archive this business?
+                </h3>
+                <p className="text-sm text-gray-600 text-center mb-1">
+                  You're about to hide:
+                </p>
+                <p className="text-base font-semibold text-gray-900 text-center mb-4">
+                  "{confirmAction.name}"
+                </p>
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-5 text-xs text-amber-800">
+                  ℹ️ The business will be hidden from the public directory and map.
+                  User favorites and reviews remain intact. You can restore it
+                  anytime from the "Archived" filter.
+                </div>
+              </>
+            )}
+
+            {confirmAction.type === "restore" && (
+              <>
+                <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center text-3xl mx-auto mb-4">
+                  ♻️
+                </div>
+                <h3 className="font-bold text-lg text-gray-900 text-center mb-2">
+                  Restore this business?
+                </h3>
+                <p className="text-sm text-gray-600 text-center mb-1">
+                  You're about to make this public again:
+                </p>
+                <p className="text-base font-semibold text-gray-900 text-center mb-4">
+                  "{confirmAction.name}"
+                </p>
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 mb-5 text-xs text-emerald-800">
+                  ✅ The business will reappear on the public directory and map.
+                </div>
+              </>
+            )}
+
+            {confirmAction.type === "delete" && (
+              <>
+                <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center text-3xl mx-auto mb-4">
+                  ⚠️
+                </div>
+                <h3 className="font-bold text-lg text-gray-900 text-center mb-2">
+                  Permanently delete?
+                </h3>
+                <p className="text-sm text-gray-600 text-center mb-1">
+                  This will permanently delete:
+                </p>
+                <p className="text-base font-semibold text-gray-900 text-center mb-4">
+                  "{confirmAction.name}"
+                </p>
+                <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-4 text-xs text-red-800">
+                  🔥 <strong>This cannot be undone.</strong> The business document
+                  will be erased from the database. Reviews and favorites pointing
+                  to it will become orphaned. Consider archiving instead.
+                </div>
+                <div className="mb-4">
+                  <label className="text-xs font-semibold text-gray-700 block mb-1">
+                    To confirm, type the business name:
+                  </label>
+                  <input
+                    type="text"
+                    value={typedConfirmation}
+                    onChange={(e) => setTypedConfirmation(e.target.value)}
+                    placeholder={confirmAction.name}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-300 text-sm focus:border-red-500 focus:ring-2 focus:ring-red-100"
+                  />
+                </div>
+              </>
+            )}
+
+            {errorMsg && (
+              <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 text-sm mb-4">
+                {errorMsg}
+              </div>
+            )}
+
+            <div className="flex flex-col-reverse sm:flex-row gap-2 sm:gap-3">
+              <button
+                onClick={() => setConfirmAction(null)}
+                disabled={processing}
+                className="flex-1 px-5 py-2.5 rounded-xl border border-gray-300 bg-white text-gray-700 font-semibold hover:bg-gray-50 transition disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirm}
+                disabled={processing || (confirmAction.type === "delete" && typedConfirmation !== confirmAction.name)}
+                className={`flex-1 px-5 py-2.5 rounded-xl text-white font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${
+                  confirmAction.type === "archive"
+                    ? "bg-amber-600 hover:bg-amber-700"
+                    : confirmAction.type === "restore"
+                    ? "bg-emerald-600 hover:bg-emerald-700"
+                    : "bg-red-600 hover:bg-red-700"
+                }`}
+              >
+                {processing ? (
+                  <>
+                    <span className="animate-spin">⏳</span> Processing...
+                  </>
+                ) : confirmAction.type === "archive" ? (
+                  "Yes, archive"
+                ) : confirmAction.type === "restore" ? (
+                  "Yes, restore"
+                ) : (
+                  "Permanently delete"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
     </div>
   )
 }

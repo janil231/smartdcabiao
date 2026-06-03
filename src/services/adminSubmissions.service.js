@@ -15,6 +15,7 @@ import { isWithinCabiaoBounds } from '../constants/cabiaoGeo'
 import { BUSINESS_TYPES } from '../data/businesses'
 import { logAudit, AUDIT_ACTIONS } from './audit.service'
 import { clearBusinessesCache } from './businesses.service'
+import { sanitizeForFirestore } from '../utils/firestoreSanitize'
 
 const SUBMISSIONS_COLLECTION = 'submissions'
 const BUSINESSES_COLLECTION = 'businesses'
@@ -118,13 +119,21 @@ export async function approveSubmissionAndPublish(id, { reviewedBy, reviewedByEm
     const entryType = submission.entryType || 'business'
     const targetCollection = entryType === 'destination' ? DESTINATIONS_COLLECTION : BUSINESSES_COLLECTION
 
-    const publishedData = {
-      id: id,
+    const allImages = [
+      ...normalizeImages(submission.images),
+      ...normalizeImages(submission.photos),
+      ...normalizeImages(submission.data?.images),
+      ...normalizeImages(submission.data?.photos),
+    ]
+    const uniqueImages = [...new Set(allImages)]
+
+    const publishedData = sanitizeForFirestore({
       name: submission.name,
       category: submission.category || 'other',
       description: submission.description,
       position: position || [15.2345, 120.83965],
-      images: normalizeImages(submission.images),
+      images: uniqueImages,
+      photos: uniqueImages,
       barangay: submission.barangay || '',
       address: submission.address || '',
       phone: submission.contact || '',
@@ -135,7 +144,7 @@ export async function approveSubmissionAndPublish(id, { reviewedBy, reviewedByEm
       sourceSubmissionName: submission.name,
       createdByUid: submission.createdByUid || null,
       createdByEmail: submission.createdByEmail || null
-    }
+    })
 
     const batch = writeBatch(db)
 
@@ -255,7 +264,7 @@ export async function approveBusinessSubmission(submissionId, submissionData, ad
           ? BUSINESS_TYPES.attraction
           : BUSINESS_TYPES.shop
 
-    const businessData = {
+    const businessData = sanitizeForFirestore({
       name: submission.businessName,
       category,
       type,
@@ -288,7 +297,7 @@ export async function approveBusinessSubmission(submissionId, submissionData, ad
       createdAt: serverTimestamp(),
       rating: 0,
       reviewCount: 0,
-    }
+    })
 
     const businessRef = await addDoc(collection(db, BUSINESSES_COLLECTION), businessData)
 

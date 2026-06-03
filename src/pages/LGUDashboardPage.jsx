@@ -37,6 +37,8 @@ import {
   repairQuestReservedCounts,
 } from '../services/quests.service'
 import { expireAllStaleParticipations } from '../services/participations.service'
+import { repairAllBusinessImages } from '../services/businesses.service'
+import { repairAllDestinationImages } from '../services/destinations.service'
 import { listPendingReviews, setReviewStatus } from '../services/reviews.service'
 import { listTopByPoints, listTopByImpact, IMPACT_UNITS } from '../services/leaderboard.service'
 import { isWithinCabiaoBounds, CABIAO_BOUNDS } from '../constants/cabiaoGeo'
@@ -56,6 +58,7 @@ const TABS = {
   QUESTS: 'quests',
   VOUCHERS: 'vouchers',
   MANAGE_ADMINS: 'manage-admins',
+  DATA_TOOLS: 'data-tools',
 }
 
 const MODERATION_ITEMS = [
@@ -895,6 +898,164 @@ function QuestFormModal({ quest, onClose, onSubmit, isLoading }) {
   )
 }
 
+function DataToolsPanel({ user }) {
+  const [running, setRunning] = useState(false)
+  const [progress, setProgress] = useState(null)
+  const [report, setReport] = useState(null)
+  const [log, setLog] = useState([])
+  const [mode, setMode] = useState(null)
+
+  const addLog = (entry) => setLog(prev => [...prev, entry])
+
+  const runRepair = async (type) => {
+    setRunning(true)
+    setProgress({ current: 0, total: 0, currentName: '', status: 'starting' })
+    setReport(null)
+    setLog([])
+    setMode(type)
+
+    try {
+      addLog({ time: new Date().toLocaleTimeString(), msg: `Starting ${type} repair...` })
+      const fn = type === 'business' ? repairAllBusinessImages : repairAllDestinationImages
+      const result = await fn((p) => {
+        setProgress(p)
+        if (p.status === 'processing') {
+          addLog({ time: new Date().toLocaleTimeString(), msg: `[${p.current}/${p.total}] Processing ${p.currentName}...` })
+        }
+      })
+      setReport(result)
+      addLog({ time: new Date().toLocaleTimeString(), msg: `Done. Repaired: ${result.repaired}, Skipped: ${result.skipped}, Failed: ${result.failed}` })
+    } catch (err) {
+      addLog({ time: new Date().toLocaleTimeString(), msg: `❌ Error: ${err.message}` })
+    } finally {
+      setRunning(false)
+      setProgress(null)
+    }
+  }
+
+  const progressPct = progress && progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0
+
+  return (
+    <div className="h-full flex flex-col min-h-0">
+      <div className="shrink-0">
+        <div className="flex items-center gap-2 mb-4">
+          <span className="text-xl">🛠️</span>
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Data Tools</h2>
+            <p className="text-sm text-gray-500">Repair and maintain data integrity</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 mb-4 text-xs text-blue-800">
+          💡 These bulk tools replace the per-card re-sync buttons. Use them to repair photos across many items at once.
+        </div>
+        <div className="flex gap-3">
+          <button
+            onClick={() => runRepair('business')}
+            disabled={running}
+            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold disabled:opacity-50 transition text-sm"
+          >
+            🔧 Repair All Business Images
+          </button>
+          <button
+            onClick={() => runRepair('destination')}
+            disabled={running}
+            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold disabled:opacity-50 transition text-sm"
+          >
+            🔧 Repair All Destination Images
+          </button>
+        </div>
+
+        {running && progress && (
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+            <p className="text-sm font-medium text-blue-800 mb-2">
+              {progress.status === 'starting' ? 'Starting...' : `Processing ${progress.current}/${progress.total}: ${progress.currentName}`}
+            </p>
+            <div className="w-full bg-blue-200 rounded-full h-3">
+              <div
+                className="bg-blue-600 h-3 rounded-full transition-all duration-300"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
+            <p className="text-xs text-blue-600 mt-1">{progressPct}%</p>
+          </div>
+        )}
+
+        {report && !running && (
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
+            <h3 className="font-semibold text-gray-800 mb-2">Repair Summary</h3>
+            <div className="grid grid-cols-3 gap-3 text-center">
+              <div className="bg-green-100 rounded-lg p-3">
+                <p className="text-2xl font-bold text-green-700">{report.repaired}</p>
+                <p className="text-xs text-green-600">Repaired</p>
+              </div>
+              <div className="bg-yellow-100 rounded-lg p-3">
+                <p className="text-2xl font-bold text-yellow-700">{report.skipped}</p>
+                <p className="text-xs text-yellow-600">Skipped</p>
+              </div>
+              <div className="bg-red-100 rounded-lg p-3">
+                <p className="text-2xl font-bold text-red-700">{report.failed}</p>
+                <p className="text-xs text-red-600">Failed</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {report && !running && report.details?.length > 0 && (
+          <div className="bg-white border border-gray-200 rounded-xl">
+            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+              <h3 className="font-semibold text-gray-800 text-sm">Details</h3>
+              <span className="text-xs text-gray-500">{report.details.length} item(s)</span>
+            </div>
+            <div className="divide-y divide-gray-100 max-h-64 overflow-y-auto">
+              {report.details.map((d, i) => (
+                <div key={i} className="flex items-start gap-2 px-4 py-2.5 text-xs">
+                  <span className="font-mono w-5 text-gray-400 shrink-0">{i + 1}.</span>
+                  <span className={`font-semibold w-16 shrink-0 ${
+                    d.status === "repaired" ? "text-emerald-700" :
+                    d.status === "skipped" ? "text-amber-700" :
+                    "text-red-700"
+                  }`}>
+                    {d.status.toUpperCase()}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-gray-900 truncate font-medium">{d.name}</div>
+                    {d.reason && (
+                      <div className="text-gray-500 italic mt-0.5">
+                        {d.reason}
+                        {d.hint && <span className="text-blue-600 not-italic ml-1">&rarr; {d.hint}</span>}
+                      </div>
+                    )}
+                    {d.source && (
+                      <div className="text-emerald-600 mt-0.5">via {d.source}</div>
+                    )}
+                  </div>
+                  {d.syncedCount !== undefined && (
+                    <span className="text-emerald-600 shrink-0 font-semibold">+{d.syncedCount} photos</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {log.length > 0 && (
+          <div className="bg-gray-900 text-gray-100 rounded-xl p-4 font-mono text-xs max-h-48 overflow-y-auto">
+            {log.map((entry, i) => (
+              <div key={i} className="leading-relaxed">
+                {entry.time && <span className="text-gray-500">[{entry.time}] </span>}
+                {entry.msg}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function LGUDashboardPage() {
   const { user } = useAuth()
   const navigate = useNavigate()
@@ -1601,7 +1762,7 @@ export default function LGUDashboardPage() {
     count: item.key === TABS.SUBMISSIONS ? newSubmissions : item.key === TABS.REPORTS ? newReports : pendingReviews.length,
   }))
 
-  const settingsItems = isMaster ? [{ key: TABS.MANAGE_ADMINS, icon: '🛡️', label: 'Manage Admins' }] : []
+  const settingsItems = isMaster ? [{ key: TABS.MANAGE_ADMINS, icon: '🛡️', label: 'Manage Admins' }, { key: TABS.DATA_TOOLS, icon: '🛠️', label: 'Data Tools' }] : []
   const allItemsFlat = [...moderationItems, ...TOURISM_ITEMS, ...settingsItems]
   const activeItemMeta = allItemsFlat.find(t => t.key === activeTab)
 
@@ -1612,6 +1773,7 @@ export default function LGUDashboardPage() {
     [TABS.SEASONS]: { icon: '🗓️', title: 'No seasons yet', desc: 'Create a season to start the tourism program.' },
     [TABS.QUESTS]: { icon: '🎯', title: 'No quests found', desc: 'Quests for the selected season will appear here.' },
     [TABS.VOUCHERS]: { icon: '🎟️', title: 'No active season', desc: 'Activate a season to manage vouchers and redemptions.' },
+    [TABS.DATA_TOOLS]: { icon: '🛠️', title: 'Data Tools', desc: 'Repair and maintain data integrity.' },
   }
 
   return (
@@ -2263,6 +2425,13 @@ export default function LGUDashboardPage() {
                   <div className="h-full flex flex-col min-h-0">
                     <div className="flex-1 min-h-0 overflow-y-auto">
                       <ManageAdminsPanel currentUserUid={user.uid} />
+                    </div>
+                  </div>
+                )}
+                {isMaster && activeTab === TABS.DATA_TOOLS && (
+                  <div className="h-full flex flex-col min-h-0">
+                    <div className="flex-1 min-h-0 overflow-y-auto">
+                      <DataToolsPanel user={user} />
                     </div>
                   </div>
                 )}

@@ -17,14 +17,38 @@ import genericPlaceholder from '../assets/placeholders/generic.svg'
 // Import image validation utilities
 import { normalizeImageUrl, getFirstValidImage } from './imageUrl'
 
+function collectAllImages(item) {
+  if (!item) return []
+  const sources = [
+    ...normalizeImagesFn(item.images),
+    ...normalizeImagesFn(item.photos),
+    ...normalizeImagesFn(item.image ? [item.image] : []),
+    ...normalizeImagesFn(item.photo ? [item.photo] : []),
+  ]
+  return [...new Set(sources)]
+}
+
+function normalizeImagesFn(images) {
+  if (!images) return []
+  if (Array.isArray(images)) return images.filter(Boolean)
+  return []
+}
+
+export function getBusinessImages(business) {
+  if (!business) return [genericPlaceholder]
+  const collected = collectAllImages(business)
+  if (collected.length > 0) return collected
+  return [getBusinessImage(business)]
+}
+
 /**
  * Get appropriate image for a business based on its type and category
  * @param {Object} business - Business object with type, category, images
  * @returns {string} Image URL or placeholder path
  */
 export function getBusinessImage(business) {
-  // Use the improved image resolution pattern
-  const firstValidImage = getFirstValidImage(business?.images) || getFirstValidImage(business?.image)
+  const allImages = collectAllImages(business)
+  const firstValidImage = getFirstValidImage(allImages)
   if (firstValidImage) {
     return firstValidImage
   }
@@ -63,6 +87,13 @@ export function getBusinessImage(business) {
   return genericPlaceholder
 }
 
+export function getDestinationImages(destination) {
+  if (!destination) return [genericPlaceholder]
+  const collected = collectAllImages(destination)
+  if (collected.length > 0) return collected
+  return [getDestinationImage(destination)]
+}
+
 /**
  * Get appropriate image for a destination
  * @param {Object} destination - Destination object with images, category
@@ -78,8 +109,8 @@ export function getDestinationImage(destination) {
   const { category } = destination || {}
   const categoryText = (category || '').toLowerCase()
   
-  // Use the improved image resolution pattern
-  const firstValidImage = getFirstValidImage(destination?.images) || getFirstValidImage(destination?.image)
+  const allImages = collectAllImages(destination)
+  const firstValidImage = getFirstValidImage(allImages)
   if (firstValidImage) {
     return firstValidImage
   }

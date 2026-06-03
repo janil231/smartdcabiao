@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import FavoriteButton from './FavoriteButton'
-import AppImage from './ui/AppImage'
-import { getBusinessImage } from '../utils/placeImages'
+import PhotoCarousel from './PhotoCarousel'
+import { getBusinessImages } from '../utils/placeImages'
 import RatingSummary from './reviews/RatingSummary'
 
 const TYPE_STYLES = {
@@ -12,18 +12,15 @@ const TYPE_STYLES = {
 
 export default function BusinessCard({ business, className = '' }) {
   const categoryStyle = TYPE_STYLES[business.type] || 'bg-gray-100 text-gray-700 border-gray-200'
-  const businessImage = getBusinessImage(business)
-
-
 
   return (
     <article className={`flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition-all duration-200 ease-out hover:shadow-md hover:-translate-y-0.5 ${className}`}>
       <div className="relative aspect-video w-full bg-gradient-to-br from-emerald-50 to-teal-50">
-        <AppImage
-          src={businessImage}
+        <PhotoCarousel
+          images={getBusinessImages(business)}
           alt={business.name}
+          mode="card"
           className="h-full w-full"
-          fallbackSrc={businessImage}
         />
         <div className="absolute top-3 right-3">
           <FavoriteButton 
