@@ -1,4 +1,4 @@
-# SMARTDCABIAO — Full Project Context Brief (Updated: June 3, 2026)
+# SMARTDCABIAO — Full Project Context Brief (Updated: June 7, 2026)
 
 ---
 
@@ -1167,3 +1167,222 @@ The `VoucherStorePage.jsx` had a single `useEffect` wrapping ALL operations in o
 
 ### Build Status
 - `npm run build` passes with zero errors (pre-existing warnings: dynamic imports, chunk size).
+
+---
+
+## Session: June 5, 2026 — Owner Quest Public Card + Reward Features (Multi-Session)
+
+### Overview
+A multi-session feature effort adding quest/reward visibility across the app: business listing reward badges, quest markers on the map, homepage reward carousel, rewards-nearby page, and a major restructuring of the BusinessDetailPage layout.
+
+### Changes Across Sessions
+
+**1. Reward badge on business listing cards (`BusinessCard.jsx`)**
+- Shows a gold "🎁 Reward" badge on cards for businesses with active quests
+- `getBusinessIdsWithActiveQuests()` fetches quests for all businesses with per-page-load cache
+
+**2. "Show Only Rewards" filter chip (`BusinessesPage.jsx`)**
+- Pill toggle next to category/barangay filters
+- Filters listing to only businesses with active quests
+
+**3. Quest markers on MapPage (`MapPage.jsx`)**
+- Gold quest overlay on POI markers for businesses with active quests
+- "🎁 Reward Available" pill in map bottom sheet cards
+
+**4. Homepage Merchant Rewards Carousel (`MerchantRewardsCarousel.jsx`)**
+- Horizontal scroll section on homepage between FeaturedBusinesses and MapPreview
+- Photo-backed cards (gradient fallback if no image), links to business detail page
+
+**5. Rewards Nearby Page (`RewardsNearbyPage.jsx`)**
+- Full catalog at `/rewards-nearby` with filter/sort
+- Photo-backed cards, join quest flow, logged-out redirect
+
+**6. Nav links + BottomNav**
+- "Rewards Nearby" in Navbar More dropdown + mobile hamburger drawer
+- 7th nav item in BottomNav (Deals → Rewards)
+
+**7. OwnerQuestPublicCard photo support + join flow rewrite**
+- Converted `<Link>` to `<button>` with full `joinOwnerQuest()` flow
+- Loading/error/success states, logged-out redirect via `onLoginRequired` callback
+- Optional photo background mode (`onPhoto` prop)
+
+**8. Photo backgrounds on quest cards at 3 locations**
+- BusinessDetailPage reward banner section
+- MerchantRewardsCarousel
+- RewardsNearbyPage
+
+**9. BusinessDetailPage layout restructure (THIS SESSION — June 5)**
+- Container widened from `max-w-7xl` → `max-w-[1600px]` with `xl:px-12` padding
+- No parent max-width wrappers in App.jsx — all constraints in-page
+- **3-column layout** (with quests): Photo **4/12** | Info **3/12** | Quests **5/12** (sticky)
+- **2-column layout** (no quests): Photo 1/2 | Info 1/2
+- Photo column uses `h-full min-h-[400px]` to eliminate empty space below gallery
+- PhotoCarousel uses `w-full h-full` with `object-cover` images
+- Reward banner text tightened: `text-base`, `leading-tight`, `flex-1 min-w-0` on text containers, `shrink-0` on icon
+- **Duplicate "Quests at this Business" section REMOVED** — quests display once inside the photo-background banner
+- `OwnerQuestPublicCard` handles all states inline: Join → Timer → Completed (no "scroll down" needed)
+- Unused `QuestTimerCard` import removed from BusinessDetailPage
+- Breadcrumb + loading skeleton + not-found containers all updated to match `max-w-[1600px]`
+- `overflow-hidden` avoidance maintained for sticky column; `lg:sticky lg:top-24` preserved
+- Reviews, Map, Nearby Businesses remain full-width below grid
+- Mobile single-column stack unchanged
+- `.pulse-slow` animation in `index.css` for quest marker pulsing
+
+### Relevant Files Modified
+
+| File | Change |
+|---|---|
+| `src/pages/BusinessDetailPage.jsx` | **Major:** grid layout restructured, column ratios, photo fill, duplicate quest section removed, width widened, reward banner tightened, QuestTimerCard import removed |
+| `src/components/owner/OwnerQuestPublicCard.jsx` | Join quest button with full flow (loading/error/success/logged-out), photo support, inline QuestTimerCard integration, updated success message |
+| `src/components/owner/QuestTimerCard.jsx` | Timer/start/completed UI for quest participation |
+| `src/pages/BusinessesPage.jsx` | Reward badge + "Show Only Rewards" filter chip |
+| `src/pages/MapPage.jsx` | Quest marker overlay + gold reward pill in bottom sheet |
+| `src/components/MerchantRewardsCarousel.jsx` | Homepage carousel with photo backgrounds |
+| `src/pages/RewardsNearbyPage.jsx` | Rewards catalog page with photo-backed cards, filter/sort |
+| `src/pages/HomePage.jsx` | Carousel insertion point |
+| `src/services/ownerQuests.service.js` | `getBusinessIdsWithActiveQuests()` with per-page-load cache |
+| `src/utils/placeImages.js` | `getBusinessImages()` utility |
+| `src/utils/imageUrl.js` | `getFirstValidImage()` utility |
+| `src/components/BottomNav.jsx` | 7-column nav with rewards link |
+| `src/components/Navbar.jsx` | "Rewards Nearby" in More dropdown + mobile drawer |
+| `src/App.jsx` | `/rewards-nearby` route |
+| `src/index.css` | `pulse-slow` animation |
+
+### Build Status
+- `npm run build` passes with zero errors (pre-existing warnings: chunk size ~1900kB, circular dynamic imports).
+
+---
+
+## Sessions: June 5–7, 2026 — Owner Quest Buy Verification System + What-to-Buy Details + Photo Stretching Fix
+
+### Overview
+Three feature areas shipped in this multi-session effort: (A) buy quest verification with QR/code flow and merchant panels, (B) what-to-buy detail fields displayed across all surfaces, and (C) a photo gallery stretching fix on the business detail page.
+
+---
+
+### A. Buy Quest Verification System
+
+**Schema additions** (`src/services/ownerQuests.service.js`):
+- `normalizeQuestDoc` and `createOwnerQuest` updated with buy quest fields: `buyVerificationMethod` (`"qr"` / `"code"`), `qrToken`, `dailyCode`, `dailyCodeRotatedAt`, `autoRotateDaily`
+- 6 new service functions: `regenerateBuyQuestQRToken`, `rotateBuyQuestDailyCode`, `verifyBuyQuestByQR`, `verifyBuyQuestByCode`, `merchantMarkParticipationComplete`, `getQuestParticipationsForMerchant`, `getBusinessPosition`
+- `generateDailyCode()` helper for random daily codes
+- All functions use `sanitizeForFirestore()` and `String(id)`
+- Server-side geofence validation — never trust client for verification
+
+**Customer-facing components** (`src/components/owner/`):
+- `OwnerQuestPublicCard.jsx` — 5 visual states (not joined / joined idle / active / paused / completed). Buy quest branch shows "Scan Merchant QR Code" and "Enter Code Instead" buttons with geofence gating. Geolocation `watchPosition` with auto-pause/resume via `geofenceStateRef`. Timer countdown with auto-complete via `autoCompleteTriggeredRef`. Toast notifications, cancel confirmation, reward code copy.
+- `BuyQuestScannerModal.jsx` — **[NEW]** Camera-based QR scanner using `html5-qrcode`, calls `verifyBuyQuestByQR`, error recovery with scanner restart
+- `BuyQuestCodeModal.jsx` — **[NEW]** Text input for daily code entry, uppercase formatting, calls `verifyBuyQuestByCode`
+- `BuyQuestQRDisplayModal.jsx` — **[NEW]** Canvas-based QR display for merchants to show customers
+- `BuyQuestParticipantsModal.jsx` — **[NEW]** Participants list with pending/completed/all tabs, merchant manual complete + confirm dialog
+- `MyQuestsSection.jsx` — **[NEW]** Profile quests tab, loads all owner quest participations grouped by status with filter chips, reward code copy, "Go to Business" links
+
+**Merchant components & pages:**
+- `OwnerQuestForm.jsx` — Updated buy quest section with `buyVerificationMethod` radio (QR Code / Daily Code), auto-rotate daily checkbox
+- `MyBusinessQuestsPage.jsx` — Buy quest merchant action panels: "Show QR to Customer", "Rotate QR", "Rotate" daily code with timestamp, "View Participants"; handler functions `handleRegenerateBuyQR` and `handleRotateDailyCode`
+- `ProfilePage.jsx` — Migrated from `useState` tab management to `useSearchParams` for URL-based tab routing (`?tab=quests`); added "My Quests" tab
+
+**Business detail page:**
+- `BusinessDetailPage.jsx` — Photo background removed from reward banner, replaced with `bg-gradient-to-br from-emerald-500 via-emerald-600 to-emerald-700`; quest column narrowed to `lg:col-span-3`, photo widened to `lg:col-span-5`, info to `lg:col-span-4`; `onPhoto={false}` to quest cards
+- `OwnerQuestPublicCard.jsx` — `onPhoto={false}` branch changed to light white card with border, stacked vertical layout, full-width Join button
+
+**Dead code (preserved on disk, no longer imported):**
+- `QuestTimerCard.jsx` — Replaced by inline timer in OwnerQuestPublicCard
+
+---
+
+### B. What-to-Buy Details (June 7, 2026)
+
+**Schema additions** (`src/services/ownerQuests.service.js`):
+- 6 new fields added to `normalizeQuestDoc` and `createOwnerQuest` payload: `itemPhotoUrl` (Cloudinary URL, optional), `itemDetails` (string, optional), `minimumPurchase` (number, 0 = no minimum), `quantityRequired` (number, default 1), `conditions` (string, optional), `questInstructions` (string, for visit quests, optional)
+- All fields optional and backward compatible — existing quests work without them
+- Sanitized via `sanitizeForFirestore()`
+
+**Form updates** (`OwnerQuestForm.jsx`):
+- New state variables for all 6 fields + `photoUploading`
+- Photo upload handler using existing `uploadToCloudinary` + `compressImage` — validates size (3MB max) and type (JPG/PNG/WebP)
+- **Buy quest**: Collapsible "What to Buy Details" section (photo upload with remove, item details text input, minimum purchase + quantity required grid, conditions textarea)
+- **Visit quest**: "Quest Instructions" textarea below duration field
+- All fields included in save payload
+
+**Display component** (`QuestDetailsPanel.jsx`) — **[NEW]** Reusable dumb component:
+- **Buy quest**: Shows item photo (optional), item name + quantity badge, item details text, minimum purchase badge, conditions text
+- **Visit quest**: Shows quest instructions text
+- `compact` prop for smaller spaces (homepage, profile rows, merchant view)
+- Renders nothing if no detail fields present — safe to render unconditionally
+
+**Integration across all surfaces:**
+| Surface | File | Placement |
+|---|---|---|
+| Business detail quest card (not joined) | `OwnerQuestPublicCard.jsx` | After reward badges, before Join button |
+| Business detail quest card (joined idle/active/paused) | `OwnerQuestPublicCard.jsx` | Prominently after status header |
+| Business detail quest card (completed) | `OwnerQuestPublicCard.jsx` | Compact below title |
+| Rewards Nearby page cards | `RewardsNearbyPage.jsx` | Compact below reward info |
+| Homepage carousel | `MerchantRewardsCarousel.jsx` | Item photo + name inline; min purchase badge when no photo |
+| Profile My Quests rows | `MyQuestsSection.jsx` | Compact in each quest row |
+| Merchant quest list | `MyBusinessQuestsPage.jsx` | Compact under quest metadata + tip hint for missing details |
+
+---
+
+### C. Photo Stretching Fix (June 7, 2026)
+
+**Problem:** Photo gallery in `BusinessDetailPage.jsx` used `h-full min-h-[400px]`, causing the photo to stretch unnaturally tall when the quest column became very long.
+
+**Fix** (`src/pages/BusinessDetailPage.jsx:222-224`):
+- Removed `h-full min-h-[400px]` from photo column div
+- Added `aspect-[4/3]` container with `relative rounded-xl overflow-hidden bg-gray-100`
+- Wrapped photo carousel in `absolute inset-0` to force it inside the aspect box
+- Photo column now uses `lg:sticky lg:top-24` — stays pinned when scrolling through long quest lists
+- No ancestor `overflow-hidden` to break sticky behavior (verified)
+- Mobile (`< lg`) unchanged — still single-column stack
+
+---
+
+### D. Remote Fix (June 7, 2026)
+
+**Problem:** Git remote `origin` pointed to wrong repo `janil231/smartdcabiao1.git` instead of `janil231/smartdcabiao.git`
+
+**Fix:**
+- `git remote remove origin` + `git remote add origin https://github.com/janil231/smartdcabiao.git`
+- `git push origin main` — `* [new branch] main -> main` (5 commits pushed)
+
+---
+
+### Files Changed (this session set)
+
+| File | Change |
+|---|---|
+| `src/services/ownerQuests.service.js` | Buy quest schema + 6 new verification functions; what-to-buy schema fields |
+| `src/services/businessQuestRewards.service.js` | **[NEW]** Reward creation/retrieval |
+| `src/components/owner/OwnerQuestPublicCard.jsx` | 5-state rewrite + buy quest branch + What-to-Buy integration |
+| `src/components/owner/BuyQuestScannerModal.jsx` | **[NEW]** QR scanner modal |
+| `src/components/owner/BuyQuestCodeModal.jsx` | **[NEW]** Code entry modal |
+| `src/components/owner/BuyQuestQRDisplayModal.jsx` | **[NEW]** Merchant QR display |
+| `src/components/owner/BuyQuestParticipantsModal.jsx` | **[NEW]** Participants list + manual complete |
+| `src/components/owner/MyQuestsSection.jsx` | **[NEW]** Profile quests tab |
+| `src/components/owner/QuestDetailsPanel.jsx` | **[NEW]** What-to-Buy display component |
+| `src/components/owner/OwnerQuestForm.jsx` | Buy verification method radios + what-to-buy + instructions sections + photo upload |
+| `src/pages/BusinessDetailPage.jsx` | Photo gallery aspect ratio + sticky fix; quest column width; reward banner gradient |
+| `src/pages/ProfilePage.jsx` | URL-based tab routing + My Quests tab |
+| `src/pages/MyBusinessQuestsPage.jsx` | Buy quest merchant panels + What-to-Buy display + tip hint |
+| `src/pages/MyBusinessesPage.jsx` | **[NEW]** Business management list |
+| `src/pages/RewardsNearbyPage.jsx` | Compact What-to-Buy integration |
+| `src/components/MerchantRewardsCarousel.jsx` | Item photo + info in homepage cards |
+| `src/components/BottomNav.jsx` | Nav updates |
+| `src/components/Navbar.jsx` | Nav updates |
+| `src/components/Auth/LoginModal.jsx` | Auth modal updates |
+| `src/App.jsx` | Route additions |
+| `src/pages/BusinessesPage.jsx` | Reward badge filter |
+| `src/pages/DestinationDetails.jsx` | Detail page updates |
+| `src/pages/HomePage.jsx` | Carousel insertion |
+| `src/pages/LGUDashboardPage.jsx` | LGU dashboard updates |
+| `src/pages/MapPage.jsx` | Quest marker overlay |
+| `firestore.rules` | Security rules updates |
+| `firestore.indexes.json` | Composite indexes |
+| `src/services/adminSubmissions.service.js` | Service updates |
+| `src/services/businesses.service.js` | Business service updates |
+| `src/utils/voucherCode.js` | Voucher code utility |
+| `SESSION_CONTEXT.md` | Updated with this session |
+
+### Build Status
+- `npm run build` passes with zero errors (pre-existing warnings: chunk size ~1935kB, circular dynamic imports).
