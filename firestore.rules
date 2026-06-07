@@ -209,8 +209,10 @@ service cloud.firestore {
 
     match /ownerQuests/{questId} {
       allow read: if true;
-      allow create: if isSignedIn()
-        && request.resource.data.ownerUid == request.auth.uid;
+      allow create: if isSignedIn() && (
+        request.resource.data.ownerUid == request.auth.uid ||
+        isMasterAdmin()
+      );
       allow update: if isSignedIn() && (
         resource.data.ownerUid == request.auth.uid ||
         isMasterAdmin()
@@ -241,10 +243,14 @@ service cloud.firestore {
         resource.data.ownerUid == request.auth.uid ||
         hasLguAccess()
       );
-      allow create: if isSignedIn()
-        && request.resource.data.uid == request.auth.uid;
-      allow update: if isSignedIn()
-        && resource.data.ownerUid == request.auth.uid;
+      allow create: if isSignedIn() && (
+        request.resource.data.uid == request.auth.uid ||
+        isMasterAdmin()
+      );
+      allow update: if isSignedIn() && (
+        resource.data.ownerUid == request.auth.uid ||
+        isMasterAdmin()
+      );
       allow delete: if false;
     }
   }

@@ -13,6 +13,8 @@ import { getMyBusinessQuestRewards } from '../../services/businessQuestRewards.s
 import BuyQuestScannerModal from './BuyQuestScannerModal'
 import BuyQuestCodeModal from './BuyQuestCodeModal'
 import QuestDetailsPanel from './QuestDetailsPanel'
+import QuestDetailsViewModal from './QuestDetailsViewModal'
+import HelpTooltip from '../ui/HelpTooltip'
 
 const GEOFENCE_RADIUS_METERS = 150
 
@@ -45,6 +47,45 @@ function formatDistance(m) {
   return `${(m / 1000).toFixed(1)}km away`
 }
 
+function getQuestSteps(quest) {
+  const isVisit = quest.questType === 'visit'
+  const isBuy = quest.questType === 'buy'
+  const isQR = quest.buyVerificationMethod === 'qr'
+  const isCode = quest.buyVerificationMethod === 'code'
+
+  if (isVisit) {
+    return [
+      'Travel to the business location',
+      `Stay for at least ${quest.requiredDurationMinutes || 15} minutes`,
+      'Earn your reward automatically',
+    ]
+  }
+
+  if (isBuy && isQR) {
+    return [
+      'Visit the business',
+      'Buy the item or meet the minimum purchase',
+      'Ask staff to show the quest QR code',
+      'Scan the QR to claim your reward',
+    ]
+  }
+
+  if (isBuy && isCode) {
+    return [
+      'Visit the business',
+      'Buy the item or meet the minimum purchase',
+      "Ask staff for today's daily code",
+      'Enter the code to claim your reward',
+    ]
+  }
+
+  return [
+    'Visit the business',
+    'Complete the quest requirements',
+    'Earn your reward',
+  ]
+}
+
 export default function OwnerQuestPublicCard({ quest, business, currentUser, onPhoto = false, onLoginRequired }) {
   const [participation, setParticipation] = useState(null)
   const [reward, setReward] = useState(null)
@@ -62,6 +103,7 @@ export default function OwnerQuestPublicCard({ quest, business, currentUser, onP
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
   const [showScanner, setShowScanner] = useState(false)
   const [showCodeModal, setShowCodeModal] = useState(false)
+  const [showDetailsModal, setShowDetailsModal] = useState(false)
 
   const geofenceStateRef = useRef(null)
   const autoCompleteTriggeredRef = useRef(false)
@@ -105,6 +147,10 @@ export default function OwnerQuestPublicCard({ quest, business, currentUser, onP
   const isBuyQuest = quest.questType === 'buy'
 
   const isJoined = !isNotJoined && !isCompleted
+
+  const participationState = isNotJoined ? 'not_joined' : isCompleted ? 'completed' : isActive ? 'active' : isPaused ? 'paused' : 'joined_idle'
+  const isWithinGeofence = distanceMeters !== null && distanceMeters <= GEOFENCE_RADIUS_METERS
+  const distanceText = distanceMeters !== null ? formatDistance(distanceMeters) : null
 
   useEffect(() => {
     if (!currentUser?.uid || !isJoined || isCompleted) {
@@ -294,7 +340,10 @@ export default function OwnerQuestPublicCard({ quest, business, currentUser, onP
 
   return (
     <>
-    <div className={`rounded-xl p-4 ${cardBg}`}>
+    <div className={`rounded-xl p-4 relative ${cardBg}`}>
+      <div className="absolute top-3 right-3 z-10">
+        <HelpTooltip steps={getQuestSteps(quest)} variant={onPhoto ? 'dark' : 'light'} />
+      </div>
       {toast && (
         <div className="mb-3 p-2 bg-emerald-50 text-emerald-800 text-xs font-semibold rounded-lg text-center">
           {toast}
@@ -434,18 +483,6 @@ export default function OwnerQuestPublicCard({ quest, business, currentUser, onP
             Enter Code Instead
           </button>
 
-          {distanceMeters !== null && distanceMeters > GEOFENCE_RADIUS_METERS && (
-            <div className="mb-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
-              <p className="text-xs font-semibold text-gray-700 mb-1">How it works:</p>
-              <ol className="text-xs text-gray-600 space-y-1 list-decimal ml-4">
-                <li>Visit the business</li>
-                <li>Buy the item</li>
-                <li>Ask staff to show the quest QR</li>
-                <li>Scan to claim your reward</li>
-              </ol>
-            </div>
-          )}
-
           <button
             onClick={() => setShowCancelConfirm(true)}
             className="w-full text-xs text-gray-500 hover:text-red-600 underline"
@@ -552,6 +589,16 @@ export default function OwnerQuestPublicCard({ quest, business, currentUser, onP
         </>
       )}
 
+      {!showCancelConfirm && (
+        <button
+          type="button"
+          onClick={() => setShowDetailsModal(true)}
+          className={`mt-2 text-xs hover:underline font-medium w-full text-center py-1 ${onPhoto ? 'text-white hover:text-emerald-100' : 'text-emerald-700 hover:text-emerald-800'}`}
+        >
+          View Details →
+        </button>
+      )}
+
       {error && (
         <div className="mt-2 p-2 bg-red-50 text-red-700 text-xs rounded-lg">
           {error}
@@ -603,6 +650,41 @@ export default function OwnerQuestPublicCard({ quest, business, currentUser, onP
         onSuccess={handleVerificationSuccess}
       />
     )}
+
+    <QuestDetailsViewModal
+      quest={quest}
+      participation={participation}
+      isOpen={showDetailsModal}
+      onClose={() => setShowDetailsModal(false)}
+      onJoinClick={async () => {
+        setShowDetailsModal(false)
+        await handleJoin()
+      }}
+      onStartClick={async () => {
+        setShowDetailsModal(false)
+        await handleStart()
+      }}
+      onCancelClick={async () => {
+        setShowDetailsModal(false)
+        setShowCancelConfirm(true)
+      }}
+      onScanQRClick={() => {
+        setShowDetailsModal(false)
+        setShowScanner(true)
+      }}
+      onEnterCodeClick={() => {
+        setShowDetailsModal(false)
+        setShowCodeModal(true)
+      }}
+      onLoginRequired={onLoginRequired}
+      isWithinGeofence={isWithinGeofence}
+      distanceText={distanceText}
+      participationState={participationState}
+      rewardCode={reward?.code || null}
+      timerRemaining={remainingSeconds}
+      loading={loading}
+      error={error}
+    />
   </>
   )
 }

@@ -221,7 +221,7 @@ export default function BusinessDetailPage() {
               <div className={`grid grid-cols-1 gap-6 lg:gap-8 mb-8 ${hasQuests ? 'lg:grid-cols-12' : 'lg:grid-cols-2'}`}>
                 {/* COLUMN 1 — Photo Gallery */}
                 <div className={`${hasQuests ? 'lg:col-span-5' : 'lg:col-span-1'}`}>
-                  <div className="lg:sticky lg:top-24">
+                  <div>
                     <div className="aspect-[4/3] relative rounded-xl overflow-hidden bg-gray-100">
                       <div className="absolute inset-0">
                         <PhotoCarousel images={getBusinessImages(business)} alt={business.name} mode="detail" className="w-full h-full" />
@@ -388,19 +388,8 @@ export default function BusinessDetailPage() {
                 {/* COLUMN 3 — Quests (only when present) */}
                 {hasQuests && (
                   <aside className="lg:col-span-3">
-                    <div className="lg:sticky lg:top-24 space-y-6">
-                      <section className="rounded-2xl shadow-md bg-gradient-to-br from-emerald-500 via-emerald-600 to-emerald-700 p-5">
-                        <div className="flex items-center gap-2 mb-4">
-                          <span className="text-3xl shrink-0">🎁</span>
-                          <div className="flex-1 min-w-0">
-                            <h2 className="text-lg font-bold text-white drop-shadow leading-tight">
-                              {ownerQuests.length === 1 ? 'Reward Available!' : `${ownerQuests.length} Rewards Available!`}
-                            </h2>
-                            <p className="text-xs text-white/90 drop-shadow leading-tight mt-0.5">
-                              Complete a quest to earn perks
-                            </p>
-                          </div>
-                        </div>
+                    <div>
+                      <section className="rounded-xl shadow-lg bg-gradient-to-br from-emerald-500 via-emerald-600 to-emerald-700 p-5 lg:max-h-[465px] lg:overflow-y-auto custom-scrollbar">
                         <div className="space-y-3">
                           {ownerQuests.map(quest => (
                             <OwnerQuestPublicCard
@@ -414,7 +403,6 @@ export default function BusinessDetailPage() {
                           ))}
                         </div>
                       </section>
-
                     </div>
                   </aside>
                 )}

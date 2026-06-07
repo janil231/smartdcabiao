@@ -181,7 +181,7 @@ export async function createOwnerQuest(ownerUid, businessId, businessName, data)
 
   const user = auth.currentUser
   if (!user) throw new Error('Must be signed in to create a quest')
-  const resolvedOwnerUid = user.uid
+  const resolvedOwnerUid = ownerUid || user.uid
 
   if (import.meta.env.DEV) {
     console.log('[ownerQuests.create] auth.currentUser.uid:', resolvedOwnerUid)

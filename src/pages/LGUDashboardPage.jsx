@@ -38,6 +38,7 @@ import {
 } from '../services/quests.service'
 import { expireAllStaleParticipations } from '../services/participations.service'
 import { repairAllBusinessImages, backfillBusinessOwnerUids } from '../services/businesses.service'
+import { seedSampleQuestsForAllBusinesses, deleteAllSeededQuestsAndRewards } from '../services/seedSampleOwnerQuests.service'
 import { repairAllDestinationImages } from '../services/destinations.service'
 import { listPendingReviews, setReviewStatus } from '../services/reviews.service'
 import { listTopByPoints, listTopByImpact, IMPACT_UNITS } from '../services/leaderboard.service'
@@ -914,6 +915,13 @@ function DataToolsPanel({ user }) {
   const [backfilling, setBackfilling] = useState(false)
   const [backfillResult, setBackfillResult] = useState(null)
   const [showBackfillDetails, setShowBackfillDetails] = useState(false)
+  const [showSeedConfirm, setShowSeedConfirm] = useState(false)
+  const [seeding, setSeeding] = useState(false)
+  const [seedProgress, setSeedProgress] = useState(null)
+  const [seedResult, setSeedResult] = useState(null)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteResult, setDeleteResult] = useState(null)
 
   const addLog = (entry) => setLog(prev => [...prev, entry])
 
@@ -960,6 +968,48 @@ function DataToolsPanel({ user }) {
   }
 
   const progressPct = progress && progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0
+
+  const handleSeedQuests = async () => {
+    setSeeding(true)
+    setSeedProgress(null)
+    setSeedResult(null)
+    setShowSeedConfirm(false)
+    addLog({ time: new Date().toLocaleTimeString(), msg: 'Starting seed sample owner quests...' })
+    try {
+      const result = await seedSampleQuestsForAllBusinesses({
+        onProgress: (p) => {
+          setSeedProgress(p)
+          addLog({ time: new Date().toLocaleTimeString(), msg: `[${p.businessIndex}/${p.totalBusinesses}] ${p.businessName} — Quest ${p.questIndex}/${p.totalQuests}` })
+        },
+      })
+      setSeedResult(result)
+      addLog({ time: new Date().toLocaleTimeString(), msg: `Done. Seeded: ${result.businessesSeeded}, Skipped: ${result.businessesSkipped.length}, Errors: ${result.errors.length}` })
+    } catch (err) {
+      addLog({ time: new Date().toLocaleTimeString(), msg: `❌ Error: ${err.message}` })
+    } finally {
+      setSeeding(false)
+    }
+  }
+
+  const handleDeleteSeeded = async () => {
+    setDeleting(true)
+    setDeleteResult(null)
+    setShowDeleteConfirm(false)
+    addLog({ time: new Date().toLocaleTimeString(), msg: 'Deleting all seeded quests and rewards...' })
+    try {
+      const result = await deleteAllSeededQuestsAndRewards()
+      setDeleteResult(result)
+      addLog({ time: new Date().toLocaleTimeString(), msg: `Done. Deleted ${result.deletedQuests} quests, ${result.deletedRewards} rewards.` })
+    } catch (err) {
+      addLog({ time: new Date().toLocaleTimeString(), msg: `❌ Error: ${err.message}` })
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const seedProgressPct = seedProgress
+    ? Math.round(((seedProgress.businessIndex - 1) * seedProgress.totalQuests + seedProgress.questIndex) / (seedProgress.totalBusinesses * seedProgress.totalQuests) * 100)
+    : 0
 
   return (
     <div className="h-full flex flex-col min-h-0">
@@ -1130,6 +1180,171 @@ function DataToolsPanel({ user }) {
                     </div>
                   )}
                 </>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-gray-200 pt-6 mt-6">
+          <h4 className="font-semibold text-gray-900 mb-2">🎯 Sample Data — Owner Quests</h4>
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 mb-3 text-xs text-blue-800">
+            Seeds 5 sample quests + rewards for every Firestore business that doesn't already have owner quests.
+            Skips static/mock/archived businesses. One quest per business may fail without aborting the batch.
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowSeedConfirm(true)}
+              disabled={seeding}
+              className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-50 text-sm"
+            >
+              {seeding ? 'Seeding...' : '🎯 Seed Sample Owner Quests'}
+            </button>
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              disabled={deleting || seeding}
+              className="px-4 py-2 rounded-lg bg-red-600 text-white font-semibold hover:bg-red-700 disabled:opacity-50 text-sm"
+            >
+              {deleting ? 'Deleting...' : '⚠️ Delete All Seeded Quests'}
+            </button>
+          </div>
+
+          {showDeleteConfirm && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowDeleteConfirm(false)}>
+              <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full mx-4" onClick={(e) => e.stopPropagation()}>
+                <h3 className="text-lg font-bold text-gray-900 mb-2">Confirm Delete</h3>
+                <p className="text-sm text-gray-600 mb-4">
+                  This will permanently delete ALL owner quests and business quest rewards from Firestore.
+                  This action is logged. Continue?
+                </p>
+                <div className="flex gap-2 justify-end">
+                  <button
+                    onClick={() => setShowDeleteConfirm(false)}
+                    className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 font-semibold hover:bg-gray-200 text-sm"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleDeleteSeeded}
+                    className="px-4 py-2 rounded-lg bg-red-600 text-white font-semibold hover:bg-red-700 text-sm"
+                  >
+                    Yes, Delete All
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {deleteResult && !deleting && (
+            <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700">
+              Deleted <strong>{deleteResult.deletedQuests}</strong> quests and <strong>{deleteResult.deletedRewards}</strong> rewards.
+            </div>
+          )}
+
+          {showSeedConfirm && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowSeedConfirm(false)}>
+              <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full mx-4" onClick={(e) => e.stopPropagation()}>
+                <h3 className="text-lg font-bold text-gray-900 mb-2">Confirm Seed</h3>
+                <p className="text-sm text-gray-600 mb-4">
+                  This will create 5 sample owner quests + reward records for each qualifying business.
+                  This action is logged. Continue?
+                </p>
+                <div className="flex gap-2 justify-end">
+                  <button
+                    onClick={() => setShowSeedConfirm(false)}
+                    className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 font-semibold hover:bg-gray-200 text-sm"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSeedQuests}
+                    className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 text-sm"
+                  >
+                    Yes, Seed
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {seeding && seedProgress && (
+            <div className="mt-3">
+              <div className="flex justify-between text-xs text-gray-600 mb-1">
+                <span>Seeding quests...</span>
+                <span>{seedProgressPct}%</span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2.5">
+                <div
+                  className="bg-emerald-500 h-2.5 rounded-full transition-all duration-300"
+                  style={{ width: `${seedProgressPct}%` }}
+                />
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                Business {seedProgress.businessIndex}/{seedProgress.totalBusinesses}
+                {seedProgress.businessName && ` — ${seedProgress.businessName}`}
+              </p>
+            </div>
+          )}
+
+          {seedResult && !seeding && (
+            <div className="mt-4 p-4 bg-gray-50 rounded-xl border border-gray-200">
+              <div className="grid grid-cols-3 gap-3 text-center mb-3">
+                <div className="bg-green-100 rounded-lg p-3">
+                  <p className="text-2xl font-bold text-green-700">{seedResult.businessesSeeded}</p>
+                  <p className="text-xs text-green-600">Seeded</p>
+                </div>
+                <div className="bg-yellow-100 rounded-lg p-3">
+                  <p className="text-2xl font-bold text-yellow-700">{seedResult.businessesSkipped.length}</p>
+                  <p className="text-xs text-yellow-600">Skipped</p>
+                </div>
+                <div className="bg-red-100 rounded-lg p-3">
+                  <p className="text-2xl font-bold text-red-700">{seedResult.errors.length}</p>
+                  <p className="text-xs text-red-600">Errors</p>
+                </div>
+              </div>
+
+              {seedResult.businessesSeededList && seedResult.businessesSeededList.length > 0 && (
+                <div className="mb-2">
+                  <p className="text-xs font-semibold text-emerald-700 mb-1">Seeded ({seedResult.businessesSeededList.length}):</p>
+                  <div className="max-h-24 overflow-y-auto space-y-0.5">
+                    {seedResult.businessesSeededList.map((s, i) => (
+                      <p key={i} className="text-xs text-emerald-600">✅ <strong>{s.businessName}</strong> — {s.questsCreated}/5 quests, {s.rewardsCreated}/5 rewards{s.questsCreated < 5 && <span className="text-amber-600"> (partial)</span>}</p>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {seedResult.businessesSkipped.length > 0 && (
+                <div className="mb-2">
+                  <p className="text-xs font-semibold text-gray-700 mb-1">Skipped ({seedResult.businessesSkipped.length}):</p>
+                  <div className="max-h-24 overflow-y-auto space-y-0.5">
+                    {seedResult.businessesSkipped.map((s, i) => (
+                      <p key={i} className="text-xs text-gray-500"><span className="text-amber-600">⊘</span> <strong>{s.businessName}</strong> — {s.reason}</p>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {seedResult.errors.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-red-700 mb-1">Errors ({seedResult.errors.length}):</p>
+                  <div className="max-h-32 overflow-y-auto space-y-1">
+                    {seedResult.errors.map((e, i) => (
+                      <div key={i} className="text-xs text-red-500">
+                        <p>⚠️ <strong>{e.businessName}</strong> — {String(e.error)}</p>
+                        {e.details && e.details.length > 0 && (
+                          <ul className="ml-4 mt-0.5 space-y-0.5 text-red-400">
+                            {e.details.map((d, dIdx) => (
+                              <li key={dIdx}>
+                                • Quest {d.questIndex} ({d.questType} &quot;{d.questTitle}&quot;) [{d.stage}]: {d.error}
+                                {d.code && <span className="text-red-300"> (code: {d.code})</span>}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
           )}
