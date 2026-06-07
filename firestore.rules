@@ -163,7 +163,8 @@ service cloud.firestore {
     // ============ REVIEWS ============
 
     match /reviews/{reviewId} {
-      allow read: if resource.data.status == 'approved'
+      allow read: if resource == null
+        || resource.data.status == 'approved'
         || (isSignedIn() && resource.data.uid == request.auth.uid)
         || hasLguAccess();
       allow create: if isSignedIn()
@@ -219,6 +220,7 @@ service cloud.firestore {
 
     match /ownerQuestParticipations/{participationId} {
       allow read: if isSignedIn() && (
+        resource == null ||
         resource.data.uid == request.auth.uid ||
         resource.data.ownerUid == request.auth.uid ||
         hasLguAccess()
