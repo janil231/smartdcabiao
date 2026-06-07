@@ -2,6 +2,7 @@ import Navbar from '../components/Navbar'
 import Hero from '../components/Hero'
 import FeaturedBusinesses from '../components/FeaturedBusinesses'
 import BusinessPromotionCarousel from '../components/BusinessPromotionCarousel'
+import MerchantRewardsCarousel from '../components/MerchantRewardsCarousel'
 import MapPreview from '../components/MapPreview'
 import EventsSection from '../components/EventsSection'
 import SustainableTourismTips from '../components/SustainableTourismTips'
@@ -16,6 +17,7 @@ export default function HomePage() {
         <Hero />
         <BusinessPromotionCarousel />
         <FeaturedBusinesses />
+        <MerchantRewardsCarousel />
         <MapPreview />
         <EventsSection />
         <SustainableTourismTips />

@@ -37,7 +37,7 @@ import {
   repairQuestReservedCounts,
 } from '../services/quests.service'
 import { expireAllStaleParticipations } from '../services/participations.service'
-import { repairAllBusinessImages } from '../services/businesses.service'
+import { repairAllBusinessImages, backfillBusinessOwnerUids } from '../services/businesses.service'
 import { repairAllDestinationImages } from '../services/destinations.service'
 import { listPendingReviews, setReviewStatus } from '../services/reviews.service'
 import { listTopByPoints, listTopByImpact, IMPACT_UNITS } from '../services/leaderboard.service'
@@ -46,6 +46,11 @@ import { listSeasonImpact, sumImpactByUnit } from '../services/impactLedger.serv
 import { listSeasonRedemptions, findRedemptionByCode, adminMarkVoucherUsed } from '../services/voucherRedemptions.service'
 import { logAudit } from '../services/audit.service'
 import { rotateEventCode } from '../services/questVerification.service'
+import {
+  listAllOwnerQuests,
+  toggleOwnerQuestActive as toggleOwnerQuest,
+  getOwnerQuestParticipations,
+} from '../services/ownerQuests.service'
 import CheckInModal from '../components/quest/CheckInModal'
 import QRDisplayModal from '../components/quest/QRDisplayModal'
 import QuestDetailsModal from '../components/quest/QuestDetailsModal'
@@ -56,6 +61,7 @@ const TABS = {
   REVIEWS: 'reviews',
   SEASONS: 'seasons',
   QUESTS: 'quests',
+  OWNER_QUESTS: 'owner-quests',
   VOUCHERS: 'vouchers',
   MANAGE_ADMINS: 'manage-admins',
   DATA_TOOLS: 'data-tools',
@@ -70,6 +76,7 @@ const MODERATION_ITEMS = [
 const TOURISM_ITEMS = [
   { key: TABS.SEASONS, icon: '🗓️', label: 'Seasons' },
   { key: TABS.QUESTS, icon: '🎯', label: 'Quests' },
+  { key: TABS.OWNER_QUESTS, icon: '🏪', label: 'Owner Quests' },
   { key: TABS.VOUCHERS, icon: '🎟️', label: 'Vouchers' },
 ]
 
@@ -904,6 +911,9 @@ function DataToolsPanel({ user }) {
   const [report, setReport] = useState(null)
   const [log, setLog] = useState([])
   const [mode, setMode] = useState(null)
+  const [backfilling, setBackfilling] = useState(false)
+  const [backfillResult, setBackfillResult] = useState(null)
+  const [showBackfillDetails, setShowBackfillDetails] = useState(false)
 
   const addLog = (entry) => setLog(prev => [...prev, entry])
 
@@ -930,6 +940,22 @@ function DataToolsPanel({ user }) {
     } finally {
       setRunning(false)
       setProgress(null)
+    }
+  }
+
+  const handleBackfillOwners = async () => {
+    setBackfilling(true)
+    setBackfillResult(null)
+    setShowBackfillDetails(false)
+    try {
+      addLog({ time: new Date().toLocaleTimeString(), msg: 'Starting owner UID backfill...' })
+      const result = await backfillBusinessOwnerUids(user?.uid, user?.email)
+      setBackfillResult(result)
+      addLog({ time: new Date().toLocaleTimeString(), msg: `Done. Backfilled: ${result.backfilled}, Skipped: ${result.skipped}, Failed: ${result.failed}` })
+    } catch (err) {
+      addLog({ time: new Date().toLocaleTimeString(), msg: `❌ Error: ${err.message}` })
+    } finally {
+      setBackfilling(false)
     }
   }
 
@@ -1041,6 +1067,74 @@ function DataToolsPanel({ user }) {
           </div>
         )}
 
+        <div className="border-t border-gray-200 pt-4 mt-4">
+          <h4 className="font-semibold text-gray-900 mb-2">🔗 Backfill Business Ownership</h4>
+          <p className="text-sm text-gray-600 mb-3">
+            Some businesses approved before the merchant quest feature don't have
+            an owner linked. This tool scans all businesses, finds the original
+            submission, and links the owner so they can manage their business.
+          </p>
+          <button
+            onClick={handleBackfillOwners}
+            disabled={backfilling}
+            className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-50 text-sm"
+          >
+            {backfilling ? 'Backfilling...' : '🔗 Backfill Owner UIDs'}
+          </button>
+
+          {backfillResult && (
+            <div className="mt-4 p-4 bg-gray-50 rounded-xl border border-gray-200">
+              <div className="grid grid-cols-3 gap-3 text-center mb-3">
+                <div className="bg-green-100 rounded-lg p-3">
+                  <p className="text-2xl font-bold text-green-700">{backfillResult.backfilled}</p>
+                  <p className="text-xs text-green-600">Backfilled</p>
+                </div>
+                <div className="bg-yellow-100 rounded-lg p-3">
+                  <p className="text-2xl font-bold text-yellow-700">{backfillResult.skipped}</p>
+                  <p className="text-xs text-yellow-600">Skipped</p>
+                </div>
+                <div className="bg-red-100 rounded-lg p-3">
+                  <p className="text-2xl font-bold text-red-700">{backfillResult.failed}</p>
+                  <p className="text-xs text-red-600">Failed</p>
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 mb-2">Scanned: {backfillResult.scanned}</p>
+
+              {backfillResult.details?.length > 0 && (
+                <>
+                  <button
+                    onClick={() => setShowBackfillDetails(!showBackfillDetails)}
+                    className="text-xs font-medium text-emerald-600 hover:text-emerald-700"
+                  >
+                    {showBackfillDetails ? '▼ Hide details' : `▶ Show details (${backfillResult.details.length})`}
+                  </button>
+
+                  {showBackfillDetails && (
+                    <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
+                      {backfillResult.details.map((d, i) => (
+                        <div key={i} className="flex items-start gap-2 text-xs bg-white rounded-lg px-3 py-2 border border-gray-200">
+                          <span className={`font-semibold w-20 shrink-0 ${
+                            d.status === 'backfilled' ? 'text-emerald-700' :
+                            d.status === 'skipped' ? 'text-amber-700' : 'text-red-700'
+                          }`}>
+                            {d.status.toUpperCase()}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <span className="font-medium text-gray-900">{d.name}</span>
+                            {d.ownerUid && <span className="text-gray-500 ml-1">→ {d.ownerUid}</span>}
+                            {d.reason && <span className="text-gray-500 italic ml-1">({d.reason})</span>}
+                            {d.strategy && <span className="text-blue-600 ml-1">via {d.strategy}</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
         {log.length > 0 && (
           <div className="bg-gray-900 text-gray-100 rounded-xl p-4 font-mono text-xs max-h-48 overflow-y-auto">
             {log.map((entry, i) => (
@@ -1104,6 +1198,12 @@ export default function LGUDashboardPage() {
   const [qrModalQuest, setQrModalQuest] = useState(null)
   const [questSearchQuery, setQuestSearchQuery] = useState('')
   const [selectedQuestDetails, setSelectedQuestDetails] = useState(null)
+
+  const [ownerQuests, setOwnerQuests] = useState([])
+  const [confirmOwnerToggle, setConfirmOwnerToggle] = useState(null)
+  const [expandedOwnerQuest, setExpandedOwnerQuest] = useState(null)
+  const [ownerQuestCompletions, setOwnerQuestCompletions] = useState([])
+  const [completionsLoading, setCompletionsLoading] = useState(false)
 
   const filteredQuests = useMemo(() => {
     if (!questSearchQuery.trim()) return quests
@@ -1211,6 +1311,9 @@ export default function LGUDashboardPage() {
           } else {
             setSeasonRedemptions([])
           }
+        } else if (activeTab === TABS.OWNER_QUESTS) {
+          const list = await listAllOwnerQuests()
+          setOwnerQuests(list)
         }
       } catch {
         // Error loading data - handled silently
@@ -1297,6 +1400,9 @@ export default function LGUDashboardPage() {
         } else {
           setSeasonRedemptions([])
         }
+      } else if (activeTab === TABS.OWNER_QUESTS) {
+        const list = await listAllOwnerQuests()
+        setOwnerQuests(list)
       }
     } catch {
       // Error loading data - handled silently
@@ -1568,6 +1674,45 @@ export default function LGUDashboardPage() {
     setConfirmToggle(quest)
   }
 
+  const handleOwnerToggleClick = (quest) => {
+    setConfirmOwnerToggle(quest)
+  }
+
+  const confirmOwnerToggleAction = async () => {
+    if (!confirmOwnerToggle) return
+    const quest = confirmOwnerToggle
+    const newActive = !quest.isActive
+    setConfirmOwnerToggle(null)
+    setActionLoading(true)
+    try {
+      await toggleOwnerQuest(quest.id, newActive)
+      showToast(newActive ? `"${quest.title}" is now LIVE!` : `"${quest.title}" deactivated.`)
+      loadData()
+    } catch (error) {
+      showToast(error.message, 'error')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleExpandOwnerQuest = async (quest) => {
+    if (expandedOwnerQuest === quest.id) {
+      setExpandedOwnerQuest(null)
+      setOwnerQuestCompletions([])
+      return
+    }
+    setExpandedOwnerQuest(quest.id)
+    setCompletionsLoading(true)
+    try {
+      const parts = await getOwnerQuestParticipations(quest.id)
+      setOwnerQuestCompletions(parts)
+    } catch {
+      setOwnerQuestCompletions([])
+    } finally {
+      setCompletionsLoading(false)
+    }
+  }
+
   const confirmToggleAction = async () => {
     if (!confirmToggle) return
     const quest = confirmToggle
@@ -1774,6 +1919,7 @@ export default function LGUDashboardPage() {
     [TABS.QUESTS]: { icon: '🎯', title: 'No quests found', desc: 'Quests for the selected season will appear here.' },
     [TABS.VOUCHERS]: { icon: '🎟️', title: 'No active season', desc: 'Activate a season to manage vouchers and redemptions.' },
     [TABS.DATA_TOOLS]: { icon: '🛠️', title: 'Data Tools', desc: 'Repair and maintain data integrity.' },
+    [TABS.OWNER_QUESTS]: { icon: '🏪', title: 'No owner quests yet', desc: 'Business owner-created quests will appear here for oversight.' },
   }
 
   return (
@@ -1804,7 +1950,7 @@ export default function LGUDashboardPage() {
                 )}
                 <SidebarSection
                   title="Tourism Program"
-                  items={isMaster ? TOURISM_ITEMS : TOURISM_ITEMS.filter(i => i.key === TABS.QUESTS)}
+                  items={isMaster ? TOURISM_ITEMS : TOURISM_ITEMS.filter(i => i.key === TABS.QUESTS || i.key === TABS.OWNER_QUESTS)}
                   activeKey={activeTab}
                   onSelect={setActiveTab}
                 />
@@ -1819,7 +1965,7 @@ export default function LGUDashboardPage() {
                 activeTab={activeTab}
                 onChange={setActiveTab}
                 moderationItems={isMaster ? moderationItems : []}
-                tourismItems={isMaster ? TOURISM_ITEMS : TOURISM_ITEMS.filter(i => i.key === TABS.QUESTS)}
+                tourismItems={isMaster ? TOURISM_ITEMS : TOURISM_ITEMS.filter(i => i.key === TABS.QUESTS || i.key === TABS.OWNER_QUESTS)}
                 settingsItems={settingsItems}
                 navigate={navigate}
                 counts={{ newSubmissions, newReports, pendingReviews: pendingReviews.length }}
@@ -2421,6 +2567,164 @@ export default function LGUDashboardPage() {
                     </div>
                   </div>
                 )}
+                {activeTab === TABS.OWNER_QUESTS && (
+                  <div className="h-full flex flex-col min-h-0">
+                    <div className="shrink-0">
+                      <div className="flex items-center gap-2 mb-4">
+                        <span className="text-xl">🏪</span>
+                        <div>
+                          <h2 className="text-lg font-semibold text-gray-900">Owner Quests</h2>
+                          <p className="text-sm text-gray-500">Oversee quests created by business owners</p>
+                        </div>
+                      </div>
+                      <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-xs text-amber-800">
+                        Owner quests go live immediately when created. Use the toggle below to deactivate policy-violating quests. Rewards are merchant vouchers (<span className="font-mono">BIZ-XXXXXXXXXX</span>), not LGU points.
+                      </div>
+                    </div>
+                    <div className="flex-1 min-h-0 overflow-y-auto">
+                    {loading ? (
+                      <div className="flex items-center justify-center py-12">
+                        <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-600 border-t-transparent" />
+                      </div>
+                    ) : ownerQuests.length === 0 ? (
+                      <div className="text-center py-12">
+                        <div className="text-5xl mb-3">{EMPTY_STATES[TABS.OWNER_QUESTS].icon}</div>
+                        <h3 className="font-semibold text-gray-800">{EMPTY_STATES[TABS.OWNER_QUESTS].title}</h3>
+                        <p className="text-sm text-gray-500 mt-1">{EMPTY_STATES[TABS.OWNER_QUESTS].desc}</p>
+                      </div>
+                    ) : (
+                      <div className="w-full overflow-x-auto">
+                        <table className="min-w-[800px] w-full text-sm">
+                          <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
+                            <tr>
+                              <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase">Business</th>
+                              <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase">Title</th>
+                              <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase">Type</th>
+                              <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase">Reward</th>
+                              <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase">Completions</th>
+                              <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
+                              {isMaster && <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase">Actions</th>}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-200">
+                            {ownerQuests.map((quest) => (
+                              <tr key={quest.id} className="hover:bg-gray-50">
+                                <td className="px-3 py-3">
+                                  <div className="font-medium text-gray-900 text-sm">{quest.businessName}</div>
+                                  <div className="text-xs text-gray-500 font-mono truncate max-w-[180px]">{quest.businessId}</div>
+                                </td>
+                                <td className="px-3 py-3">
+                                  <div className="font-medium text-gray-900 text-sm leading-snug">{quest.title}</div>
+                                  {quest.description && (
+                                    <div className="text-xs text-gray-500 mt-0.5 truncate max-w-[220px]">{quest.description}</div>
+                                  )}
+                                </td>
+                                <td className="px-3 py-3 whitespace-nowrap">
+                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+                                    quest.questType === 'visit' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
+                                  }`}>
+                                    {quest.questType === 'visit' ? '📍 Visit' : '🛒 Buy'}
+                                  </span>
+                                  {quest.questType === 'visit' && quest.requiredDurationMinutes > 0 && (
+                                    <span className="ml-1 text-xs text-gray-500">{quest.requiredDurationMinutes}min</span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-3 whitespace-nowrap">
+                                  <span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
+                                    {quest.rewardType === 'discount_percent' && `${quest.rewardValue}% off`}
+                                    {quest.rewardType === 'discount_fixed' && `₱${quest.rewardValue} off`}
+                                    {quest.rewardType === 'free_item' && `Free ${quest.rewardItemName || 'item'}`}
+                                    {quest.rewardType === 'bogo' && `BOGO ${quest.rewardItemName || 'item'}`}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-3">
+                                  <button
+                                    onClick={() => handleExpandOwnerQuest(quest)}
+                                    className="text-xs font-medium text-emerald-600 hover:text-emerald-700"
+                                  >
+                                    {expandedOwnerQuest === quest.id ? '▼ Hide' : '▶ View'}
+                                  </button>
+                                </td>
+                                <td className="px-3 py-3 whitespace-nowrap">
+                                  {isMaster ? (
+                                    <div className="flex items-center gap-2 group relative">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOwnerToggleClick(quest)}
+                                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                                          quest.isActive ? 'bg-emerald-600' : 'bg-gray-300'
+                                        }`}
+                                        role="switch"
+                                        aria-checked={quest.isActive}
+                                        aria-label={quest.isActive ? 'Deactivate quest' : 'Activate quest'}
+                                      >
+                                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                          quest.isActive ? 'translate-x-6' : 'translate-x-1'
+                                        }`} />
+                                      </button>
+                                      <span className={`text-xs font-semibold ${quest.isActive ? 'text-emerald-700' : 'text-gray-500'}`}>
+                                        {quest.isActive ? 'Live' : 'Inactive'}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full ${
+                                      quest.isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'
+                                    }`}>
+                                      <span className={`w-1.5 h-1.5 rounded-full ${quest.isActive ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+                                      {quest.isActive ? 'LIVE' : 'INACTIVE'}
+                                    </span>
+                                  )}
+                                </td>
+                                {isMaster && (
+                                  <td className="px-3 py-3">
+                                    <Link
+                                      to={`/my-businesses/${quest.businessId}/quests`}
+                                      className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
+                                    >
+                                      Manage →
+                                    </Link>
+                                  </td>
+                                )}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {expandedOwnerQuest && (
+                          <div className="border-t border-gray-200 bg-gray-50 p-4">
+                            <h4 className="text-sm font-semibold text-gray-700 mb-2">
+                              Completions for this quest
+                            </h4>
+                            {completionsLoading ? (
+                              <div className="flex items-center gap-2 text-sm text-gray-500">
+                                <div className="inline-block animate-spin rounded-full h-4 w-4 border-2 border-emerald-600 border-t-transparent" />
+                                Loading...
+                              </div>
+                            ) : ownerQuestCompletions.length === 0 ? (
+                              <p className="text-sm text-gray-500">No completions yet.</p>
+                            ) : (
+                              <div className="space-y-1 max-h-48 overflow-y-auto">
+                                {ownerQuestCompletions.map((p) => (
+                                  <div key={p.id} className="flex items-center justify-between text-sm bg-white rounded-lg px-3 py-2 border border-gray-200">
+                                    <div>
+                                      <span className="font-medium text-gray-900">{p.userEmail || p.uid}</span>
+                                      <span className="text-gray-500 ml-2">
+                                        {p.completedAt?.toDate?.()?.toLocaleDateString?.() || ''}
+                                      </span>
+                                    </div>
+                                    <span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
+                                      {p.rewardCodeId ? 'Reward issued' : 'No reward'}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    </div>
+                  </div>
+                )}
                 {isMaster && activeTab === TABS.MANAGE_ADMINS && (
                   <div className="h-full flex flex-col min-h-0">
                     <div className="flex-1 min-h-0 overflow-y-auto">
@@ -2850,6 +3154,59 @@ export default function LGUDashboardPage() {
                 } disabled:opacity-50`}
               >
                 {confirmToggle.status !== 'active' ? 'Yes, publish' : 'Yes, move to Draft'}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {confirmOwnerToggle && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/60" onClick={() => setConfirmOwnerToggle(null)} />
+          <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl p-6">
+            <div className="flex items-start gap-4 mb-4">
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center text-2xl shrink-0 ${
+                confirmOwnerToggle.isActive ? 'bg-amber-100' : 'bg-emerald-100'
+              }`}>
+                {confirmOwnerToggle.isActive ? '📝' : '🚀'}
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-lg text-gray-900">
+                  {confirmOwnerToggle.isActive ? 'Deactivate this owner quest?' : 'Reactivate this owner quest?'}
+                </h3>
+                <p className="text-sm text-gray-600 mt-1">
+                  <strong>&ldquo;{confirmOwnerToggle.title}&rdquo;</strong>
+                  <span className="block text-xs text-gray-500 mt-1">{confirmOwnerToggle.businessName}</span>
+                </p>
+              </div>
+            </div>
+            <div className={`rounded-xl p-3 text-sm mb-5 ${
+              confirmOwnerToggle.isActive ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-800'
+            }`}>
+              {confirmOwnerToggle.isActive ? (
+                <>This quest will be <strong>hidden from users</strong>. Existing participants keep their rewards, but no new joins are allowed.</>
+              ) : (
+                <>This quest will become <strong>visible to all users</strong> on the business detail page.</>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                onClick={() => setConfirmOwnerToggle(null)}
+                className="px-5 py-2.5 rounded-xl border border-gray-300 bg-white text-gray-700 font-semibold hover:bg-gray-50 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmOwnerToggleAction}
+                disabled={actionLoading}
+                className={`px-5 py-2.5 rounded-xl text-white font-semibold transition ${
+                  confirmOwnerToggle.isActive
+                    ? 'bg-amber-600 hover:bg-amber-700'
+                    : 'bg-emerald-600 hover:bg-emerald-700'
+                } disabled:opacity-50`}
+              >
+                {confirmOwnerToggle.isActive ? 'Yes, deactivate' : 'Yes, reactivate'}
               </button>
             </div>
           </div>

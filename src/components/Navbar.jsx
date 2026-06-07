@@ -17,6 +17,7 @@ const mainLinks = [
 const moreLinks = [
   { label: 'Favorites', to: '/favorites' },
   { label: 'Rewards', to: '/rewards' },
+  { label: 'Rewards Nearby', to: '/rewards-nearby' },
   { label: 'Vouchers', to: '/vouchers' },
   { label: 'Suggest', to: '/suggest-destination' },
 ]
@@ -102,6 +103,7 @@ export default function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [authModalOpen, setAuthModalOpen] = useState(false)
   const [isUserAdmin, setIsUserAdmin] = useState(false)
+  const [hasBusiness, setHasBusiness] = useState(false)
   const [moreDropdownOpen, setMoreDropdownOpen] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [scrolled, setScrolled] = useState(false)
@@ -118,6 +120,17 @@ export default function Navbar() {
       }
     }
     checkAdmin()
+  }, [user])
+
+  useEffect(() => {
+    if (!user) { setHasBusiness(false); return }
+    let mounted = true
+    import('../services/businesses.service').then(({ getMyApprovedBusinesses }) => {
+      getMyApprovedBusinesses(user.uid).then(biz => {
+        if (mounted) setHasBusiness(biz.length > 0)
+      }).catch(() => {})
+    })
+    return () => { mounted = false }
   }, [user])
 
   useEffect(() => {
@@ -230,6 +243,16 @@ export default function Navbar() {
             >
               List My Business
             </Link>
+
+            {hasBusiness && (
+              <Link
+                to="/my-businesses"
+                onClick={closeMenu}
+                className="flex items-center gap-3 px-4 py-3 rounded-lg font-medium text-gray-800 min-h-[44px] hover:bg-emerald-50"
+              >
+                My Business
+              </Link>
+            )}
 
             {user ? (
               <>
@@ -380,6 +403,11 @@ export default function Navbar() {
                   <DropdownItem to="/profile">
                     Profile
                   </DropdownItem>
+                  {hasBusiness && (
+                    <DropdownItem to="/my-businesses">
+                      My Business
+                    </DropdownItem>
+                  )}
                   {isUserAdmin && (
                     <DropdownItem to="/lgu">
                       Admin Dashboard

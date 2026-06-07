@@ -19,6 +19,7 @@ import MapUtilities from '../features/map/MapUtilities'
 import InvalidateMapSize from '../features/map/InvalidateMapSize'
 import { getAllPlaces, clearPlacesCache } from '../features/map/mapHelpers'
 import { getBusinessById } from '../services/businesses.service'
+import { getBusinessIdsWithActiveQuests } from '../services/ownerQuests.service'
 import 'leaflet/dist/leaflet.css'
 
 // Fix default icon in webpack/vite (react-leaflet)
@@ -75,12 +76,15 @@ function ApplyDefaultMapView() {
   return null
 }
 
-function getMarkerIcon(type) {
+function getMarkerIcon(type, hasQuest = false) {
   const style = TYPE_STYLES[type] || TYPE_STYLES[BUSINESS_TYPES.shop]
   const symbol = TYPE_SYMBOL[type] || '•'
+  const questBadge = hasQuest
+    ? '<div style="position:absolute;top:-6px;right:-6px;width:16px;height:16px;border-radius:50%;background:#f59e0b;border:2px solid #d97706;display:flex;align-items:center;justify-content:center;font-size:9px;line-height:1;box-shadow:0 1px 3px rgba(0,0,0,0.3);">🎁</div>'
+    : ''
   return L.divIcon({
     className: 'custom-marker',
-    html: `<div style="margin-left:-14px;margin-top:-14px;width:28px;height:28px;border-radius:50%;background:${style.bg};border:2px solid ${style.border};box-shadow:0 2px 4px rgba(0,0,0,0.2);display:flex;align-items:center;justify-content:center;font-size:14px;color:white;line-height:1;">${symbol}</div>`,
+    html: `<div style="position:relative;margin-left:-14px;margin-top:-14px;width:28px;height:28px;border-radius:50%;background:${style.bg};border:2px solid ${style.border};box-shadow:0 2px 4px rgba(0,0,0,0.2);display:flex;align-items:center;justify-content:center;font-size:14px;color:white;line-height:1;">${symbol}${questBadge}</div>`,
     iconSize: [28, 28],
     iconAnchor: [14, 14],
   })
@@ -169,6 +173,7 @@ export default function MapPage() {
   const [allPlaces, setAllPlaces] = useState([])
   const [loading, setLoading] = useState(true)
   const [flyTarget, setFlyTarget] = useState(null)
+  const [questBusinessIds, setQuestBusinessIds] = useState(null)
   const isMobile = useIsMobile()
   const mapRef = useRef(null)
   const markerRefs = useRef({})
@@ -176,6 +181,10 @@ export default function MapPage() {
   const hasAutoZoomedRef = useRef(false)
 
   const { filters, setFilter, clearFilters, hasActiveFilters } = useMapFilters()
+
+  useEffect(() => {
+    getBusinessIdsWithActiveQuests().then(setQuestBusinessIds).catch(() => {})
+  }, [])
 
   useEffect(() => {
     async function loadPlaces() {
@@ -397,11 +406,12 @@ export default function MapPage() {
 
             {filteredPlaces.map((poi) => {
               const placeKey = getPlaceKey(poi)
+              const hasQuest = poi.poiType === 'business' && questBusinessIds?.has(String(poi.id))
               return (
               <Marker
                 key={placeKey}
                 position={poi.position}
-                icon={getMarkerIcon(poi.type)}
+                icon={getMarkerIcon(poi.type, hasQuest)}
                 ref={(ref) => {
                   if (ref) markerRefs.current[placeKey] = ref
                   else delete markerRefs.current[placeKey]
@@ -424,6 +434,11 @@ export default function MapPage() {
                         <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium text-white ${TYPE_COLORS[poi.type]?.bg || 'bg-gray-500'}`}>
                           {poi.category}
                         </span>
+                        {hasQuest && (
+                          <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-amber-500 px-1.5 py-0.5 text-xs font-bold text-white">
+                            🎁 Reward
+                          </span>
+                        )}
                         <h3 className="mt-2 font-semibold text-gray-900">{poi.name}</h3>
                         <p className="mt-1 text-sm text-gray-600 line-clamp-2">{poi.description}</p>
                         <p className="mt-1 text-xs text-gray-500">
@@ -520,13 +535,20 @@ export default function MapPage() {
                   ✕
                 </button>
                 <div className="px-4 pb-5 pt-1">
-                  <span
-                    className={`inline-block rounded px-2 py-0.5 text-xs font-medium text-white ${
-                      TYPE_COLORS[selectedPOI.type]?.bg || 'bg-gray-500'
-                    }`}
-                  >
-                    {selectedPOI.category}
-                  </span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span
+                      className={`inline-block rounded px-2 py-0.5 text-xs font-medium text-white ${
+                        TYPE_COLORS[selectedPOI.type]?.bg || 'bg-gray-500'
+                      }`}
+                    >
+                      {selectedPOI.category}
+                    </span>
+                    {questBusinessIds?.has(String(selectedPOI.id)) && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500 px-2 py-0.5 text-xs font-bold text-white">
+                        🎁 Reward
+                      </span>
+                    )}
+                  </div>
                   <h3 className="text-lg font-bold text-gray-900 mt-2 pr-10">{selectedPOI.name}</h3>
                   <p className="text-sm text-gray-600 mt-1 line-clamp-3">{selectedPOI.description}</p>
                   <p className="text-xs text-gray-500 mt-2">
@@ -627,6 +649,11 @@ export default function MapPage() {
                           }`}>
                             {poi.category}
                           </span>
+                          {questBusinessIds?.has(String(poi.id)) && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500 px-1.5 py-0.5 text-xs font-bold text-white">
+                              🎁 Reward
+                            </span>
+                          )}
                           <span>📍 {poi.barangay}</span>
                         </div>
                       </div>

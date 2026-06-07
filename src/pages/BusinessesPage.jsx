@@ -19,6 +19,7 @@ import {
   permanentlyDeleteBusiness,
   isStaticBusiness,
 } from '../services/businesses.service'
+import { getBusinessIdsWithActiveQuests } from '../services/ownerQuests.service'
 
 const TYPE_STYLES = {
   [BUSINESS_TYPES.restaurant]: 'bg-amber-500/10 text-amber-700 border-amber-200',
@@ -26,7 +27,7 @@ const TYPE_STYLES = {
   [BUSINESS_TYPES.attraction]: 'bg-emerald-500/10 text-emerald-700 border-emerald-200',
 }
 
-function BusinessCard({ business, isMaster, onAction }) {
+function BusinessCard({ business, isMaster, onAction, hasReward }) {
   const categoryStyle = TYPE_STYLES[business.type] || 'bg-gray-100 text-gray-700 border-gray-200'
   const isArchived = business.isActive === false
 
@@ -113,6 +114,13 @@ function BusinessCard({ business, isMaster, onAction }) {
           </div>
         )}
 
+        {hasReward && (
+          <div className="absolute top-3 left-3 z-10">
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600/95 backdrop-blur-sm px-2.5 py-1 text-xs font-bold text-white shadow-lg">
+              🎁 Reward
+            </span>
+          </div>
+        )}
         <div className="absolute top-3 right-3">
           <FavoriteButton 
             item={{ ...business, type: business.type }}
@@ -207,6 +215,8 @@ export default function BusinessesPage() {
   const [processing, setProcessing] = useState(false)
   const [errorMsg, setErrorMsg] = useState("")
   const [typedConfirmation, setTypedConfirmation] = useState("")
+  const [rewardBusinessIds, setRewardBusinessIds] = useState(null)
+  const [showRewardsOnly, setShowRewardsOnly] = useState(false)
 
   useEffect(() => {
     if (!user?.uid) {
@@ -337,6 +347,10 @@ export default function BusinessesPage() {
     loadBusinesses()
   }, [loadBusinesses])
 
+  useEffect(() => {
+    getBusinessIdsWithActiveQuests().then(setRewardBusinessIds).catch(() => {})
+  }, [])
+
   const filteredBusinesses = useMemo(() => {
     let list = businesses
 
@@ -368,8 +382,12 @@ export default function BusinessesPage() {
       })
     }
 
+    if (showRewardsOnly && rewardBusinessIds) {
+      list = list.filter(b => rewardBusinessIds.has(String(b.id)))
+    }
+
     return list
-  }, [businesses, filter, searchQuery, isMaster, archiveFilter])
+  }, [businesses, filter, searchQuery, isMaster, archiveFilter, showRewardsOnly, rewardBusinessIds])
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -473,6 +491,26 @@ export default function BusinessesPage() {
                   {option.label}
                 </button>
               ))}
+              <div className="w-px h-8 bg-gray-200 self-center" />
+              <button
+                type="button"
+                onClick={() => setShowRewardsOnly(prev => !prev)}
+                disabled={!rewardBusinessIds}
+                className={`rounded-lg px-3 py-2 sm:px-4 sm:py-2 text-sm font-medium transition-all duration-200 ease-out active:scale-[0.98] h-11 ${
+                  showRewardsOnly
+                    ? 'bg-amber-500 text-white shadow-sm'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                🎁 Rewards
+                {rewardBusinessIds && (
+                  <span className={`ml-1.5 inline-flex items-center justify-center w-5 h-5 rounded-full text-xs font-bold ${
+                    showRewardsOnly ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-700'
+                  }`}>
+                    {rewardBusinessIds.size}
+                  </span>
+                )}
+              </button>
             </div>
             </div>
           </Reveal>
@@ -512,7 +550,7 @@ export default function BusinessesPage() {
           ) : filteredBusinesses.length > 0 ? (
             <div className="mt-6 sm:mt-10 grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
               {filteredBusinesses.map((business) => (
-                <BusinessCard key={business.id} business={business} isMaster={isMaster} onAction={setConfirmAction} />
+                <BusinessCard key={business.id} business={business} isMaster={isMaster} onAction={setConfirmAction} hasReward={rewardBusinessIds?.has(String(business.id))} />
               ))}
             </div>
           ) : (

@@ -10,10 +10,14 @@ import PhotoCarousel from '../components/PhotoCarousel'
 import RatingSummary from '../components/reviews/RatingSummary'
 import ReviewsList from '../components/reviews/ReviewsList'
 import ReviewForm from '../components/reviews/ReviewForm'
+import OwnerQuestPublicCard from '../components/owner/OwnerQuestPublicCard'
+import LoginModal from '../components/Auth/LoginModal'
 import { useAuth } from '../contexts/AuthContext'
 import { getBusinessImages } from '../utils/placeImages'
+
 import { getBusinessById } from '../services/businesses.service'
 import { listApprovedReviews, getMyReview } from '../services/reviews.service'
+import { listOwnerQuestsForBusiness } from '../services/ownerQuests.service'
 import { BUSINESS_TYPES } from '../data'
 import 'leaflet/dist/leaflet.css'
 
@@ -58,6 +62,9 @@ export default function BusinessDetailPage() {
   const [reviews, setReviews] = useState([])
   const [reviewsLoading, setReviewsLoading] = useState(true)
   const [myReview, setMyReview] = useState(null)
+  const [ownerQuests, setOwnerQuests] = useState([])
+  const [ownerQuestsLoading, setOwnerQuestsLoading] = useState(true)
+  const [authModalOpen, setAuthModalOpen] = useState(false)
 
   const loadReviews = useMemo(() => async () => {
     setReviewsLoading(true)
@@ -98,6 +105,24 @@ export default function BusinessDetailPage() {
     loadReviews()
   }, [loadReviews])
 
+  useEffect(() => {
+    if (!business?.id) return
+    let mounted = true
+    async function loadQuests() {
+      setOwnerQuestsLoading(true)
+      try {
+        const quests = await listOwnerQuestsForBusiness(business.id)
+        if (mounted) setOwnerQuests(quests)
+      } catch {
+        if (mounted) setOwnerQuests([])
+      } finally {
+        if (mounted) setOwnerQuestsLoading(false)
+      }
+    }
+    loadQuests()
+    return () => { mounted = false }
+  }, [business?.id])
+
   if (loading) {
     return (
       <div className="flex min-h-screen flex-col">
@@ -105,7 +130,7 @@ export default function BusinessDetailPage() {
         <main className="flex-1 pb-mobile-nav">
           <div className="animate-pulse">
             <div className="h-64 bg-gray-200" />
-            <div className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
+            <div className="mx-auto max-w-[1600px] w-full px-4 py-8 sm:px-6 lg:px-8 xl:px-12">
               <div className="h-8 bg-gray-200 rounded w-64 mb-4" />
               <div className="h-32 bg-gray-200 rounded mb-8" />
               <div className="grid md:grid-cols-2 gap-8">
@@ -131,7 +156,7 @@ export default function BusinessDetailPage() {
       <div className="flex min-h-screen flex-col">
         <Navbar />
         <main className="flex-1 pb-mobile-nav">
-          <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-[1600px] w-full px-4 py-8 sm:px-6 lg:px-8 xl:px-12">
             <div className="text-center">
               <h1 className="text-2xl font-bold text-gray-900">Business Not Found</h1>
               <p className="mt-4 text-gray-600">Sorry, we couldn't find the business you're looking for.</p>
@@ -162,7 +187,7 @@ export default function BusinessDetailPage() {
       <main className="flex-1 pb-mobile-nav">
         {/* Breadcrumb */}
         <div className="bg-white border-b border-gray-200">
-          <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-[1600px] w-full px-4 py-3 sm:px-6 lg:px-8 xl:px-12">
             <nav className="flex" aria-label="Breadcrumb">
               <ol className="flex items-center space-x-2 text-sm">
                 <li>
@@ -189,226 +214,217 @@ export default function BusinessDetailPage() {
           </div>
         </div>
 
-        <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {/* Image Gallery */}
-            <PhotoCarousel images={getBusinessImages(business)} alt={business.name} mode="detail" className="aspect-video w-full overflow-hidden rounded-xl" />
-
-            {/* Business Information */}
-            <div className="space-y-6">
-              <div>
-                <div className="flex items-start justify-between">
-                  <div>
-                    <span className={`inline-block rounded border px-3 py-1 text-xs font-medium uppercase tracking-wider ${categoryStyle.bg}`}>
-                      {business.category}
-                    </span>
-                    <h1 className="mt-3 text-3xl font-bold text-gray-900">{business.name}</h1>
-                    <div className="mt-2 flex items-center gap-4 text-sm text-gray-600">
-                      <span className="flex items-center gap-1">
-                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        {business.priceRange}
-                      </span>
-                      {business.rating && (
-                        <span className="flex items-center gap-1">
-                          <svg className="h-4 w-4 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                          </svg>
-                          {business.rating}
-                        </span>
-                      )}
+        <div className="mx-auto max-w-[1600px] w-full px-4 py-8 sm:px-6 lg:px-8 xl:px-12">
+          {(() => {
+            const hasQuests = !ownerQuestsLoading && ownerQuests.length > 0
+            return (
+              <div className={`grid grid-cols-1 gap-6 lg:gap-8 mb-8 ${hasQuests ? 'lg:grid-cols-12' : 'lg:grid-cols-2'}`}>
+                {/* COLUMN 1 — Photo Gallery */}
+                <div className={`${hasQuests ? 'lg:col-span-5' : 'lg:col-span-1'}`}>
+                  <div className="lg:sticky lg:top-24">
+                    <div className="aspect-[4/3] relative rounded-xl overflow-hidden bg-gray-100">
+                      <div className="absolute inset-0">
+                        <PhotoCarousel images={getBusinessImages(business)} alt={business.name} mode="detail" className="w-full h-full" />
+                      </div>
                     </div>
                   </div>
-                  <FavoriteButton 
-                    item={{ ...business, type: business.type }}
-                    size="lg"
-                    className="bg-white border-2 border-gray-200"
-                  />
                 </div>
-              </div>
 
-              <p className="text-gray-700 leading-relaxed">{business.description}</p>
-
-              {/* Contact Information */}
-              <div className="space-y-3">
-                <h2 className="text-lg font-semibold text-gray-900">Contact Information</h2>
-                <div className="space-y-2">
-                  <div className="flex items-start gap-3">
-                    <svg className="h-5 w-5 mt-0.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                    </svg>
-                    <span className="text-gray-700">{business.address}</span>
+                {/* COLUMN 2 — Business Info */}
+                <div className={`space-y-6 ${hasQuests ? 'lg:col-span-4' : 'lg:col-span-1'}`}>
+                  <div>
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <span className={`inline-block rounded border px-3 py-1 text-xs font-medium uppercase tracking-wider ${categoryStyle.bg}`}>
+                          {business.category}
+                        </span>
+                        <h1 className="mt-3 text-3xl font-bold text-gray-900">{business.name}</h1>
+                        <div className="mt-2 flex items-center gap-4 text-sm text-gray-600">
+                          <span className="flex items-center gap-1">
+                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            {business.priceRange}
+                          </span>
+                          {business.rating && (
+                            <span className="flex items-center gap-1">
+                              <svg className="h-4 w-4 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                              </svg>
+                              {business.rating}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <FavoriteButton 
+                        item={{ ...business, type: business.type }}
+                        size="lg"
+                        className="bg-white border-2 border-gray-200"
+                      />
+                    </div>
                   </div>
-                  {business.phone && (
-                    <div className="flex items-center gap-3">
-                      <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+
+                  <p className="text-gray-700 leading-relaxed">{business.description}</p>
+
+                  <div className="space-y-3">
+                    <h2 className="text-lg font-semibold text-gray-900">Contact Information</h2>
+                    <div className="space-y-2">
+                      <div className="flex items-start gap-3">
+                        <svg className="h-5 w-5 mt-0.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                        <span className="text-gray-700">{business.address}</span>
+                      </div>
+                      {business.phone && (
+                        <div className="flex items-center gap-3">
+                          <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                          </svg>
+                          <span className="text-gray-700">{business.phone}</span>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-3">
+                        <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span className="text-gray-700">{business.hours}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <a
+                      href={getDirectionsUrl()}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-6 py-3 text-sm font-medium text-white hover:bg-emerald-700"
+                    >
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
                       </svg>
-                      <span className="text-gray-700">{business.phone}</span>
+                      Get Directions
+                    </a>
+                    {business.phone && (
+                      <a
+                        href={`tel:${business.phone}`}
+                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-6 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                      >
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                        </svg>
+                        Call Now
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setIsReportModalOpen(true)}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-6 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      Report an Issue
+                    </button>
+                  </div>
+
+                  {business.specialties && business.specialties.length > 0 && (
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">Specialties</h2>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {business.specialties.map((specialty, index) => (
+                          <span key={index} className="rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-700">{specialty}</span>
+                        ))}
+                      </div>
                     </div>
                   )}
-                  <div className="flex items-center gap-3">
-                    <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <span className="text-gray-700">{business.hours}</span>
-                  </div>
-                </div>
-              </div>
 
-              {/* Action Buttons */}
-              <div className="flex flex-col sm:flex-row gap-3">
-                <a
-                  href={getDirectionsUrl()}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-6 py-3 text-sm font-medium text-white hover:bg-emerald-700"
-                >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                  </svg>
-                  Get Directions
-                </a>
-                {business.phone && (
-                  <a
-                    href={`tel:${business.phone}`}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-6 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                  >
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
-                    </svg>
-                    Call Now
-                  </a>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setIsReportModalOpen(true)}
-                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-6 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  Report an Issue
-                </button>
-              </div>
-
-              {/* Specialties */}
-              {business.specialties && business.specialties.length > 0 && (
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900">Specialties</h2>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {business.specialties.map((specialty, index) => (
-                      <span
-                        key={index}
-                        className="rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-700"
-                      >
-                        {specialty}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Features */}
-              {business.features && business.features.length > 0 && (
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900">Features & Amenities</h2>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {business.features.map((feature, index) => (
-                      <div key={index} className="flex items-center gap-1 text-sm text-gray-600">
-                        <svg className="h-4 w-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                        {feature}
+                  {business.features && business.features.length > 0 && (
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">Features & Amenities</h2>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {business.features.map((feature, index) => (
+                          <div key={index} className="flex items-center gap-1 text-sm text-gray-600">
+                            <svg className="h-4 w-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                            {feature}
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Social Media */}
-              {(business.website || business.socialMedia?.facebook || business.socialMedia?.instagram) && (
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900">Connect</h2>
-                  <div className="mt-2 flex gap-3">
-                    {business.website && (
-                      <a
-                        href={business.website}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="rounded-lg border border-gray-300 bg-white p-2 text-gray-600 hover:bg-gray-50"
-                      >
-                        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
-                        </svg>
-                      </a>
-                    )}
-                    {business.socialMedia?.facebook && (
-                      <a
-                        href={`https://facebook.com/${business.socialMedia.facebook}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="rounded-lg border border-gray-300 bg-white p-2 text-gray-600 hover:bg-gray-50"
-                      >
-                        <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
-                        </svg>
-                      </a>
-                    )}
-                    {business.socialMedia?.instagram && (
-                      <a
-                        href={`https://instagram.com/${business.socialMedia.instagram}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="rounded-lg border border-gray-300 bg-white p-2 text-gray-600 hover:bg-gray-50"
-                      >
-                        <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zM5.838 12a6.162 6.162 0 1112.324 0 6.162 6.162 0 01-12.324 0zM12 16a4 4 0 110-8 4 4 0 010 8zm4.965-10.405a1.44 1.44 0 112.881.001 1.44 1.44 0 01-2.881-.001z"/>
-                        </svg>
-                      </a>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Map Section */}
-          <div className="mt-12">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">Location</h2>
-            <div className="h-96 rounded-xl overflow-hidden border border-gray-200">
-              <MapContainer
-                center={business.position}
-                zoom={16}
-                className="h-full w-full"
-                scrollWheelZoom={false}
-              >
-                <TileLayer
-                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                />
-                <Marker
-                  position={business.position}
-                  icon={getMarkerIcon(business.type)}
-                >
-                  <Popup>
-                    <div className="min-w-[200px] text-left">
-                      <h3 className="font-semibold text-gray-900">{business.name}</h3>
-                      <p className="mt-1 text-sm text-gray-600">{business.address}</p>
                     </div>
-                  </Popup>
-                </Marker>
-              </MapContainer>
-            </div>
-          </div>
+                  )}
 
-          {/* Reviews Section */}
+                  {(business.website || business.socialMedia?.facebook || business.socialMedia?.instagram) && (
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">Connect</h2>
+                      <div className="mt-2 flex gap-3">
+                        {business.website && (
+                          <a href={business.website} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-gray-300 bg-white p-2 text-gray-600 hover:bg-gray-50">
+                            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+                            </svg>
+                          </a>
+                        )}
+                        {business.socialMedia?.facebook && (
+                          <a href={`https://facebook.com/${business.socialMedia.facebook}`} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-gray-300 bg-white p-2 text-gray-600 hover:bg-gray-50">
+                            <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                            </svg>
+                          </a>
+                        )}
+                        {business.socialMedia?.instagram && (
+                          <a href={`https://instagram.com/${business.socialMedia.instagram}`} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-gray-300 bg-white p-2 text-gray-600 hover:bg-gray-50">
+                            <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zM5.838 12a6.162 6.162 0 1112.324 0 6.162 6.162 0 01-12.324 0zM12 16a4 4 0 110-8 4 4 0 010 8zm4.965-10.405a1.44 1.44 0 112.881.001 1.44 1.44 0 01-2.881-.001z"/>
+                            </svg>
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* COLUMN 3 — Quests (only when present) */}
+                {hasQuests && (
+                  <aside className="lg:col-span-3">
+                    <div className="lg:sticky lg:top-24 space-y-6">
+                      <section className="rounded-2xl shadow-md bg-gradient-to-br from-emerald-500 via-emerald-600 to-emerald-700 p-5">
+                        <div className="flex items-center gap-2 mb-4">
+                          <span className="text-3xl shrink-0">🎁</span>
+                          <div className="flex-1 min-w-0">
+                            <h2 className="text-lg font-bold text-white drop-shadow leading-tight">
+                              {ownerQuests.length === 1 ? 'Reward Available!' : `${ownerQuests.length} Rewards Available!`}
+                            </h2>
+                            <p className="text-xs text-white/90 drop-shadow leading-tight mt-0.5">
+                              Complete a quest to earn perks
+                            </p>
+                          </div>
+                        </div>
+                        <div className="space-y-3">
+                          {ownerQuests.map(quest => (
+                            <OwnerQuestPublicCard
+                              key={quest.id}
+                              quest={quest}
+                              business={business}
+                              currentUser={user}
+                              onPhoto={false}
+                              onLoginRequired={() => setAuthModalOpen(true)}
+                            />
+                          ))}
+                        </div>
+                      </section>
+
+                    </div>
+                  </aside>
+                )}
+              </div>
+            )
+          })()}
+
           <div className="mt-12">
             <h2 className="text-xl font-semibold text-gray-900 mb-6">Reviews</h2>
             <div className="grid md:grid-cols-2 gap-8">
-              {/* Rating Summary & List */}
               <div>
                 <div className="bg-gray-50 rounded-xl p-6 mb-6">
                   <div className="flex items-center gap-4">
@@ -425,8 +441,6 @@ export default function BusinessDetailPage() {
                 </div>
                 <ReviewsList reviews={reviews} loading={reviewsLoading} />
               </div>
-
-              {/* Review Form */}
               <div>
                 <ReviewForm
                   targetType="business"
@@ -440,11 +454,31 @@ export default function BusinessDetailPage() {
             </div>
           </div>
 
-          {/* Related Businesses */}
+          <div className="mt-12">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">Location</h2>
+            <div className="h-96 rounded-xl overflow-hidden border border-gray-200">
+              <MapContainer
+                center={business.position}
+                zoom={16}
+                className="h-full w-full"
+                scrollWheelZoom={false}
+              >
+                <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                <Marker position={business.position} icon={getMarkerIcon(business.type)}>
+                  <Popup>
+                    <div className="min-w-[200px] text-left">
+                      <h3 className="font-semibold text-gray-900">{business.name}</h3>
+                      <p className="mt-1 text-sm text-gray-600">{business.address}</p>
+                    </div>
+                  </Popup>
+                </Marker>
+              </MapContainer>
+            </div>
+          </div>
+
           <div className="mt-12">
             <h2 className="text-xl font-semibold text-gray-900 mb-6">Nearby Businesses</h2>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {/* You can add related business logic here */}
               <div className="text-center text-gray-500 col-span-full">
                 More businesses coming soon...
               </div>
@@ -453,6 +487,9 @@ export default function BusinessDetailPage() {
         </div>
       </main>
       
+      {/* Auth Modal */}
+      <LoginModal isOpen={authModalOpen} onClose={() => setAuthModalOpen(false)} />
+
       {/* Report Issue Modal */}
       <ReportIssueModal
         isOpen={isReportModalOpen}

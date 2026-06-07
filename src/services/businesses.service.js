@@ -13,6 +13,7 @@ const USE_FIRESTORE = import.meta.env.VITE_USE_FIRESTORE_DATA === 'true'
 const BUSINESSES_COLLECTION = 'businesses'
 
 let businessesCache = null
+let ownerBusinessesCache = null
 
 function mapCategoryToType(category) {
   switch (category) {
@@ -51,6 +52,7 @@ function normalizeBusinessDoc(docSnap) {
     website: data.website || null,
     socialMedia: data.socialMedia || data.facebook ? { facebook: data.facebook } : {},
     isActive: data.isActive !== false,
+    ownerUid: data.ownerUid || data.createdByUid || data.submittedBy || null,
   }
 }
 
@@ -181,8 +183,27 @@ export async function getFeaturedBusinesses() {
   return data.slice(0, 3)
 }
 
+export async function getMyApprovedBusinesses(uid) {
+  if (!uid) return []
+  try {
+    const q = query(
+      collection(db, BUSINESSES_COLLECTION),
+      where('ownerUid', '==', uid)
+    )
+    const snapshot = await getDocs(q)
+    const list = snapshot.docs.map(normalizeBusinessDoc)
+    return list.filter(b => b.isActive !== false)
+  } catch (error) {
+    if (import.meta.env.DEV) {
+      console.warn('[businesses] getMyApprovedBusinesses failed:', error)
+    }
+    return []
+  }
+}
+
 export async function clearBusinessesCache() {
   businessesCache = null
+  ownerBusinessesCache = null
   await clearMapPlacesCache()
 }
 
@@ -465,6 +486,96 @@ export async function getRecentApprovedBusinesses(limit = 10) {
   });
 
   return eligible.slice(0, limit);
+}
+
+export async function backfillBusinessOwnerUids(adminUid, adminEmail) {
+  const all = await listBusinesses({ forceRefresh: true })
+  const { data } = all
+
+  const needsBackfill = data.filter((b) => {
+    if (!b.ownerUid) return true
+    return false
+  })
+
+  let scanned = 0
+  let backfilled = 0
+  let skipped = 0
+  let failed = 0
+  const details = []
+
+  for (const business of needsBackfill) {
+    scanned++
+    try {
+      const match = await findSubmissionForBusiness(business)
+      if (!match) {
+        skipped++
+        details.push({
+          id: business.id,
+          name: business.name,
+          status: 'skipped',
+          reason: 'no matching submission found',
+        })
+        continue
+      }
+
+      const submission = match.submission
+      const ownerUid = submission.createdByUid || submission.submittedBy
+
+      if (!ownerUid) {
+        skipped++
+        details.push({
+          id: business.id,
+          name: business.name,
+          status: 'skipped',
+          reason: `submission ${submission.id} has no createdByUid or submittedBy`,
+          strategy: match.strategy,
+        })
+        continue
+      }
+
+      const safePayload = sanitizeForFirestore({
+        ownerUid,
+        updatedAt: serverTimestamp(),
+        _ownerBackfilledAt: serverTimestamp(),
+      })
+
+      await updateDoc(doc(db, BUSINESSES_COLLECTION, String(business.id)), safePayload)
+
+      try {
+        const { logAudit } = await import('./audit.service')
+        await logAudit({
+          action: 'backfill_owner_uid',
+          targetType: 'business',
+          targetId: String(business.id),
+          adminUid,
+          adminEmail,
+          meta: { ownerUid, source: match.strategy, businessName: business.name },
+        })
+      } catch {
+        // audit log is non-critical
+      }
+
+      backfilled++
+      details.push({
+        id: business.id,
+        name: business.name,
+        status: 'backfilled',
+        ownerUid,
+        strategy: match.strategy,
+      })
+    } catch (err) {
+      failed++
+      details.push({
+        id: business.id,
+        name: business.name,
+        status: 'failed',
+        reason: err.message,
+      })
+    }
+  }
+
+  clearBusinessesCache()
+  return { scanned, backfilled, skipped, failed, details }
 }
 
 export async function repairAllBusinessImages(onProgress = () => {}) {

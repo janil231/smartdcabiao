@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
+import MyRewardsSection from '../components/owner/MyRewardsSection'
+import MyQuestsSection from '../components/owner/MyQuestsSection'
 import { useAuth } from '../contexts/AuthContext'
 import { useFavorites } from '../contexts/FavoritesContext'
 import { useLanguage } from '../contexts/LanguageContext'
@@ -93,7 +95,8 @@ export default function ProfilePage() {
   const [showAllDestinationSubmissions, setShowAllDestinationSubmissions] = useState(false)
   const [loading, setLoading] = useState(true)
   const [statsLoading, setStatsLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('overview')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeTab = searchParams.get('tab') || 'overview'
   const [season, setSeason] = useState(null)
   const [seasonStats, setSeasonStats] = useState({
     pointsTotal: 0,
@@ -105,7 +108,6 @@ export default function ProfilePage() {
   const [badgeProgress, setBadgeProgress] = useState({})
   const [showOnLeaderboard, setShowOnLeaderboard] = useState(true)
   const [leaderboardSettingsLoading, setLeaderboardSettingsLoading] = useState(false)
-
   useEffect(() => {
     if (authLoading) return
     
@@ -157,11 +159,11 @@ export default function ProfilePage() {
   useEffect(() => {
     if (authLoading) return
     if (!user) return
-    
+
     let mounted = true
     
-    async function loadSeasonStats() {
-      setStatsLoading(true)
+    async function loadData() {
+      setLoading(true)
       try {
         const { season: activeSeason, seasonId } = await getUserSeasonWithActive()
         
@@ -214,7 +216,7 @@ export default function ProfilePage() {
       }
     }
     
-    loadSeasonStats()
+    loadData()
     
     return () => {
       mounted = false
@@ -285,7 +287,7 @@ export default function ProfilePage() {
 
           <div className="flex gap-2 mb-6 overflow-x-auto">
             <button
-              onClick={() => setActiveTab('overview')}
+              onClick={() => setSearchParams({ tab: 'overview' })}
               className={`px-4 py-2 rounded-lg font-medium text-sm whitespace-nowrap transition ${
                 activeTab === 'overview' 
                   ? 'bg-emerald-600 text-white' 
@@ -295,7 +297,7 @@ export default function ProfilePage() {
               Overview
             </button>
             <button
-              onClick={() => setActiveTab('stats')}
+              onClick={() => setSearchParams({ tab: 'stats' })}
               className={`px-4 py-2 rounded-lg font-medium text-sm whitespace-nowrap transition ${
                 activeTab === 'stats' 
                   ? 'bg-emerald-600 text-white' 
@@ -305,7 +307,7 @@ export default function ProfilePage() {
               Season Stats
             </button>
             <button
-              onClick={() => setActiveTab('badges')}
+              onClick={() => setSearchParams({ tab: 'badges' })}
               className={`px-4 py-2 rounded-lg font-medium text-sm whitespace-nowrap transition ${
                 activeTab === 'badges' 
                   ? 'bg-emerald-600 text-white' 
@@ -315,7 +317,7 @@ export default function ProfilePage() {
               Badges ({earnedBadges?.length ?? 0})
             </button>
             <button
-              onClick={() => setActiveTab('submissions')}
+              onClick={() => setSearchParams({ tab: 'submissions' })}
               className={`px-4 py-2 rounded-lg font-medium text-sm whitespace-nowrap transition ${
                 activeTab === 'submissions' 
                   ? 'bg-emerald-600 text-white' 
@@ -323,6 +325,26 @@ export default function ProfilePage() {
               }`}
             >
               My Submissions
+            </button>
+            <button
+              onClick={() => setSearchParams({ tab: 'rewards' })}
+              className={`px-4 py-2 rounded-lg font-medium text-sm whitespace-nowrap transition ${
+                activeTab === 'rewards' 
+                  ? 'bg-emerald-600 text-white' 
+                  : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'
+              }`}
+            >
+              My Rewards
+            </button>
+            <button
+              onClick={() => setSearchParams({ tab: 'quests' })}
+              className={`px-4 py-2 rounded-lg font-medium text-sm whitespace-nowrap transition ${
+                activeTab === 'quests' 
+                  ? 'bg-emerald-600 text-white' 
+                  : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'
+              }`}
+            >
+              My Quests
             </button>
           </div>
 
@@ -349,6 +371,23 @@ export default function ProfilePage() {
                   <div className="mt-4 flex gap-4 text-sm">
                     <span className="text-gray-600">{favoriteBusinesses.length} businesses</span>
                     <span className="text-gray-600">{favoriteDestinations.length} destinations</span>
+                  </div>
+                </Link>
+
+                <Link 
+                  to="/my-businesses"
+                  className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:border-emerald-300 transition-colors"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center">
+                      <svg className="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                      </svg>
+                    </div>
+                    <div>
+                      <h2 className="font-semibold text-gray-900">My Business</h2>
+                      <p className="text-sm text-gray-500">Manage quests and rewards for your business</p>
+                    </div>
                   </div>
                 </Link>
 
@@ -609,6 +648,14 @@ export default function ProfilePage() {
                 </div>
               )}
             </div>
+          )}
+
+          {activeTab === 'rewards' && (
+            <MyRewardsSection uid={user?.uid} />
+          )}
+
+          {activeTab === 'quests' && (
+            <MyQuestsSection user={user} />
           )}
         </div>
 

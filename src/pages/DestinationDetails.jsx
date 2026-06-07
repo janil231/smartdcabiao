@@ -4,14 +4,9 @@ import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
 import FavoriteButton from '../components/FavoriteButton'
 import ReportIssueModal from '../components/ReportIssueModal'
-import PhotoCarousel from '../components/PhotoCarousel'
-import RatingSummary from '../components/reviews/RatingSummary'
-import ReviewsList from '../components/reviews/ReviewsList'
-import ReviewForm from '../components/reviews/ReviewForm'
-import { useAuth } from '../contexts/AuthContext'
-import { getDestinationImages } from '../utils/placeImages'
+import AppImage from '../components/ui/AppImage'
+import { getDestinationImage } from '../utils/placeImages'
 import { getDestinationById } from '../services/destinations.service'
-import { listApprovedReviews, getMyReview } from '../services/reviews.service'
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -36,30 +31,11 @@ function getDestinationIcon(type = 'destination') {
 export default function DestinationDetails() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { user } = useAuth()
   const [destination, setDestination] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [shareMessage, setShareMessage] = useState('')
   const [isReportModalOpen, setIsReportModalOpen] = useState(false)
-  const [reviews, setReviews] = useState([])
-  const [reviewsLoading, setReviewsLoading] = useState(true)
-  const [myReview, setMyReview] = useState(null)
-
-  const loadReviews = useMemo(() => async () => {
-    setReviewsLoading(true)
-    try {
-      const [approvedReviews, myReviewData] = await Promise.all([
-        listApprovedReviews({ targetType: 'destination', targetId: id }),
-        user ? getMyReview({ targetType: 'destination', targetId: id, uid: user.uid }) : Promise.resolve(null)
-      ])
-      setReviews(approvedReviews)
-      setMyReview(myReviewData)
-    } catch (error) {
-      console.error('Error loading reviews:', error)
-    } finally {
-      setReviewsLoading(false)
-    }
-  }, [id, user])
 
   useEffect(() => {
     async function loadDestination() {
@@ -81,10 +57,6 @@ export default function DestinationDetails() {
 
     loadDestination()
   }, [id, navigate])
-
-  useEffect(() => {
-    loadReviews()
-  }, [loadReviews])
 
   const handleShare = async () => {
     const url = window.location.href
@@ -112,6 +84,25 @@ export default function DestinationDetails() {
     }
   }
 
+  // Create an images array for gallery (safe against null/undefined)
+  const destinationImages = useMemo(() => {
+    if (!destination) {
+      return [] // Return empty array until destination exists
+    }
+    
+    if (destination?.images?.length > 0) {
+      return destination.images
+    }
+    
+    // If destination has a single image property
+    if (destination?.image) {
+      return [destination.image]
+    }
+    
+    // Use placeholder as single image if no real images
+    return [getDestinationImage(destination)]
+  }, [destination])
+
   const getDirections = () => {
     if (destination?.position) {
       const [lat, lng] = destination.position
@@ -120,14 +111,28 @@ export default function DestinationDetails() {
     }
   }
 
+  const nextImage = () => {
+    if (destinationImages.length > 0) {
+      setCurrentImageIndex((prev) => (prev + 1) % destinationImages.length)
+    }
+  }
+
+  const prevImage = () => {
+    if (destinationImages.length > 0) {
+      setCurrentImageIndex((prev) => 
+        prev === 0 ? destinationImages.length - 1 : prev - 1
+      )
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-screen flex-col">
         <Navbar />
-        <main className="flex-1 pb-mobile-nav">
+        <main className="flex-1">
           <div className="animate-pulse">
             <div className="h-64 bg-gray-200" />
-            <div className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
+            <div className="max-w-7xl mx-auto px-4 py-12 sm:px-6 lg:px-8">
               <div className="h-8 bg-gray-200 rounded w-64 mb-4" />
               <div className="h-32 bg-gray-200 rounded mb-8" />
               <div className="grid md:grid-cols-3 gap-8">
@@ -152,8 +157,8 @@ export default function DestinationDetails() {
     return (
       <div className="flex min-h-screen flex-col">
         <Navbar />
-        <main className="flex-1 pb-mobile-nav">
-          <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        <main className="flex-1">
+          <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
             <div className="text-center">
               <div className="inline-flex items-center justify-center w-16 h-16 bg-gray-100 rounded-full mb-4">
                 <svg className="h-8 w-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -181,6 +186,9 @@ export default function DestinationDetails() {
     )
   }
 
+  // Use the same destinationImages array for consistency
+  const images = destinationImages
+
   return (
     <div className="flex min-h-screen flex-col">
       <Navbar />
@@ -198,13 +206,13 @@ export default function DestinationDetails() {
         </div>
       </div>
 
-      <main className="flex-1 pb-mobile-nav">
+      <main className="flex-1">
         <div className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
           {/* Header */}
           <div className="mb-8">
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
               <div>
-                <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">{destination.name}</h1>
+                <h1 className="text-3xl font-bold text-gray-900">{destination.name}</h1>
                 {destination.barangay && (
                   <p className="mt-2 text-lg text-gray-600 flex items-center gap-2">
                     <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -244,7 +252,49 @@ export default function DestinationDetails() {
             {/* Main Content */}
             <div className="md:col-span-2 space-y-8">
               {/* Image Gallery */}
-              <PhotoCarousel images={getDestinationImages(destination)} alt={destination.name} mode="detail" className="aspect-video w-full overflow-hidden rounded-xl" />
+              <div>
+                <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-gray-100">
+                  <AppImage
+                    src={destinationImages[currentImageIndex]}
+                    alt={destination.name}
+                    className="h-full w-full"
+                    fallbackSrc={getDestinationImage(destination)}
+                  />
+                  {images.length > 1 && (
+                    <>
+                      <button
+                        onClick={prevImage}
+                        className="absolute left-4 top-1/2 -translate-y-1/2 rounded-full bg-white/80 p-2 text-gray-600 hover:bg-white hover:text-gray-900 transition"
+                      >
+                        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={nextImage}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full bg-white/80 p-2 text-gray-600 hover:bg-white hover:text-gray-900 transition"
+                      >
+                        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </button>
+                    </>
+                  )}
+                </div>
+                  {destinationImages.length > 1 && (
+                    <div className="mt-4 flex justify-center gap-2">
+                      {destinationImages.map((_, index) => (
+                      <button
+                        key={index}
+                        onClick={() => setCurrentImageIndex(index)}
+                        className={`h-2 w-2 rounded-full transition ${
+                          index === currentImageIndex ? 'bg-emerald-600' : 'bg-gray-300'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {/* Description */}
               <div>
@@ -301,42 +351,6 @@ export default function DestinationDetails() {
                   </div>
                 </div>
               )}
-
-              {/* Reviews Section */}
-              <div>
-                <h2 className="text-xl font-semibold text-gray-900 mb-6">Reviews</h2>
-                <div className="grid md:grid-cols-2 gap-8">
-                  {/* Rating Summary & List */}
-                  <div>
-                    <div className="bg-gray-50 rounded-xl p-6 mb-6">
-                      <div className="flex items-center gap-4">
-                        <div className="text-4xl font-bold text-gray-900">
-                          {destination.ratingAvg ? destination.ratingAvg.toFixed(1) : '0.0'}
-                        </div>
-                        <div>
-                          <RatingSummary ratingAvg={destination.ratingAvg} ratingCount={destination.ratingCount} />
-                          <p className="text-sm text-gray-500 mt-1">
-                            {destination.ratingCount || 0} {destination.ratingCount === 1 ? 'review' : 'reviews'}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                    <ReviewsList reviews={reviews} loading={reviewsLoading} />
-                  </div>
-
-                  {/* Review Form */}
-                  <div>
-                    <ReviewForm
-                      targetType="destination"
-                      targetId={id}
-                      user={user}
-                      existingReview={myReview}
-                      placeName={destination.name}
-                      onReviewSubmitted={loadReviews}
-                    />
-                  </div>
-                </div>
-              </div>
             </div>
 
             {/* Sidebar */}

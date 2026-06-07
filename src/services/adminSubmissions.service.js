@@ -127,6 +127,8 @@ export async function approveSubmissionAndPublish(id, { reviewedBy, reviewedByEm
     ]
     const uniqueImages = [...new Set(allImages)]
 
+    const ownerUid = submission.submittedBy || submission.createdByUid || null
+
     const publishedData = sanitizeForFirestore({
       name: submission.name,
       category: submission.category || 'other',
@@ -142,7 +144,8 @@ export async function approveSubmissionAndPublish(id, { reviewedBy, reviewedByEm
       publishedAt: serverTimestamp(),
       sourceSubmissionId: id,
       sourceSubmissionName: submission.name,
-      createdByUid: submission.createdByUid || null,
+      ownerUid,
+      createdByUid: submission.createdByUid || ownerUid,
       createdByEmail: submission.createdByEmail || null
     })
 
@@ -292,6 +295,7 @@ export async function approveBusinessSubmission(submissionId, submissionData, ad
       isActive: true,
       isVerified: false,
       verified: false,
+      ownerUid: submission.submittedBy || null,
       submittedBy: submission.submittedBy,
       sourceSubmissionId: submissionId,
       createdAt: serverTimestamp(),

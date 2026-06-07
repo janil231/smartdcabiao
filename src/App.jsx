@@ -15,6 +15,7 @@ import DestinationDetails from './pages/DestinationDetails'
 import FavoritesPage from './pages/FavoritesPage'
 import CommunityActivitiesPage from './pages/CommunityActivitiesPage'
 import RewardsPreviewPage from './pages/RewardsPreviewPage'
+import RewardsNearbyPage from './pages/RewardsNearbyPage'
 import VoucherStorePage from './pages/VoucherStorePage'
 import PrivacyPolicyPage from './pages/PrivacyPolicyPage'
 import TermsPage from './pages/TermsPage'
@@ -25,6 +26,8 @@ import LGUDashboardPage from './pages/LGUDashboardPage'
 import LGUMerchantInsightsPage from './pages/lgu/LGUMerchantInsightsPage'
 import ProfilePage from './pages/ProfilePage'
 import RegisterBusinessPage from './pages/RegisterBusinessPage'
+import MyBusinessesPage from './pages/MyBusinessesPage'
+import MyBusinessQuestsPage from './pages/MyBusinessQuestsPage'
 
 function AppLayout() {
   const { pathname } = useLocation()
@@ -43,6 +46,7 @@ function AppLayout() {
           <Route path="/favorites" element={<FavoritesPage />} />
           <Route path="/events" element={<CommunityActivitiesPage />} />
           <Route path="/rewards" element={<RewardsPreviewPage />} />
+          <Route path="/rewards-nearby" element={<RewardsNearbyPage />} />
           <Route path="/vouchers" element={<VoucherStorePage />} />
           <Route path="/privacy" element={<PrivacyPolicyPage />} />
           <Route path="/terms" element={<TermsPage />} />
@@ -53,6 +57,8 @@ function AppLayout() {
           <Route path="/register-business" element={<RegisterBusinessPage />} />
           <Route path="/lgu" element={<LGUDashboardPage />} />
           <Route path="/lgu/merchant/:businessId" element={<LGUMerchantInsightsPage />} />
+          <Route path="/my-businesses" element={<MyBusinessesPage />} />
+          <Route path="/my-businesses/:id/quests" element={<MyBusinessQuestsPage />} />
         </Routes>
       </PageTransition>
       {!isLguRoute && <BottomNav />}
