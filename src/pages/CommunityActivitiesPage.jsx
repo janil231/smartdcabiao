@@ -14,6 +14,7 @@ import {
   reconcileOverbookedQuestSlots,
 } from '../services/participations.service'
 import { listActiveOwnerQuests } from '../services/ownerQuests.service'
+import { getUserJoinedQuestIds } from '../utils/userJoinedQuests'
 import OwnerQuestCompactCard from '../components/owner/OwnerQuestCompactCard'
 import { hasUserSeenOnboarding, setSeenOnboarding, getUserLocation, setUserLocation as saveUserLocation } from '../services/userSettings.service'
 import { CABIAO_CENTER } from '../constants/cabiaoGeo'
@@ -69,6 +70,7 @@ function QuestCard({
   extraBadge,
   onScanQR,
   onEnterCode,
+  isJoined: propIsJoined,
 }) {
   const typeStyle = TYPE_STYLES[quest.category] || 'bg-gray-100 text-gray-700 border-gray-200'
   const typeLabel = TYPE_LABELS[quest.category] || 'Quest'
@@ -79,7 +81,8 @@ function QuestCard({
 
   const { capacity, reserved, slotsLeft, isFull } = getQuestSlotInfo(quest)
 
-  const isJoined = participation?.status === 'joined'
+  const participationJoined = participation?.status === 'joined'
+  const isJoined = propIsJoined || participationJoined
   const isCompleted = participation?.status === 'completed'
   const isCancelledOrExpired = participation?.status === 'cancelled' || participation?.status === 'expired'
   
@@ -173,9 +176,9 @@ function QuestCard({
   }
 
   const handleAction = () => {
-    if (isJoined) {
+    if (participationJoined) {
       onCancel(quest.id)
-    } else if (!isCompleted && !isCancelledOrExpired) {
+    } else if (!isCompleted && !isCancelledOrExpired && !propIsJoined) {
       onJoin(quest.id)
     }
   }
@@ -211,10 +214,20 @@ function QuestCard({
   return (
     <article 
       ref={focused ? (el) => el?.scrollIntoView({ behavior: 'smooth', block: 'center' }) : undefined}
-      className={`flex flex-col overflow-hidden rounded-xl border bg-white shadow-sm transition hover:shadow-md ${
-        focused ? 'border-emerald-400 ring-2 ring-emerald-200' : 'border-gray-200'
+      className={`relative flex flex-col overflow-hidden rounded-xl border bg-white shadow-sm transition hover:shadow-md ${
+        focused
+          ? 'border-emerald-400 ring-2 ring-emerald-200'
+          : isJoined
+          ? 'border-emerald-400 ring-1 ring-emerald-200'
+          : 'border-gray-200'
       }`}
     >
+      {isJoined && (
+        <span className="absolute top-2 right-2 z-10 bg-emerald-600 text-white text-xs font-medium px-2 py-1 rounded-full shadow-sm flex items-center gap-1">
+          <span>✅</span>
+          <span>Joined</span>
+        </span>
+      )}
       <div className="flex flex-1 flex-col p-5">
         <div className="flex flex-wrap items-center gap-2">
           <span className={`inline-block w-fit rounded border px-2 py-0.5 text-xs font-medium uppercase tracking-wider ${typeStyle}`}>
@@ -330,12 +343,14 @@ function QuestCard({
         <button
           type="button"
           onClick={handleAction}
-          disabled={isLoading || isCompleted || isCancelledOrExpired || (!isJoined && isFull)}
+          disabled={isLoading || isCompleted || isCancelledOrExpired || isJoined || (!isJoined && isFull)}
           className={`mt-4 inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition focus:outline-none focus:ring-2 focus:ring-offset-2 ${
             isCompleted
               ? 'cursor-default bg-emerald-100 text-emerald-700'
               : isCancelledOrExpired
               ? 'cursor-default bg-gray-100 text-gray-400'
+              : propIsJoined && !participationJoined
+              ? 'cursor-default bg-gray-100 text-gray-500'
               : isJoined
               ? 'bg-red-100 text-red-700 hover:bg-red-200 focus:ring-red-400'
               : isFull
@@ -352,6 +367,8 @@ function QuestCard({
               </svg>
               Completed
             </>
+          ) : propIsJoined && !participationJoined ? (
+            <span className="text-gray-500">✅ Already Joined</span>
           ) : isJoined ? (
             <>
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -415,27 +432,41 @@ function CancelConfirmModal({ isOpen, onClose, onConfirm, isLoading, questTitle 
 
 export default function CommunityActivitiesPage() {
   const { user, grandfatheredUnverified, loading: authLoading } = useAuth()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const focusQuestId = searchParams.get('focusQuestId')
-  
-  const [quests, setQuests] = useState([])
+  const activeTab = searchParams.get('tab') || 'community'
+
+  const [lguQuests, setLguQuests] = useState([])
+  const [ownerQuests, setOwnerQuests] = useState([])
   const [participations, setParticipations] = useState({})
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  const [joinedIds, setJoinedIds] = useState({ lguIds: new Set(), ownerIds: new Set() })
+  const [myQuestsFilter, setMyQuestsFilter] = useState('active')
+
+  const [loadingLGU, setLoadingLGU] = useState(true)
+  const [loadingOwner, setLoadingOwner] = useState(true)
+  const [loadingJoined, setLoadingJoined] = useState(true)
+  const [lguError, setLguError] = useState(null)
+  const [ownerError, setOwnerError] = useState(null)
+
   const [actionLoading, setActionLoading] = useState(null)
   const [activeSeason, setActiveSeason] = useState(null)
-  const [activeTab, setActiveTab] = useState('all')
   const [toast, setToast] = useState(null)
   const [cancelConfirm, setCancelConfirm] = useState(null)
-  
+
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [userLocation, setUserLocation] = useState(null)
   const [locationLoading, setLocationLoading] = useState(false)
   const [locationError, setLocationError] = useState(null)
   const [showQRScanner, setShowQRScanner] = useState(false)
   const [codeQuest, setCodeQuest] = useState(null)
-  const [ownerQuests, setOwnerQuests] = useState([])
-  const [ownerQuestsLoading, setOwnerQuestsLoading] = useState(true)
+
+  const setTab = (tab) => {
+    setSearchParams(prev => {
+      const params = new URLSearchParams(prev)
+      params.set('tab', tab)
+      return params
+    })
+  }
 
   useEffect(() => {
     autoEndStaleSeasons().catch((err) => {
@@ -448,104 +479,118 @@ export default function CommunityActivitiesPage() {
     setTimeout(() => setToast(null), 4000)
   }
 
-  const loadQuests = useCallback(async () => {
-    setError(null)
+  /* Effect 1: Fetch LGU quests for active season */
+  const loadLguQuests = useCallback(async () => {
+    setLguError(null)
     try {
       if (user) {
         await auth.authStateReady()
       }
       const season = await getActiveSeason()
-      
       if (season) {
         setActiveSeason(season)
-        console.log('[Events] Active season:', season.name, season.id);
         let questList = []
         try {
           questList = await listActiveQuestsBySeason(season.id)
-          console.log('[Events] Loaded', questList.length, 'active quests');
         } catch (err) {
-          console.error('[Events] Failed to load quests:', err);
-          throw err;
+          throw err
         }
         if (questList.length > 0 && user) {
           questList = await reconcileOverbookedQuestSlots(questList)
-        }
+          const userParts = await getUserParticipations(user.uid)
+          const partsMap = {}
+          userParts.forEach(p => {
+            partsMap[p.questId] = p
+          })
+          setParticipations(partsMap)
 
-        if (questList.length > 0) {
-          setQuests(questList)
-          
-          if (user) {
-            const userParts = await getUserParticipations(user.uid)
-            const partsMap = {}
-            userParts.forEach(p => {
-              partsMap[p.questId] = p
-            })
-            setParticipations(partsMap)
-            
-            try {
-              await expireMyStaleParticipations(user.uid)
-            } catch (expireErr) {
-              console.warn('Expire stale participations:', expireErr?.message || expireErr)
-            }
-            const refreshedParts = await getUserParticipations(user.uid)
-            const refreshedMap = {}
-            refreshedParts.forEach(p => {
-              refreshedMap[p.questId] = p
-            })
-            setParticipations(refreshedMap)
-
-            const seenOnboarding = await hasUserSeenOnboarding(user.uid, season.id)
-            if (!seenOnboarding) {
-              setShowOnboarding(true)
-            }
-
-            const savedLocation = await getUserLocation(user.uid)
-            if (savedLocation) {
-              setUserLocation(savedLocation)
-            }
+          try {
+            await expireMyStaleParticipations(user.uid)
+          } catch (expireErr) {
+            console.warn('Expire stale participations:', expireErr?.message || expireErr)
           }
-        } else {
-          console.log('[Events] No quests found for active season');
+          const refreshedParts = await getUserParticipations(user.uid)
+          const refreshedMap = {}
+          refreshedParts.forEach(p => {
+            refreshedMap[p.questId] = p
+          })
+          setParticipations(refreshedMap)
+
+          const seenOnboarding = await hasUserSeenOnboarding(user.uid, season.id)
+          if (!seenOnboarding) {
+            setShowOnboarding(true)
+          }
+
+          const savedLocation = await getUserLocation(user.uid)
+          if (savedLocation) {
+            setUserLocation(savedLocation)
+          }
         }
-      } else {
-        console.log('[Events] No active season found');
+        setLguQuests(questList)
       }
     } catch (err) {
-      console.error('[Events] Error loading quests:', err)
       const msg = err?.message || ''
       if (msg.includes('permission') || err?.code === 'permission-denied') {
-        setError(
-          'Could not load quest data (Firestore permission). Sign in, hard-refresh, and deploy the latest firestore.rules if this persists.'
-        )
-      } else if (msg.includes('BLOCKED') || err?.message?.includes('network')) {
-        setError(
-          'Firestore was blocked by a browser extension. Pause ad blockers for localhost:5173 and refresh.'
-        )
+        setLguError('Could not load quest data (Firestore permission).')
+      } else if (msg.includes('BLOCKED') || msg.includes('network')) {
+        setLguError('Firestore was blocked by a browser extension.')
+      } else {
+        setLguError(err?.message || 'Failed to load quests')
       }
     } finally {
-      setLoading(false)
+      setLoadingLGU(false)
     }
   }, [user])
 
   useEffect(() => {
     if (authLoading) return
-    loadQuests()
-  }, [loadQuests, authLoading])
+    loadLguQuests()
+  }, [loadLguQuests, authLoading])
 
+  /* Effect 2: Fetch owner quests (independent of season) */
   useEffect(() => {
     let cancelled = false
-    ;(async () => {
-      try {
-        const list = await listActiveOwnerQuests()
-        if (!cancelled) setOwnerQuests(list)
-      } catch (err) {
-        console.warn('[Events] Failed to load owner quests:', err)
-      } finally {
-        if (!cancelled) setOwnerQuestsLoading(false)
-      }
-    })()
+    setLoadingOwner(true)
+    listActiveOwnerQuests()
+      .then(data => {
+        if (!cancelled) {
+          setOwnerQuests(data)
+          setLoadingOwner(false)
+        }
+      })
+      .catch(err => {
+        if (!cancelled) {
+          console.warn('[Events] Failed to load owner quests:', err)
+          setOwnerError(err?.message || 'Failed to load owner quests')
+          setLoadingOwner(false)
+        }
+      })
     return () => { cancelled = true }
   }, [])
+
+  /* Effect 3: Fetch user's joined quest IDs */
+  useEffect(() => {
+    if (!user) {
+      setJoinedIds({ lguIds: new Set(), ownerIds: new Set() })
+      setLoadingJoined(false)
+      return
+    }
+    let cancelled = false
+    setLoadingJoined(true)
+    getUserJoinedQuestIds(user.uid)
+      .then(ids => {
+        if (!cancelled) {
+          setJoinedIds(ids)
+          setLoadingJoined(false)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLoadingJoined(false)
+        }
+      })
+    return () => { cancelled = true }
+  }, [user])
 
   const handleLocationRequest = async () => {
     if (!navigator.geolocation) {
@@ -576,10 +621,6 @@ export default function CommunityActivitiesPage() {
       }
     )
   }
-
-  const myQuestIds = useMemo(() => {
-    return new Set(Object.keys(participations))
-  }, [participations])
 
   const isQuestActiveNow = useCallback((quest) => {
     if (!quest) return false
@@ -621,14 +662,14 @@ export default function CommunityActivitiesPage() {
   }, [quests, activeTab, myQuestIds])
 
   const finishingSoonQuests = useMemo(() => {
-    return quests
+    return lguQuests
       .filter((q) => q.endAt && isQuestActiveNow(q))
       .sort((a, b) => (toJSDate(a.endAt) || 0) - (toJSDate(b.endAt) || 0))
       .slice(0, 5)
-  }, [quests, isQuestActiveNow])
+  }, [lguQuests, isQuestActiveNow])
 
   const highImpactQuests = useMemo(() => {
-    return quests
+    return lguQuests
       .filter(
         (q) =>
           isQuestActiveNow(q) &&
@@ -638,15 +679,17 @@ export default function CommunityActivitiesPage() {
       )
       .sort((a, b) => (b.impact?.amountPerCompletion || 0) - (a.impact?.amountPerCompletion || 0))
       .slice(0, 6)
-  }, [quests, isQuestActiveNow])
+  }, [lguQuests, isQuestActiveNow])
 
   const nearbyQuests = useMemo(() => {
+    const allWithLocation = [...lguQuests, ...ownerQuests]
+
     const base =
       userLocation && typeof userLocation.lat === 'number' && typeof userLocation.lng === 'number'
         ? { lat: userLocation.lat, lng: userLocation.lng, isUser: true }
         : { lat: CABIAO_CENTER[0], lng: CABIAO_CENTER[1], isUser: false }
 
-    const withLocation = quests.filter((q) => {
+    const withLocation = allWithLocation.filter((q) => {
       if (!q.position) return false
       if (Array.isArray(q.position)) {
         return q.position.length === 2
@@ -682,10 +725,10 @@ export default function CommunityActivitiesPage() {
       baseIsUserLocation: base.isUser,
       quests: questsWithDistance.slice(0, 5),
     }
-  }, [quests, userLocation, isQuestActiveNow])
+  }, [lguQuests, ownerQuests, userLocation, isQuestActiveNow])
 
   const beginnerQuests = useMemo(() => {
-    return quests
+    return lguQuests
       .filter(q => {
         const { slotsLeft, isFull } = getQuestSlotInfo(q)
         return !isFull && slotsLeft > 0 && isQuestActiveNow(q)
@@ -735,11 +778,10 @@ export default function CommunityActivitiesPage() {
       return
     }
     setActionLoading(questId)
-    setError(null)
 
     try {
       await auth.authStateReady()
-      const quest = quests.find(q => q.id === questId)
+      const quest = lguQuests.find(q => q.id === questId)
       await joinQuest({
         uid: user.uid,
         questId,
@@ -756,7 +798,6 @@ export default function CommunityActivitiesPage() {
       const expiresDate = new Date(Date.now() + (quest?.gracePeriodHours || 24) * 60 * 60 * 1000)
       showToast(`🎉 Joined! Complete by ${expiresDate.toLocaleDateString()} to earn ${quest?.points || 0} points.`, 'success')
     } catch (err) {
-      setError(err.message ?? 'Failed to join quest')
       showToast(err.message ?? 'Failed to join quest', 'error')
     } finally {
       setActionLoading(null)
@@ -768,7 +809,6 @@ export default function CommunityActivitiesPage() {
     const questId = cancelConfirm.questId
     
     setActionLoading(questId)
-    setError(null)
     
     try {
       await cancelQuest({
@@ -786,24 +826,11 @@ export default function CommunityActivitiesPage() {
       showToast('Your spot has been released.', 'success')
       setCancelConfirm(null)
     } catch (err) {
-      setError(err.message ?? 'Failed to cancel quest')
       showToast(err.message ?? 'Failed to cancel quest', 'error')
     } finally {
       setActionLoading(null)
     }
   }
-
-  const myQuestsCount = useMemo(() => {
-    return Object.keys(participations).length
-  }, [participations])
-
-  const joinedCount = useMemo(() => {
-    return Object.values(participations).filter(p => p.status === 'joined').length
-  }, [participations])
-
-  const completedCount = useMemo(() => {
-    return Object.values(participations).filter(p => p.status === 'completed').length
-  }, [participations])
 
   const getSeasonCountdown = () => {
     if (!activeSeason?.endAt) return null
@@ -813,6 +840,11 @@ export default function CommunityActivitiesPage() {
     const daysLeft = Math.ceil((endDate - now) / (1000 * 60 * 60 * 24))
     if (daysLeft <= 0) return 'Season ended'
     return `Ends in ${daysLeft} day${daysLeft > 1 ? 's' : ''}`
+  }
+
+  const handleCancelById = (id) => {
+    const q = lguQuests.find(qu => qu.id === id)
+    setCancelConfirm({ questId: id, title: q?.title })
   }
 
   const questVerifyProps = {
@@ -830,6 +862,145 @@ export default function CommunityActivitiesPage() {
       }
       setCodeQuest(q)
     },
+  }
+
+  const communityCount = lguQuests.length
+  const businessCount = ownerQuests.length
+  const myQuestsCount = joinedIds.lguIds.size + joinedIds.ownerIds.size
+
+  function TabButton({ tab, label, count }) {
+    const isActive = activeTab === tab
+    return (
+      <button
+        onClick={() => setTab(tab)}
+        className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+          isActive
+            ? 'border-emerald-600 text-emerald-700'
+            : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+        }`}
+      >
+        {label}
+        {count > 0 && (
+          <span className={`ml-2 px-2 py-0.5 rounded-full text-xs ${
+            isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'
+          }`}>
+            {count}
+          </span>
+        )}
+      </button>
+    )
+  }
+
+  function FilterChip({ active, onClick, children }) {
+    return (
+      <button
+        onClick={onClick}
+        className={`px-3 py-1.5 text-sm font-medium rounded-lg transition ${
+          active
+            ? 'bg-emerald-600 text-white shadow-sm'
+            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+        }`}
+      >
+        {children}
+      </button>
+    )
+  }
+
+  function MyQuestsTab({ lguQuests: lgu, ownerQuests: owner, joinedIds: ids, participations: parts, filter: mFilter, onFilterChange, setTab: switchTab }) {
+    if (!user) {
+      return (
+        <div className="text-center py-12 text-gray-500">
+          <p>Sign in to see your quests.</p>
+        </div>
+      )
+    }
+
+    const myLgu = lgu
+      .filter(q => ids.lguIds.has(q.id))
+      .map(q => ({ ...q, _type: 'community' }))
+
+    const myOwner = owner
+      .filter(q => ids.ownerIds.has(q.id))
+      .map(q => ({ ...q, _type: 'business' }))
+
+    let combined = [...myLgu, ...myOwner]
+
+    if (mFilter === 'active') {
+      combined = combined.filter(q => {
+        if (q._type === 'community') {
+          const p = parts[q.id]
+          return p && (p.status === 'joined' || p.status === 'active' || p.status === 'paused')
+        }
+        return true
+      })
+    } else if (mFilter === 'completed') {
+      combined = combined.filter(q => {
+        if (q._type === 'community') {
+          const p = parts[q.id]
+          return p && p.status === 'completed'
+        }
+        return false
+      })
+    }
+
+    if (combined.length === 0) {
+      return (
+        <div className="text-center py-12 text-gray-500">
+          <p className="mb-2">You haven't joined any quests yet.</p>
+          <button
+            onClick={() => switchTab('community')}
+            className="text-emerald-600 hover:underline"
+          >
+            Browse community quests →
+          </button>
+        </div>
+      )
+    }
+
+    return (
+      <div>
+        <div className="flex gap-2 mb-4">
+          <FilterChip active={mFilter === 'active'} onClick={() => onFilterChange('active')}>Active</FilterChip>
+          <FilterChip active={mFilter === 'completed'} onClick={() => onFilterChange('completed')}>Completed</FilterChip>
+          <FilterChip active={mFilter === 'all'} onClick={() => onFilterChange('all')}>All</FilterChip>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {combined.map(quest => (
+            <div key={`${quest._type}-${quest.id}`} className="relative">
+              <span className={`absolute top-2 left-2 z-10 text-xs font-medium px-2 py-0.5 rounded-full ${
+                quest._type === 'community'
+                  ? 'bg-emerald-100 text-emerald-800'
+                  : 'bg-amber-100 text-amber-800'
+              }`}>
+                {quest._type === 'community' ? 'Community' : 'Business'}
+              </span>
+
+              {quest._type === 'community' ? (
+                <QuestCard
+                  quest={quest}
+                  participation={parts[quest.id]}
+                  onJoin={handleJoin}
+                  onCancel={handleCancelById}
+                  isLoading={actionLoading === quest.id}
+                  focused={focusQuestId === quest.id}
+                  isJoined={true}
+                  {...questVerifyProps}
+                />
+              ) : (
+                <OwnerQuestCompactCard
+                  quest={quest}
+                  businessId={quest.businessId}
+                  businessName={quest.businessName}
+                  businessImage={quest.businessImage}
+                  isJoined={true}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -879,264 +1050,221 @@ export default function CommunityActivitiesPage() {
             </div>
           )}
 
-          <div className="mt-6 flex gap-2 border-b border-gray-200">
-            <button
-              onClick={() => setActiveTab('all')}
-              className={`px-4 py-2 -mb-px text-sm font-medium border-b-2 transition ${
-                activeTab === 'all'
-                  ? 'border-emerald-500 text-emerald-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              All Quests
-              {quests.length > 0 && (
-                <span className="ml-2 text-xs bg-gray-200 px-2 py-0.5 rounded-full">{quests.length}</span>
-              )}
-            </button>
-            <button
-              onClick={() => setActiveTab('my')}
-              disabled={!user || myQuestsCount === 0}
-              className={`px-4 py-2 -mb-px text-sm font-medium border-b-2 transition ${
-                activeTab === 'my'
-                  ? 'border-emerald-500 text-emerald-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed'
-              }`}
-            >
-              My Quests
-              {user && myQuestsCount > 0 && (
-                <span className="ml-2 text-xs bg-emerald-100 px-2 py-0.5 rounded-full">{myQuestsCount}</span>
-              )}
-            </button>
-          </div>
-
-          {user && joinedCount > 0 && (
-            <div className="mt-4 flex flex-wrap items-center gap-4 text-sm">
-              <span className="text-amber-700 font-medium">⏳ {joinedCount} pending</span>
-              <span className="text-emerald-700 font-medium">✅ {completedCount} completed</span>
-              <Link
-                to="/rewards"
-                className="ml-auto text-emerald-600 hover:text-emerald-700 font-medium"
-              >
-                View rewards →
-              </Link>
-            </div>
-          )}
-
-          {error && (
-            <div className="mt-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3">
-              <p className="text-sm text-red-700">{error}</p>
+          {/* Near You — pinned above tabs */}
+          <section className="mt-8 mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                📍 Near You
+              </h2>
               <button
-                onClick={() => { setLoading(true); setError(null); loadQuests(); }}
-                className="mt-2 text-sm font-medium text-red-700 underline hover:text-red-800"
+                onClick={handleLocationRequest}
+                disabled={locationLoading}
+                className="text-sm text-emerald-600 hover:text-emerald-700 disabled:opacity-50"
               >
-                Try again
+                {locationLoading ? 'Getting location...' : 'Use my location'}
               </button>
             </div>
-          )}
 
-          {!loading && quests.length > 0 && activeTab === 'all' && (
-            <>
-              {finishingSoonQuests.length > 0 && (
-                <section className="mt-6">
-                  <div className="flex items-center justify-between mb-3">
-                    <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                      ⏰ Finishing Soon
-                    </h2>
-                    <button
-                      onClick={() => document.getElementById('all-quests')?.scrollIntoView({ behavior: 'smooth' })}
-                      className="text-sm text-emerald-600 hover:text-emerald-700"
-                    >
-                      See all →
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-                    {finishingSoonQuests.map(quest => {
-                      const endAt = toJSDate(quest.endAt)
-                      let daysLabel = null
-                      if (endAt) {
-                        const now = new Date()
-                        const daysLeft = Math.max(
-                          0,
-                          Math.ceil((endAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-                        )
-                        daysLabel =
-                          daysLeft <= 0
-                            ? 'Ends today'
-                            : `Ends in ${daysLeft} day${daysLeft > 1 ? 's' : ''}`
-                      }
-                      return (
-                        <QuestCard
-                          key={quest.id}
-                          quest={quest}
-                          participation={participations[quest.id]}
-                          onJoin={handleJoin}
-                          onCancel={(id) => {
-                            const q = quests.find(qu => qu.id === id)
-                            setCancelConfirm({ questId: id, title: q?.title })
-                          }}
-                          isLoading={actionLoading === quest.id}
-                          focused={focusQuestId === quest.id}
-                          extraBadge={daysLabel}
-                          {...questVerifyProps}
-                        />
-                      )
-                    })}
-                  </div>
-                </section>
-              )}
+            {locationError && (
+              <p className="text-sm text-amber-600 mb-3">{locationError}</p>
+            )}
 
-              {highImpactQuests.length > 0 && (
-                <section className="mt-8">
-                  <div className="flex items-center justify-between mb-3">
-                    <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                      🌱 High Impact
-                    </h2>
-                    <button
-                      onClick={() => document.getElementById('all-quests')?.scrollIntoView({ behavior: 'smooth' })}
-                      className="text-sm text-emerald-600 hover:text-emerald-700"
-                    >
-                      See all →
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-                    {highImpactQuests.map(quest => (
+            {nearbyQuests && nearbyQuests.quests.length === 0 && (
+              <p className="text-sm text-gray-600">
+                No quests with location data yet. Browse quests below.
+              </p>
+            )}
+
+            {nearbyQuests && nearbyQuests.quests.length > 0 && (
+              <>
+                {!nearbyQuests.baseIsUserLocation && (
+                  <p className="text-sm text-gray-600 mb-3">
+                    Showing quests near Cabiao center. Enable location for more accurate results.
+                  </p>
+                )}
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {nearbyQuests.quests.map(quest => (
+                    quest.questType === 'visit' || quest.questType === 'buy' ? (
+                      <OwnerQuestCompactCard
+                        key={quest.id}
+                        quest={quest}
+                        businessId={quest.businessId}
+                        businessName={quest.businessName}
+                        businessImage={quest.businessImage}
+                        isJoined={joinedIds.ownerIds.has(quest.id)}
+                      />
+                    ) : (
                       <QuestCard
                         key={quest.id}
                         quest={quest}
                         participation={participations[quest.id]}
                         onJoin={handleJoin}
-                        onCancel={(id) => {
-                          const q = quests.find(qu => qu.id === id)
-                          setCancelConfirm({ questId: id, title: q?.title })
-                        }}
+                        onCancel={handleCancelById}
                         isLoading={actionLoading === quest.id}
                         focused={focusQuestId === quest.id}
-                        extraBadge={quest.impact?.label ? `Impact: ${quest.impact.label}` : 'High impact'}
+                        distanceKm={quest.distanceKm}
+                        isJoined={joinedIds.lguIds.has(quest.id)}
                         {...questVerifyProps}
                       />
-                    ))}
-                  </div>
-                </section>
-              )}
+                    )
+                  ))}
+                </div>
+              </>
+            )}
+          </section>
 
-              <section className="mt-8">
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                    📍 Near You
-                  </h2>
+          {/* Tab navigation */}
+          <div className="border-b border-gray-200 mb-6">
+            <nav className="flex gap-1 -mb-px overflow-x-auto">
+              <TabButton tab="community" label="Community Quests" count={communityCount} />
+              <TabButton tab="business" label="Business Quests" count={businessCount} />
+              <TabButton tab="my" label="My Quests" count={myQuestsCount} />
+            </nav>
+          </div>
+
+          {/* Community Quests Tab */}
+          {activeTab === 'community' && (
+            <div>
+              {loadingLGU ? (
+                <p className="text-center text-gray-500 py-8">Loading quests...</p>
+              ) : lguError ? (
+                <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3">
+                  <p className="text-sm text-red-700">{lguError}</p>
                   <button
-                    onClick={handleLocationRequest}
-                    disabled={locationLoading}
-                    className="text-sm text-emerald-600 hover:text-emerald-700 disabled:opacity-50"
+                    onClick={() => { setLoadingLGU(true); loadLguQuests(); }}
+                    className="mt-2 text-sm font-medium text-red-700 underline hover:text-red-800"
                   >
-                    {locationLoading ? 'Getting location...' : 'Use my location'}
+                    Try again
                   </button>
                 </div>
-                
-                {locationError && (
-                  <p className="text-sm text-amber-600 mb-3">{locationError}</p>
-                )}
+              ) : lguQuests.length === 0 ? (
+                <p className="text-center text-gray-500 py-8">No quests in this season yet.</p>
+              ) : (
+                <>
+                  {finishingSoonQuests.length > 0 && (
+                    <section className="mb-8">
+                      <div className="flex items-center justify-between mb-3">
+                        <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                          ⏰ Finishing Soon
+                        </h2>
+                      </div>
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                        {finishingSoonQuests.map(quest => {
+                          const endAt = toJSDate(quest.endAt)
+                          let daysLabel = null
+                          if (endAt) {
+                            const now = new Date()
+                            const daysLeft = Math.max(0, Math.ceil((endAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)))
+                            daysLabel = daysLeft <= 0 ? 'Ends today' : `Ends in ${daysLeft} day${daysLeft > 1 ? 's' : ''}`
+                          }
+                          return (
+                            <QuestCard
+                              key={quest.id}
+                              quest={quest}
+                              participation={participations[quest.id]}
+                              onJoin={handleJoin}
+                              onCancel={handleCancelById}
+                              isLoading={actionLoading === quest.id}
+                              focused={focusQuestId === quest.id}
+                              extraBadge={daysLabel}
+                              isJoined={joinedIds.lguIds.has(quest.id)}
+                              {...questVerifyProps}
+                            />
+                          )
+                        })}
+                      </div>
+                    </section>
+                  )}
 
-                {nearbyQuests && nearbyQuests.quests.length === 0 && (
-                  <p className="text-sm text-gray-600">
-                    No quests with location data yet. Browse all quests below.
-                  </p>
-                )}
+                  {highImpactQuests.length > 0 && (
+                    <section className="mb-8">
+                      <div className="flex items-center justify-between mb-3">
+                        <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                          🌱 High Impact
+                        </h2>
+                      </div>
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                        {highImpactQuests.map(quest => (
+                          <QuestCard
+                            key={quest.id}
+                            quest={quest}
+                            participation={participations[quest.id]}
+                            onJoin={handleJoin}
+                            onCancel={handleCancelById}
+                            isLoading={actionLoading === quest.id}
+                            focused={focusQuestId === quest.id}
+                            extraBadge={quest.impact?.label ? `Impact: ${quest.impact.label}` : 'High impact'}
+                            isJoined={joinedIds.lguIds.has(quest.id)}
+                            {...questVerifyProps}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
-                {nearbyQuests && nearbyQuests.quests.length > 0 && (
-                  <>
-                    {!nearbyQuests.baseIsUserLocation && (
-                      <p className="text-sm text-gray-600 mb-3">
-                        Showing quests near Cabiao center. Enable location for more accurate results.
-                      </p>
-                    )}
-                    <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-                      {nearbyQuests.quests.map(quest => (
+                  <section>
+                    <h2 className="text-lg font-semibold text-gray-900 mb-4">All Community Quests</h2>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                      {lguQuests.map(quest => (
                         <QuestCard
                           key={quest.id}
                           quest={quest}
                           participation={participations[quest.id]}
                           onJoin={handleJoin}
-                          onCancel={(id) => {
-                            const q = quests.find(qu => qu.id === id)
-                            setCancelConfirm({ questId: id, title: q?.title })
-                          }}
+                          onCancel={handleCancelById}
                           isLoading={actionLoading === quest.id}
                           focused={focusQuestId === quest.id}
-                          distanceKm={quest.distanceKm}
+                          isJoined={joinedIds.lguIds.has(quest.id)}
                           {...questVerifyProps}
                         />
                       ))}
                     </div>
-                  </>
-                )}
-              </section>
-            </>
+                  </section>
+                </>
+              )}
+            </div>
           )}
 
-          {!loading && activeTab === 'all' && (
-            <section className="mt-12 mb-12">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                  🎁 Merchant Rewards
-                </h2>
-                <Link
-                  to="/rewards-nearby"
-                  className="text-sm text-emerald-600 hover:text-emerald-700 font-medium"
-                >
-                  View all →
-                </Link>
-              </div>
-              {ownerQuestsLoading ? (
-                <p className="text-sm text-gray-500">Loading merchant rewards...</p>
+          {/* Business Quests Tab */}
+          {activeTab === 'business' && (
+            <div>
+              {loadingOwner ? (
+                <p className="text-center text-gray-500 py-8">Loading business quests...</p>
+              ) : ownerError ? (
+                <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3">
+                  <p className="text-sm text-red-700">{ownerError}</p>
+                </div>
               ) : ownerQuests.length === 0 ? (
-                <p className="text-sm text-gray-500">No merchant rewards available yet.</p>
+                <p className="text-center text-gray-500 py-8">No business quests available yet.</p>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {ownerQuests.slice(0, 6).map(quest => (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {ownerQuests.map(quest => (
                     <OwnerQuestCompactCard
                       key={quest.id}
                       quest={quest}
                       businessId={quest.businessId}
                       businessName={quest.businessName}
                       businessImage={quest.businessImage}
+                      isJoined={joinedIds.ownerIds.has(quest.id)}
                     />
                   ))}
                 </div>
               )}
-            </section>
+            </div>
           )}
 
-          <div id="all-quests" className="mt-8">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">
-              {activeTab === 'my' ? 'My Quests' : 'All Quests'}
-            </h2>
-            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {loading ? (
-              <p className="col-span-full text-center text-gray-500">Loading quests...</p>
-            ) : filteredQuests.length === 0 ? (
-              <p className="col-span-full text-center text-gray-500">
-                {activeTab === 'my' ? "You haven't joined any quests yet." : 'No quests in this season yet.'}
-              </p>
-            ) : (
-              filteredQuests.map((quest) => (
-                <QuestCard
-                  key={quest.id}
-                  quest={quest}
-                  participation={participations[quest.id]}
-                  onJoin={handleJoin}
-                  onCancel={(id) => {
-                    const q = quests.find(qu => qu.id === id)
-                    setCancelConfirm({ questId: id, title: q?.title })
-                  }}
-                  isLoading={actionLoading === quest.id}
-                  focused={focusQuestId === quest.id}
-                  {...questVerifyProps}
-                />
-              ))
-            )}
-            </div>
-          </div>
+          {/* My Quests Tab */}
+          {activeTab === 'my' && (
+            <MyQuestsTab
+              lguQuests={lguQuests}
+              ownerQuests={ownerQuests}
+              joinedIds={joinedIds}
+              participations={participations}
+              filter={myQuestsFilter}
+              onFilterChange={setMyQuestsFilter}
+              setTab={setTab}
+            />
+          )}
         </div>
       </main>
       <Footer />

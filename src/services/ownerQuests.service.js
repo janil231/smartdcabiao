@@ -364,6 +364,21 @@ export async function getOwnerQuestParticipation(uid, questId) {
   }
 }
 
+export async function getUserOwnerQuestParticipations(uid) {
+  if (!uid) return []
+  try {
+    const q = query(
+      collection(db, PARTICIPATIONS_COLLECTION),
+      where('uid', '==', uid)
+    )
+    const snapshot = await getDocs(q)
+    return snapshot.docs.map(normalizeParticipationDoc)
+  } catch (error) {
+    if (import.meta.env.DEV) console.warn('[ownerQuests] getUserOwnerQuestParticipations failed:', error)
+    return []
+  }
+}
+
 export async function startOwnerQuestTimer(uid, questId) {
   const participationId = `${uid}_${questId}`
   const ref = doc(db, PARTICIPATIONS_COLLECTION, participationId)
