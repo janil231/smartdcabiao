@@ -14,7 +14,7 @@ import {
   reconcileOverbookedQuestSlots,
 } from '../services/participations.service'
 import { listActiveOwnerQuests } from '../services/ownerQuests.service'
-import OwnerQuestPublicCard from '../components/owner/OwnerQuestPublicCard'
+import OwnerQuestCompactCard from '../components/owner/OwnerQuestCompactCard'
 import { hasUserSeenOnboarding, setSeenOnboarding, getUserLocation, setUserLocation as saveUserLocation } from '../services/userSettings.service'
 import { CABIAO_CENTER } from '../constants/cabiaoGeo'
 import { auth } from '../lib/firebase'
@@ -1075,7 +1075,7 @@ export default function CommunityActivitiesPage() {
           )}
 
           {!loading && activeTab === 'all' && (
-            <section className="mt-8">
+            <section className="mt-12 mb-12">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
                   🎁 Merchant Rewards
@@ -1092,14 +1092,14 @@ export default function CommunityActivitiesPage() {
               ) : ownerQuests.length === 0 ? (
                 <p className="text-sm text-gray-500">No merchant rewards available yet.</p>
               ) : (
-                <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {ownerQuests.slice(0, 6).map(quest => (
-                    <OwnerQuestPublicCard
+                    <OwnerQuestCompactCard
                       key={quest.id}
                       quest={quest}
-                      business={quest.businessId ? { id: quest.businessId, name: quest.businessName } : null}
-                      currentUser={user}
-                      onLoginRequired={() => showToast('Sign in to join merchant rewards', 'error')}
+                      businessId={quest.businessId}
+                      businessName={quest.businessName}
+                      businessImage={quest.businessImage}
                     />
                   ))}
                 </div>

@@ -5,7 +5,7 @@ import { db } from '../lib/firebase'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
 import { getFirstValidImage } from '../utils/imageUrl'
-import QuestDetailsPanel from '../components/owner/QuestDetailsPanel'
+import OwnerQuestCompactCard from '../components/owner/OwnerQuestCompactCard'
 
 const FILTER_OPTIONS = [
   { value: 'all', label: 'All' },
@@ -18,14 +18,6 @@ const SORT_OPTIONS = [
   { value: 'reward', label: 'Best Reward' },
 ]
 
-function formatRewardValue(quest) {
-  if (quest.rewardType === 'discount_percent') return `${quest.rewardValue}%`
-  if (quest.rewardType === 'discount_fixed') return `₱${quest.rewardValue}`
-  if (quest.rewardType === 'free_item') return 'Free'
-  if (quest.rewardType === 'bogo') return 'BOGO'
-  return ''
-}
-
 function getRewardSortValue(quest) {
   if (quest.rewardType === 'discount_percent') return quest.rewardValue * 10
   if (quest.rewardType === 'discount_fixed') return quest.rewardValue
@@ -34,65 +26,12 @@ function getRewardSortValue(quest) {
   return 0
 }
 
-function RewardListCard({ quest }) {
-  return (
-    <Link
-      to={`/businesses/${quest.businessId}`}
-      className="group block relative overflow-hidden rounded-xl shadow-md hover:shadow-xl transition min-h-[160px]"
-    >
-      {quest.businessImage ? (
-        <div
-          className="absolute inset-0 bg-cover bg-center group-hover:scale-105 transition-transform duration-500"
-          style={{ backgroundImage: `url(${quest.businessImage})` }}
-        />
-      ) : (
-        <div className="absolute inset-0 bg-gradient-to-br from-emerald-500 via-emerald-600 to-amber-500" />
-      )}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/55 to-black/25" />
-
-      <div className="relative z-10 p-4 h-full flex items-start gap-4 min-h-[160px]">
-        <div className="hidden sm:flex w-14 h-14 rounded-xl bg-white/20 backdrop-blur items-center justify-center text-2xl shrink-0 shadow-sm">
-          🎁
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="font-bold text-white group-hover:text-amber-300 transition drop-shadow-sm">
-              {quest.title}
-            </h3>
-            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-              quest.questType === 'visit'
-                ? 'bg-blue-400/20 text-blue-100'
-                : 'bg-purple-400/20 text-purple-100'
-            }`}>
-              {quest.questType === 'visit' ? '🏃 Visit' : '🛍️ Buy'}
-            </span>
-          </div>
-          <p className="mt-1 text-sm text-white/80 line-clamp-1">{quest.description}</p>
-          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-            <span className="inline-flex items-center gap-1 rounded-full bg-white/95 backdrop-blur px-2.5 py-0.5 font-semibold text-gray-900">
-              🎁 {formatRewardValue(quest)} {quest.rewardItemName || 'Reward'}
-            </span>
-            <span className="text-white/90">
-              at <span className="font-semibold text-white">{quest.businessName}</span>
-            </span>
-            {quest.questType === 'visit' && quest.requiredDurationMinutes > 0 && (
-              <span className="text-white/70 text-xs">
-                {quest.requiredDurationMinutes} min stay
-              </span>
-            )}
-          </div>
-          {(quest.itemPhotoUrl || quest.itemDetails || quest.minimumPurchase > 0 || quest.conditions || quest.questInstructions) && (
-            <div className="mt-2">
-              <QuestDetailsPanel quest={quest} compact={true} />
-            </div>
-          )}
-        </div>
-        <svg className="w-5 h-5 text-white/50 group-hover:text-white transition shrink-0 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-        </svg>
-      </div>
-    </Link>
-  )
+function formatRewardValue(quest) {
+  if (quest.rewardType === 'discount_percent') return `${quest.rewardValue}%`
+  if (quest.rewardType === 'discount_fixed') return `₱${quest.rewardValue}`
+  if (quest.rewardType === 'free_item') return 'Free'
+  if (quest.rewardType === 'bogo') return 'BOGO'
+  return ''
 }
 
 export default function RewardsNearbyPage() {
@@ -203,24 +142,31 @@ export default function RewardsNearbyPage() {
           </div>
 
           {loading ? (
-            <div className="mt-8 space-y-4">
+            <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {[1, 2, 3].map(i => (
-                <div key={i} className="animate-pulse rounded-xl border border-gray-200 bg-white p-4">
-                  <div className="flex gap-4">
-                    <div className="w-14 h-14 rounded-xl bg-gray-200 hidden sm:block" />
-                    <div className="flex-1 space-y-3">
-                      <div className="h-5 bg-gray-200 rounded w-48" />
-                      <div className="h-4 bg-gray-200 rounded w-full" />
-                      <div className="h-4 bg-gray-200 rounded w-32" />
-                    </div>
+                <div key={i} className="animate-pulse rounded-xl border border-gray-200 bg-white overflow-hidden">
+                  <div className="h-10 bg-gray-100" />
+                  <div className="p-4 space-y-3">
+                    <div className="h-5 bg-gray-200 rounded w-3/4" />
+                    <div className="h-4 bg-gray-200 rounded w-full" />
+                    <div className="h-4 bg-gray-200 rounded w-1/2" />
+                    <div className="h-6 bg-gray-100 rounded w-1/3" />
+                    <div className="h-px bg-gray-100" />
+                    <div className="h-4 bg-gray-200 rounded w-1/4" />
                   </div>
                 </div>
               ))}
             </div>
           ) : displayQuests.length > 0 ? (
-            <div className="mt-8 space-y-3">
+            <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {displayQuests.map(quest => (
-                <RewardListCard key={quest.id} quest={quest} />
+                <OwnerQuestCompactCard
+                  key={quest.id}
+                  quest={quest}
+                  businessId={quest.businessId}
+                  businessName={quest.businessName}
+                  businessImage={quest.businessImage}
+                />
               ))}
             </div>
           ) : (
