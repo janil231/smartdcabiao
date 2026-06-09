@@ -4,6 +4,8 @@
 
 import { listBusinesses } from '../../services/businesses.service'
 import { listDestinations } from '../../services/destinations.service'
+import { getDataVersion } from '../../services/appMeta.service'
+import { getCachedPOIs, setCachedPOIs } from '../../utils/poiCache'
 
 let cachedPlaces = null
 
@@ -18,10 +20,20 @@ export async function getAllPlaces({ forceRefresh = false } = {}) {
     return cachedPlaces
   }
 
+  const currentVersion = await getDataVersion()
+
+  if (!forceRefresh) {
+    const cached = getCachedPOIs(currentVersion)
+    if (cached) {
+      cachedPlaces = cached
+      return cached
+    }
+  }
+
   try {
     const [businessesResult, destinationsResult] = await Promise.all([
-      listBusinesses({ forceRefresh }),
-      listDestinations({ forceRefresh })
+      listBusinesses({ forceRefresh: true }),
+      listDestinations({ forceRefresh: true })
     ])
 
     const businesses = unwrapList(businessesResult)
@@ -44,6 +56,7 @@ export async function getAllPlaces({ forceRefresh = false } = {}) {
       }))
 
     cachedPlaces = [...businessPlaces, ...destinationPlaces]
+    setCachedPOIs(cachedPlaces, currentVersion)
     return cachedPlaces
   } catch (error) {
     console.error('Error loading places:', error)

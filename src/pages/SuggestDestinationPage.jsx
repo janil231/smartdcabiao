@@ -9,6 +9,7 @@ import { useLanguage } from '../contexts/LanguageContext'
 import { submitDestinationSuggestion } from '../services/submissions.service'
 import { CABIAO_BARANGAYS } from '../constants/cabiaoBarangays'
 import { CABIAO_CENTER, CABIAO_BOUNDS, isWithinCabiaoBounds } from '../constants/cabiaoGeo'
+import { requireEmailVerified } from '../utils/requireEmailVerified'
 import 'leaflet/dist/leaflet.css'
 
 delete L.Icon.Default.prototype._getIconUrl
@@ -447,6 +448,7 @@ export default function SuggestDestinationPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    if (!requireEmailVerified(user, showToast)) return
     const stepErrors = validateStep(4)
     if (Object.keys(stepErrors).length > 0) {
       setErrors(stepErrors)

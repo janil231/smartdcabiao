@@ -17,6 +17,7 @@ import { getQuestSlotInfo } from '../utils/questSlots'
 import { getActiveSeason } from './seasons.service'
 import { listBusinesses } from './businesses.service'
 import { listDestinations } from './destinations.service'
+import { bumpDataVersion } from './appMeta.service'
 import { generateCabiaoCoordinates } from '../constants/cabiaoGeo'
 import {
   buildQuestVerificationFields,
@@ -26,6 +27,7 @@ import {
   questNeedsVerificationTokens,
   generateEventCode,
 } from './questVerification.service'
+import { inferQuestTags } from '../utils/tagMapping'
 
 const QUESTS_COLLECTION = 'quests'
 
@@ -91,6 +93,26 @@ export async function listQuestsBySeason(seasonId) {
   return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
 }
 
+export async function listActiveQuestsBySeason(seasonId) {
+  if (!seasonId) return [];
+  const sid = String(seasonId);
+
+  try {
+    const q = query(
+      collection(db, QUESTS_COLLECTION),
+      where('seasonId', '==', sid),
+      where('isActive', '==', true)
+    );
+    const snap = await getDocs(q);
+    const quests = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    console.log(`[Quests] Loaded ${quests.length} active quests for season ${sid}`);
+    return quests;
+  } catch (err) {
+    console.error(`[Quests] Failed to fetch quests for season ${sid}:`, err);
+    throw err;
+  }
+}
+
 export async function listAllQuests() {
   const questsRef = collection(db, QUESTS_COLLECTION)
   const q = query(questsRef, orderBy('createdAt', 'desc'))
@@ -136,6 +158,8 @@ export async function createQuest(
     requirePhoto,
     geofenceRadiusMeters,
   })
+
+  const questForTags = { questType, category, impact, ...verificationFields }
   
   await setDoc(questRef, {
     seasonId,
@@ -153,6 +177,7 @@ export async function createQuest(
     position: position || null,
     status: 'active',
     createdAt: new Date().toISOString(),
+    tags: inferQuestTags(questForTags),
     ...verificationFields,
   })
   
@@ -162,7 +187,9 @@ export async function createQuest(
     targetId: questId,
     details: { title, seasonId, adminUid: adminUser.uid, adminEmail: adminUser.email },
   })
-  
+
+  await bumpDataVersion().catch(() => {})
+
   return { id: questId, success: true }
 }
 
@@ -233,6 +260,7 @@ export async function updateQuest(questId, data, adminUser) {
   })
 
   const updatedQuest = await getQuestById(questId)
+  await bumpDataVersion().catch(() => {})
   return { success: true, quest: updatedQuest }
 }
 
@@ -252,7 +280,9 @@ export async function activateQuest(questId, adminUser) {
     targetId: questId,
     details: { title: quest.title, adminUid: adminUser.uid, adminEmail: adminUser.email },
   })
-  
+
+  await bumpDataVersion().catch(() => {})
+
   return { success: true }
 }
 
@@ -272,7 +302,9 @@ export async function deactivateQuest(questId, adminUser) {
     targetId: questId,
     details: { title: quest.title, adminUid: adminUser.uid, adminEmail: adminUser.email },
   })
-  
+
+  await bumpDataVersion().catch(() => {})
+
   return { success: true }
 }
 
@@ -527,6 +559,8 @@ export async function seedSampleQuestsForActiveSeason() {
     const [lat, lng] = generateCabiaoCoordinates(index, sampleQuests.length)
     const barangay = QUEST_BARANGAY_ROTATION[index % QUEST_BARANGAY_ROTATION.length]
     
+    const questForTags = { questType: q.category, category: q.category, impact: q.impact || null }
+
     return {
       seasonId,
       title: q.title,
@@ -543,6 +577,7 @@ export async function seedSampleQuestsForActiveSeason() {
       impact: q.impact || null,
       position: [lat, lng],
       barangay,
+      tags: inferQuestTags(questForTags),
     }
   })
   
@@ -855,6 +890,8 @@ export async function seedVisitAndBuyQuestsForActiveSeason(adminUser) {
     const questId = `seed_visit_${String(i + 1).padStart(2, '0')}`
     const qrToken = generateQRToken()
     
+    const visitQuestForTags = { questType: 'visit', category: 'visit', impact: { unit: 'hours' } }
+
     visitQuests.push({
       seasonId,
       questType: 'visit',
@@ -887,6 +924,7 @@ export async function seedVisitAndBuyQuestsForActiveSeason(adminUser) {
         amountPerCompletion: requiredMinutes / 60,
         label: `${requiredMinutes} minutes of exploration`,
       },
+      tags: inferQuestTags(visitQuestForTags),
       createdAt: now.toISOString(),
     })
     
@@ -914,6 +952,8 @@ export async function seedVisitAndBuyQuestsForActiveSeason(adminUser) {
     const questId = `seed_buy_${String(i + 1).padStart(2, '0')}`
     const buyQrToken = generateQRToken()
     
+    const buyQuestForTags = { questType: 'buy', category: 'buy', impact: { unit: 'co2_kg' } }
+
     const questData = {
       seasonId,
       questType: 'buy',
@@ -947,6 +987,7 @@ export async function seedVisitAndBuyQuestsForActiveSeason(adminUser) {
         amountPerCompletion: 0.5,
         label: 'Support for local economy',
       },
+      tags: inferQuestTags(buyQuestForTags),
       createdAt: now.toISOString(),
     }
     

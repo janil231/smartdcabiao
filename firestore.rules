@@ -89,8 +89,10 @@ service cloud.firestore {
                     request.resource.data.uid == request.auth.uid &&
                     request.resource.data.questId is string &&
                     request.resource.data.seasonId is string;
-      allow update: if hasLguAccess() ||
-                    (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow update: if isSignedIn() && (
+        resource.data.uid == request.auth.uid
+        || isMasterAdmin()
+      );
       allow delete: if isMasterAdmin();
     }
 
@@ -168,8 +170,11 @@ service cloud.firestore {
         || (isSignedIn() && resource.data.uid == request.auth.uid)
         || hasLguAccess();
       allow create: if isSignedIn()
-        && request.resource.data.uid == request.auth.uid
-        && request.resource.data.status == 'pending';
+        && (
+          (request.resource.data.uid == request.auth.uid
+           && request.resource.data.status == 'pending')
+          || isMasterAdmin()
+        );
       allow update: if isSignedIn()
         && resource.data.uid == request.auth.uid
         && resource.data.status == 'pending'
@@ -188,11 +193,25 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
 
-      // CREATE: A signed-in user can create their own profile doc
-      allow create: if request.auth != null && request.auth.uid == uid;
+      // CREATE: A signed-in user can create their own profile doc; master admin can create any
+      allow create: if request.auth != null && (
+        request.auth.uid == uid ||
+        isMasterAdmin()
+      );
 
-      // UPDATE: A signed-in user can update their own profile doc
-      allow update: if request.auth != null && request.auth.uid == uid;
+      // UPDATE: A signed-in user can update their own profile doc; master admin can update any
+      allow update: if request.auth != null && (
+        request.auth.uid == uid ||
+        isMasterAdmin()
+      ) && (
+        // interests field must have at most 8 entries
+        !request.resource.data.keys().hasAny(['interests']) ||
+        request.resource.data.interests.size() <= 8
+      ) && (
+        // interestsSetAt is a server timestamp, no size constraint
+        !request.resource.data.keys().hasAny(['interestsSetAt']) ||
+        request.resource.data.interestsSetAt is timestamp
+      );
 
       // DELETE: Only allowed via Firebase Console (admin SDK)
       allow delete: if false;
@@ -252,6 +271,13 @@ service cloud.firestore {
         isMasterAdmin()
       );
       allow delete: if false;
+    }
+
+    // ============ APP META (data version for cache invalidation) ============
+
+    match /appMeta/{docId} {
+      allow read: if true;
+      allow write: if isMasterAdmin() || hasLguAccess();
     }
   }
 }

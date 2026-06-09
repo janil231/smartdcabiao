@@ -1,18 +1,28 @@
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
+import SignupWizard from './SignupWizard'
 
 const FACEBOOK_LOGIN_DISABLED =
   import.meta.env.VITE_DISABLE_FACEBOOK_LOGIN === "true"
 
-export default function LoginModal({ isOpen, onClose }) {
-  const { login, signUp, signInWithGoogle, signInWithFacebook, resetPassword } = useAuth()
-  const [mode, setMode] = useState('login')
+export default function LoginModal({ isOpen, onClose, initialMode = 'login' }) {
+  const { login, signInWithGoogle, signInWithFacebook, resetPassword } = useAuth()
+  const navigate = useNavigate()
+  const [mode, setMode] = useState(initialMode)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState('')
+  const [wizardStep, setWizardStep] = useState(null)
+
+  useEffect(() => {
+    if (isOpen) setMode(initialMode)
+  }, [isOpen, initialMode])
+
+  const isWizardLocked = mode === 'signup-wizard' && wizardStep === 2
 
   const reset = () => {
     setEmail('')
@@ -23,20 +33,28 @@ export default function LoginModal({ isOpen, onClose }) {
   }
 
   const handleClose = () => {
+    if (isWizardLocked) return
     reset()
     onClose()
   }
+
+  useEffect(() => {
+    if (!isOpen) return
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && !isWizardLocked) {
+        handleClose()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen, isWizardLocked])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
     setLoading(true)
     try {
-      if (mode === 'login') {
-        await login(email, password)
-      } else {
-        await signUp(email, password)
-      }
+      await login(email, password)
       handleClose()
     } catch (err) {
       setError(err.message ?? 'Something went wrong')
@@ -124,19 +142,16 @@ export default function LoginModal({ isOpen, onClose }) {
             onChange={(e) => setPassword(e.target.value)}
             required
             minLength={6}
-            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+            autoComplete="current-password"
             className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-3 text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
           />
-          {mode === 'signup' && (
-            <p className="mt-1 text-xs text-gray-500">At least 6 characters</p>
-          )}
         </div>
         <button
           type="submit"
           disabled={loading}
           className="w-full rounded-lg bg-emerald-600 py-3 min-h-[44px] font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
         >
-          {loading ? 'Please wait...' : mode === 'login' ? 'Log in' : 'Sign up'}
+          {loading ? 'Please wait...' : 'Log in'}
         </button>
       </form>
 
@@ -181,27 +196,25 @@ export default function LoginModal({ isOpen, onClose }) {
       </div>
 
       <p className="mt-4 text-center text-sm text-gray-600">
-        {mode === 'login' ? "Don't have an account? " : 'Already have an account? '}
+        Don't have an account?{' '}
         <button
           type="button"
-          onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError('') }}
+          onClick={() => { setMode('signup-wizard'); setError('') }}
           className="font-medium text-emerald-600 hover:text-emerald-700"
         >
-          {mode === 'login' ? 'Sign up' : 'Log in'}
+          Sign up
         </button>
       </p>
 
-      {mode === 'login' && (
-        <p className="mt-2 text-center text-sm">
-          <button
-            type="button"
-            onClick={() => { setMode('forgot'); setError(''); setSuccess('') }}
-            className="font-medium text-emerald-600 hover:text-emerald-700"
-          >
-            Forgot Password?
-          </button>
-        </p>
-      )}
+      <p className="mt-2 text-center text-sm">
+        <button
+          type="button"
+          onClick={() => { setMode('forgot'); setError(''); setSuccess('') }}
+          className="font-medium text-emerald-600 hover:text-emerald-700"
+        >
+          Forgot Password?
+        </button>
+      </p>
     </>
   )
 
@@ -245,37 +258,63 @@ export default function LoginModal({ isOpen, onClose }) {
 
   const modal = (
     <div className="fixed inset-0 z-[100] flex items-stretch sm:items-center justify-center p-0 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="login-modal-title">
-      <div className="absolute inset-0 bg-black/50" onClick={handleClose} aria-hidden />
+      <div className="absolute inset-0 bg-black/50" onClick={isWizardLocked ? undefined : handleClose} aria-hidden />
       <div className="relative z-10 w-full h-full sm:h-auto sm:max-w-md bg-white sm:rounded-2xl p-6 sm:shadow-xl overflow-y-auto pb-[env(safe-area-inset-bottom)]">
-        <div className="flex items-center justify-between">
-          <h2 id="login-modal-title" className="text-xl font-semibold text-gray-900">
-            {mode === 'login' ? 'Log in' : mode === 'signup' ? 'Sign up' : 'Reset Password'}
-          </h2>
-          <button
-            type="button"
-            onClick={handleClose}
-            className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-            aria-label="Close"
-          >
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
+        {mode === 'signup-wizard' ? (
+          <div className="pb-2">
+            {!isWizardLocked && (
+              <div className="flex justify-end mb-2">
+                <button
+                  type="button"
+                  onClick={handleClose}
+                  className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                  aria-label="Close"
+                >
+                  <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            )}
+            <SignupWizard
+              onComplete={() => { handleClose(); navigate('/') }}
+              onSwitchToLogin={() => setMode('login')}
+              onStepChange={setWizardStep}
+            />
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between">
+              <h2 id="login-modal-title" className="text-xl font-semibold text-gray-900">
+                {mode === 'login' ? 'Log in' : 'Reset Password'}
+              </h2>
+              <button
+                type="button"
+                onClick={handleClose}
+                className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                aria-label="Close"
+              >
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
 
-        {error && (
-          <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-            {error}
-          </p>
+            {error && (
+              <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+                {error}
+              </p>
+            )}
+
+            {success && (
+              <p className="mt-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700" role="alert">
+                {success}
+              </p>
+            )}
+
+            {mode === 'forgot' ? renderForgotForm() : renderLoginForm()}
+          </>
         )}
-
-        {success && (
-          <p className="mt-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700" role="alert">
-            {success}
-          </p>
-        )}
-
-        {mode === 'forgot' ? renderForgotForm() : renderLoginForm()}
       </div>
     </div>
   )

@@ -5,6 +5,7 @@ import { listBusinesses, isStaticBusiness } from './businesses.service'
 import { createOwnerQuest } from './ownerQuests.service'
 import { sanitizeForFirestore } from '../utils/firestoreSanitize'
 import { logAudit } from './audit.service'
+import { inferQuestTags } from '../utils/tagMapping'
 
 const QUEST_TEMPLATES = [
   {
@@ -170,6 +171,9 @@ export async function seedSampleQuestsForAllBusinesses({ onProgress } = {}) {
       }
 
       try {
+        const questForTags = { questType: template.questType, category: template.questType, impact: null }
+        const questTags = inferQuestTags(questForTags, business)
+
         const questData = sanitizeForFirestore({
           title: template.title,
           description: template.description,
@@ -188,6 +192,7 @@ export async function seedSampleQuestsForAllBusinesses({ onProgress } = {}) {
           autoRotateDaily: template.questType === 'buy' ? (template.autoRotateDaily || false) : null,
           itemPhotoUrl: null,
           questInstructions: null,
+          tags: questTags,
         })
 
         const quest = await createOwnerQuest(business.ownerUid || user.uid, businessId, businessName, questData)

@@ -16,6 +16,8 @@ import { BUSINESS_TYPES } from '../data/businesses'
 import { logAudit, AUDIT_ACTIONS } from './audit.service'
 import { clearBusinessesCache } from './businesses.service'
 import { sanitizeForFirestore } from '../utils/firestoreSanitize'
+import { inferBusinessTags, inferDestinationTags } from '../utils/tagMapping'
+import { bumpDataVersion } from './appMeta.service'
 
 const SUBMISSIONS_COLLECTION = 'submissions'
 const BUSINESSES_COLLECTION = 'businesses'
@@ -129,6 +131,14 @@ export async function approveSubmissionAndPublish(id, { reviewedBy, reviewedByEm
 
     const ownerUid = submission.submittedBy || submission.createdByUid || null
 
+    const entityForTags = {
+      category: submission.category || 'other',
+      type: entryType === 'destination' ? 'destination' : (submission.type || 'shop'),
+    }
+    const inferredTags = entryType === 'destination'
+      ? inferDestinationTags(entityForTags)
+      : inferBusinessTags(entityForTags)
+
     const publishedData = sanitizeForFirestore({
       name: submission.name,
       category: submission.category || 'other',
@@ -146,7 +156,8 @@ export async function approveSubmissionAndPublish(id, { reviewedBy, reviewedByEm
       sourceSubmissionName: submission.name,
       ownerUid,
       createdByUid: submission.createdByUid || ownerUid,
-      createdByEmail: submission.createdByEmail || null
+      createdByEmail: submission.createdByEmail || null,
+      tags: inferredTags,
     })
 
     const batch = writeBatch(db)
@@ -191,6 +202,8 @@ export async function approveSubmissionAndPublish(id, { reviewedBy, reviewedByEm
       }
     })
 
+    await bumpDataVersion().catch(() => {})
+
     return { success: true, targetCollection, publishedId: id }
   } catch (error) {
     console.error('Error approving submission:', error)
@@ -228,6 +241,8 @@ export async function rejectSubmission(id, { reviewedBy, reviewedByEmail, notes,
         type: submission?.type,
       }
     })
+
+    await bumpDataVersion().catch(() => {})
 
     return { success: true }
   } catch (error) {
@@ -267,6 +282,9 @@ export async function approveBusinessSubmission(submissionId, submissionData, ad
           ? BUSINESS_TYPES.attraction
           : BUSINESS_TYPES.shop
 
+    const entityForTags = { category, type }
+    const inferredTags = inferBusinessTags(entityForTags)
+
     const businessData = sanitizeForFirestore({
       name: submission.businessName,
       category,
@@ -301,6 +319,7 @@ export async function approveBusinessSubmission(submissionId, submissionData, ad
       createdAt: serverTimestamp(),
       rating: 0,
       reviewCount: 0,
+      tags: inferredTags,
     })
 
     const businessRef = await addDoc(collection(db, BUSINESSES_COLLECTION), businessData)
@@ -343,6 +362,8 @@ export async function approveBusinessSubmission(submissionId, submissionData, ad
         sourceSubmissionId: submissionId,
       }
     })
+
+    await bumpDataVersion().catch(() => {})
 
     return { success: true, businessId: businessRef.id }
   } catch (error) {

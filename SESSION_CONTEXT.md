@@ -79,7 +79,13 @@ The app throws on startup if any of the 7 Firebase/Facebook vars are missing (li
 | `npm run preview` | `vite preview` | Preview production build locally |
 | `npm run lint` | `eslint .` | Run ESLint across the project |
 
-**Deployment:** The app is deployed on Vercel at `smartdcabiao.vercel.app`. Pushing to `main` on GitHub triggers auto-deployment via Vercel integration.
+**Deployment:** The app is deployed on Vercel at `smartdcabiao.vercel.app`. Vercel is linked to GitHub repo `janil231/smartdcabiao1.git` (NOT `smartdcabiao.git`). Pushing to `main` on `smartdcabiao1` remote triggers auto-deployment.
+
+**Two remotes:**
+- `origin` → `https://github.com/janil231/smartdcabiao.git` (primary/code)
+- `smartdcabiao1` → `https://github.com/janil231/smartdcabiao1.git` (Vercel-linked)
+
+After committing, run both: `git push origin main && git push smartdcabiao1 main`
 
 ---
 
@@ -1386,3 +1392,196 @@ Three feature areas shipped in this multi-session effort: (A) buy quest verifica
 
 ### Build Status
 - `npm run build` passes with zero errors (pre-existing warnings: chunk size ~1935kB, circular dynamic imports).
+
+---
+
+## Session: June 8, 2026 — Seed Owner Quests Tool + Quest UI Enhancements
+
+### Seed Sample Owner Quests Tool
+
+**Service** (`src/services/seedSampleOwnerQuests.service.js`):
+- `seedSampleQuestsForAllBusinesses({ onProgress })` — batch seeds 5 quests + 5 rewards per qualifying business (filters static/mock/archived, skips businesses with existing quests)
+- Per-quest try/catch: each of the 5 quests wrapped individually, one failure doesn't abort remaining; tracks per-quest errors with `questIndex`, `questTitle`, `questType`, `stage` (quest/reward), `error` message, and `code`
+- `deleteAllSeededQuestsAndRewards()` — deletes all docs from `ownerQuests` and `businessQuestRewards` collections
+- All writes through `sanitizeForFirestore()`, all IDs wrapped with `String(id)`, audit-logged
+
+**Firestore rules** (`firestore.rules`):
+- Added `|| isMasterAdmin()` to `ownerQuests` `create` clause (line 213) and `businessQuestRewards` `create`/`update` clauses (lines 244-248) — existing owner check preserved as OR condition
+
+**LGU Dashboard DataToolsPanel** (`LGUDashboardPage.jsx`):
+- Seed button with confirmation modal, live progress bar, results panel (seeded/skipped/errors with per-quest failure details)
+- "⚠️ Delete All Seeded Quests" red button with confirmation modal + result display
+
+### Business Detail Page Quest Container
+
+**3 CSS-only changes** to `BusinessDetailPage.jsx`:
+1. Removed `lg:sticky lg:top-24` from photo column wrapper — scrolls naturally
+2. Removed `lg:sticky lg:top-24` from quest column wrapper — scrolls naturally
+3. Changed `lg:max-h-[calc(100vh-8rem)]` → `lg:max-h-[465px]` — matches photo column aspect-[4/3] height
+
+**Sticky header removed:**
+- Removed the "🎁 N Rewards Available!" sticky header block (was causing visual overlap with quest content during internal scroll)
+
+**Custom scrollbar** (`index.css`):
+- Added `.custom-scrollbar` classes: 6px width, emerald-tinted thumb (white at 40%/60% opacity), translucent track, Firefox fallback via `scrollbar-width: thin`
+
+### Quest Details View Modal
+
+**New component** (`src/components/owner/QuestDetailsViewModal.jsx`):
+- Full quest detail modal with: title + status badge, type/verification pills, reward highlight box (emerald), full description (no truncation, `whitespace-pre-wrap`), `QuestDetailsPanel` for what-to-buy/instructions, geofence info, status-aware action section (Join/Start/Scan QR/Enter Code/Cancel/timer/reward code)
+- Portal to `document.body`, Escape + backdrop close, body scroll lock
+
+**Modified** `OwnerQuestPublicCard.jsx`:
+- Added "View Details →" text link at bottom of each card (above error, hidden during cancel confirm)
+- Link uses `onPhoto ? 'text-white' : 'text-emerald-700'` for correct card variants
+
+### HelpTooltip Component
+
+**New component** (`src/components/ui/HelpTooltip.jsx`):
+- Reusable `?` icon tooltip: hover (desktop) / tap-to-toggle (mobile), closes on Escape, outside click, and scroll
+- Auto-positions above/below based on viewport space; horizontal anchoring (right/left/center) to prevent edge overflow
+- `variant` prop: `'light'` (emerald icon, white popover) / `'dark'` (white icon, dark popover)
+- Uses existing `animate-pulse-slow` class for subtle box-shadow pulse
+
+**Modified** `OwnerQuestPublicCard.jsx`:
+- Replaced large "How it works" instruction block with compact `?` icon at top-right corner of card (`absolute top-3 right-3 z-10`)
+- Card container marked `relative` for absolute positioning
+- `getQuestSteps(quest)` helper returns 3-4 steps based on quest type + verification method
+- Icons use `variant={onPhoto ? 'dark' : 'light'}` for correct card background matching
+
+### Profile Page Header Cleanup
+
+**Modified** `ProfilePage.jsx`:
+- Removed "Sign Out" button from header card (was causing overflow/text-wrapping issues on mobile)
+- Email changed from `text-xl font-bold` → `text-sm font-semibold break-words` with `min-w-0` on parent for proper wrapping
+- Added "Sign Out" as centered red text link at very bottom of page (`mt-8 mb-4 flex justify-center`)
+
+### Files Changed (this session)
+
+| File | Change |
+|---|---|
+| `src/services/seedSampleOwnerQuests.service.js` | **[NEW]** Seed + delete functions |
+| `src/components/ui/HelpTooltip.jsx` | **[NEW]** Tooltip component |
+| `src/components/owner/QuestDetailsViewModal.jsx` | **[NEW]** Quest detail modal |
+| `firestore.rules` | Master admin bypass on ownerQuests/businessQuestRewards |
+| `src/pages/LGUDashboardPage.jsx` | Seed tool UI + detailed error rendering + delete button |
+| `src/pages/BusinessDetailPage.jsx` | Remove sticky, bounded height, scrollable quest container |
+| `src/components/owner/OwnerQuestPublicCard.jsx` | View Details link, HelpTooltip at top-right, how-it-works replacement |
+| `src/pages/ProfilePage.jsx` | Email shrink, sign out moved to page bottom |
+| `src/index.css` | `.custom-scrollbar` utility classes |
+
+### Build Status
+- `npm run build` passes with zero errors (pre-existing warnings: chunk size ~1960kB, circular dynamic imports).
+
+---
+
+## Session: June 8, 2026 (cont.) — Owner UID Bug Fix + Vercel Deployment Discovery
+
+### Critical Bug Fix: Owner UID Mismatch in Seeded Quests
+
+**Problem:** Seeded owner quests got the LGU admin's UID as `ownerUid` instead of the business owner's UID.
+
+**Root cause (two bugs):**
+1. `createOwnerQuest(ownerUid, businessId, businessName, data)` in `ownerQuests.service.js:184` ignored the passed `ownerUid` parameter and always used `auth.currentUser.uid` (`const resolvedOwnerUid = user.uid`)
+2. `seedSampleOwnerQuests.service.js:193` passed `user.uid` (admin's UID) instead of the business's actual `ownerUid`
+
+**Impact:** All owner-scoped operations broke for seeded quests — `rotateBuyQuestDailyCode`, `merchantMarkParticipationComplete`, `getQuestParticipationsForMerchant`, `listOwnerQuestsByOwner` all check `data.ownerUid`
+
+**Fix:**
+- `ownerQuests.service.js`: Changed `const resolvedOwnerUid = user.uid` to `const resolvedOwnerUid = ownerUid || user.uid` (respects passed param, falls back to auth UID)
+- `seedSampleOwnerQuests.service.js`: Changed `createOwnerQuest(user.uid, ...)` to `createOwnerQuest(business.ownerUid || user.uid, ...)` (looks up business's owner)
+
+### Vercel Deployment Discovery
+
+**Problem:** Commits pushed to `origin` (which points to `smartdcabiao.git`) never triggered a Vercel deployment. The user reported the live site was 9 hours stale.
+
+**Root cause:** Two remotes exist:
+- `origin` → `https://github.com/janil231/smartdcabiao.git` (code storage)
+- `smartdcabiao1` → `https://github.com/janil231/smartdcabiao1.git` (Vercel-linked)
+
+Vercel is integrated with `smartdcabiao1.git`, not `smartdcabiao.git`. All prior pushes to `origin` never reached Vercel.
+
+**Fix:** After committing, must push to both:
+```
+git push origin main
+git push smartdcabiao1 main
+```
+
+**Verification:**
+- `git remote -v` shows both remotes
+- `git ls-remote smartdcabiao1 main` confirmed old commit `1d65f72`
+- After push to `smartdcabiao1`: commit `2b7b30c` now present on both remotes
+- Vercel auto-deploys from `smartdcabiao1/main`
+
+### Files Changed (this session)
+
+| File | Change |
+|---|---|
+| `src/services/ownerQuests.service.js` | `resolvedOwnerUid = ownerUid || user.uid` |
+| `src/services/seedSampleOwnerQuests.service.js` | `business.ownerUid || user.uid` |
+| `.gitignore` | Added `nul` |
+| `SESSION_CONTEXT.md` | Updated deployment info + this session |
+
+### Build Status
+- `npm run build` passes with zero errors (pre-existing warnings).
+
+---
+
+## Session: June 8, 2026 (cont. 2) — End Season Read-Only + Events Page Active Quest Filtering
+
+### Overview
+Two changes: (A) ended seasons in LGU dashboard are read-only, and (B) Community Activities (`/events`) page filters quests by `seasonId` + `isActive` using a new composite index, removing all mock data fallback.
+
+---
+
+### A. Ended Seasons Read-Only in LGU Dashboard
+
+**`src/services/quests.service.js`:**
+- Added `listActiveQuestsBySeason(seasonId)` — queries `quests` collection with `where('seasonId', '==', sid)` AND `where('isActive', '==', true)`. Preserves existing `listQuestsBySeason()` unchanged.
+
+**`src/components/lgu/EditSeasonModal.jsx`:**
+- Added `readOnly` prop. When `true`: title shows "View Season", all fields disabled, "This season has ended and cannot be modified" banner, no Save button, Cancel becomes "Close".
+- Fixed date conversion to use `toJSDate()` instead of raw `.toDate?.()`.
+
+**`src/pages/LGUDashboardPage.jsx`:**
+- Added `viewingSeason` state. Ended seasons show only "View" button (no "Expire All Quests", no "View/Edit").
+- `handleExpireAllQuests` kept defined but no longer exposed from any UI button.
+- Renders `EditSeasonModal` with `readOnly={true}` for `viewingSeason`.
+
+---
+
+### B. Events Page Active Quest Filtering
+
+**`src/pages/CommunityActivitiesPage.jsx`:**
+- Removed `activities` import from `src/data` and `MockQuestCard` component entirely
+- Replaced `listQuestsBySeason` with `listActiveQuestsBySeason` — only returns `isActive: true` quests
+- Removed all `useMockData` state, `setUseMockData` calls, and mock data rendering paths
+- Error state now includes a **"Try again"** retry button
+- Empty state changed to "No quests in this season yet" (was "No active quests at the moment. Check back soon!")
+- The `finishingSoonQuests`, `highImpactQuests`, `nearbyQuests`, and `beginnerQuests` sections still render client-side filters on the already-filtered set
+
+---
+
+### C. Composite Index + Deploy
+
+**`firestore.indexes.json`:**
+- Added composite index for `quests` collection: `seasonId ASC, isActive ASC` (supports the new `listActiveQuestsBySeason` query)
+
+**Deployment:**
+- `firebase deploy --only firestore:rules,firestore:indexes` — indexes deployed successfully (rules already up-to-date)
+
+**Build:**
+- `npm run build` passes with zero errors
+
+---
+
+### Files Changed (this session)
+
+| File | Change |
+|---|---|
+| `src/services/quests.service.js` | Added `listActiveQuestsBySeason(seasonId)` |
+| `src/components/lgu/EditSeasonModal.jsx` | Added `readOnly` prop, `toJSDate()` fix |
+| `src/pages/LGUDashboardPage.jsx` | Ended seasons read-only, `viewingSeason` state |
+| `src/pages/CommunityActivitiesPage.jsx` | Removed mock data, use `listActiveQuestsBySeason`, retry button, empty state |
+| `firestore.indexes.json` | Added quests(seasonId ASC, isActive ASC) composite index |
+| `SESSION_CONTEXT.md` | Updated with this session |

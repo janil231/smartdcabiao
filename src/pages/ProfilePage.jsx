@@ -8,11 +8,13 @@ import { useAuth } from '../contexts/AuthContext'
 import { useFavorites } from '../contexts/FavoritesContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import BadgeCard from '../components/badges/BadgeCard'
+import InterestSelectionModal from '../components/InterestSelectionModal'
 import { getMySeasonStats, getUserSeasonWithActive, IMPACT_UNIT_CONFIG } from '../services/profileStats.service'
 import { computeBadges } from '../features/badges/badgesEngine'
 import { BADGE_CATALOG } from '../features/badges/badgesCatalog'
 import { getUserSeasonStats, updateUserLeaderboardSettings } from '../services/leaderboard.service'
 import { getMyBusinessSubmissions, getMyDestinationSubmissions } from '../services/submissions.service'
+import { getUserProfile, updateUserInterests } from '../services/users.service'
 
 function StatusBadge({ status }) {
   const styles = {
@@ -97,6 +99,10 @@ export default function ProfilePage() {
   const [statsLoading, setStatsLoading] = useState(true)
   const [searchParams, setSearchParams] = useSearchParams()
   const activeTab = searchParams.get('tab') || 'overview'
+
+  const [profileInterests, setProfileInterests] = useState([])
+  const [showInterestModal, setShowInterestModal] = useState(false)
+  const [profileData, setProfileData] = useState(null)
   const [season, setSeason] = useState(null)
   const [seasonStats, setSeasonStats] = useState({
     pointsTotal: 0,
@@ -223,6 +229,17 @@ export default function ProfilePage() {
     }
   }, [user, authLoading, favorites?.length])
 
+  useEffect(() => {
+    if (!user) return
+    let mounted = true
+    getUserProfile(user.uid).then(p => {
+      if (!mounted) return
+      setProfileData(p)
+      setProfileInterests(p?.interests || [])
+    }).catch(() => {})
+    return () => { mounted = false }
+  }, [user])
+
   const handleLogout = async () => {
     await logout()
   }
@@ -278,6 +295,43 @@ export default function ProfilePage() {
               </div>
             </div>
           </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold text-gray-900">Your Interests</h2>
+              <button
+                type="button"
+                onClick={() => setShowInterestModal(true)}
+                className="text-sm font-medium text-emerald-600 hover:text-emerald-700"
+              >
+                {profileInterests.length > 0 ? 'Edit' : 'Set Interests'}
+              </button>
+            </div>
+            {profileInterests.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {profileInterests.map(id => (
+                  <span key={id} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    {id}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500">No interests set yet.</p>
+            )}
+          </div>
+
+          <InterestSelectionModal
+            isOpen={showInterestModal}
+            onClose={() => setShowInterestModal(false)}
+            onSave={async (selected) => {
+              await updateUserInterests(user.uid, selected)
+              setProfileInterests(selected)
+              setShowInterestModal(false)
+            }}
+            onSkip={() => setShowInterestModal(false)}
+            initialSelected={profileInterests}
+            showSkip={true}
+          />
 
           <div className="flex gap-2 mb-6 overflow-x-auto">
             <button

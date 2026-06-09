@@ -8,6 +8,8 @@ import { db } from '../lib/firebase'
 import { businesses as mockBusinesses, BUSINESS_TYPES } from '../data'
 import { readCache, writeCache, getCacheMeta, CACHE_KEYS } from './cache.service'
 import { sanitizeForFirestore, stripIdField } from '../utils/firestoreSanitize'
+import { inferBusinessTags } from '../utils/tagMapping'
+import { bumpDataVersion } from './appMeta.service'
 
 const USE_FIRESTORE = import.meta.env.VITE_USE_FIRESTORE_DATA === 'true'
 const BUSINESSES_COLLECTION = 'businesses'
@@ -51,7 +53,11 @@ function normalizeBusinessDoc(docSnap) {
     images: normalizeImages(data.images || data.photos),
     website: data.website || null,
     socialMedia: data.socialMedia || data.facebook ? { facebook: data.facebook } : {},
+    rating: data.rating ?? null,
+    ratingAvg: data.ratingAvg ?? null,
+    ratingCount: data.ratingCount ?? null,
     isActive: data.isActive !== false,
+    tags: data.tags || inferBusinessTags(data),
     ownerUid: data.ownerUid || data.createdByUid || data.submittedBy || null,
   }
 }
@@ -132,6 +138,11 @@ export async function listBusinesses({ forceRefresh = false } = {}) {
     }
 
     const merged = mergeStaticAndFirestore(mockBusinesses, firestoreData)
+    merged.forEach(item => {
+      if (!item.tags || !Array.isArray(item.tags) || item.tags.length === 0) {
+        item.tags = inferBusinessTags(item)
+      }
+    })
     businessesCache = merged
     writeCache(CACHE_KEYS.businesses, merged)
     const source =
@@ -235,6 +246,7 @@ export async function archiveBusiness(businessId, masterUid, reason = "", fullBu
 
   console.log("[archiveBusiness] ✅ Wrote to Firestore:", { id: idStr, hasFullData: !!fullBusinessData, isActive: false });
   clearBusinessesCache();
+  await bumpDataVersion().catch(() => {});
 }
 
 export async function restoreBusiness(businessId) {
@@ -246,6 +258,7 @@ export async function restoreBusiness(businessId) {
     archivedReason: null,
   }, { merge: true });
   clearBusinessesCache();
+  await bumpDataVersion().catch(() => {});
 }
 
 export function isStaticBusiness(business) {
@@ -284,6 +297,7 @@ export async function permanentlyDeleteBusiness(businessId, businessData = null)
   const idStr = String(businessId);
   await deleteDoc(doc(db, "businesses", idStr));
   clearBusinessesCache();
+  await bumpDataVersion().catch(() => {});
 }
 
 export async function listBusinessesWithFilter(filter = "active") {

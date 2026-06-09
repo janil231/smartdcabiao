@@ -4,6 +4,8 @@ import Footer from '../components/Footer'
 import { useAuth } from '../contexts/AuthContext'
 import { getActiveSeason } from '../services/seasons.service'
 import { listSeasonVouchers } from '../services/vouchers.service'
+import EmailVerificationBanner from '../components/EmailVerificationBanner'
+import { requireEmailVerified } from '../utils/requireEmailVerified'
 import { getOrCreateSeasonBalance, rebuildSeasonBalanceFromLedger } from '../services/seasonBalances.service'
 import { listMyRedemptions, redeemVoucher } from '../services/voucherRedemptions.service'
 
@@ -107,7 +109,7 @@ function VoucherDetailsModal({ redemption, seasonId, onClose, onCopyCode }) {
 }
 
 export default function VoucherStorePage() {
-  const { user } = useAuth()
+  const { user, grandfatheredUnverified } = useAuth()
   const [season, setSeason] = useState(null)
   const [loading, setLoading] = useState(true)
   const [vouchers, setVouchers] = useState([])
@@ -197,6 +199,10 @@ export default function VoucherStorePage() {
 
   const handleRedeem = async (voucher) => {
     if (!user || !season || !voucher) return
+    if (!requireEmailVerified(user, showToast)) {
+      setRedeemingId(null)
+      return
+    }
     setRedeemingId(voucher.id)
     try {
       const result = await redeemVoucher({ seasonId: season.id, voucherId: voucher.id, user })
@@ -243,6 +249,7 @@ export default function VoucherStorePage() {
     <div className="flex min-h-screen flex-col">
       <Navbar />
       <main className="flex-1 pb-mobile-nav">
+        {grandfatheredUnverified && <EmailVerificationBanner />}
         <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
           <div className="mb-6">
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl">

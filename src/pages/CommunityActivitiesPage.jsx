@@ -4,8 +4,8 @@ import { Link, useSearchParams } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
 import { useAuth } from '../contexts/AuthContext'
-import { getActiveSeason } from '../services/seasons.service'
-import { listQuestsBySeason } from '../services/quests.service'
+import { getActiveSeason, autoEndStaleSeasons, formatSeasonDate, toJSDate } from '../services/seasons.service'
+import { listActiveQuestsBySeason } from '../services/quests.service'
 import { 
   getUserParticipations, 
   joinQuest, 
@@ -17,22 +17,23 @@ import { hasUserSeenOnboarding, setSeenOnboarding, getUserLocation, setUserLocat
 import { CABIAO_CENTER } from '../constants/cabiaoGeo'
 import { auth } from '../lib/firebase'
 import { getQuestSlotInfo } from '../utils/questSlots'
+import EmailVerificationBanner from '../components/EmailVerificationBanner'
+import { requireEmailVerified } from '../utils/requireEmailVerified'
 import QuestOnboardingModal from '../components/QuestOnboardingModal'
 import QRScannerModal from '../components/quest/QRScannerModal'
 import EventCodeModal from '../components/quest/EventCodeModal'
 import { getEffectiveVerificationMethod } from '../services/questVerification.service'
-import { activities, ACTIVITY_TYPES } from '../data'
 
 const TYPE_STYLES = {
-  [ACTIVITY_TYPES.cleanup]: 'bg-sky-500/10 text-sky-700 border-sky-200',
-  [ACTIVITY_TYPES.treePlanting]: 'bg-emerald-500/10 text-emerald-700 border-emerald-200',
-  [ACTIVITY_TYPES.event]: 'bg-amber-500/10 text-amber-700 border-amber-200',
+  cleanup: 'bg-sky-500/10 text-sky-700 border-sky-200',
+  tree_planting: 'bg-emerald-500/10 text-emerald-700 border-emerald-200',
+  event: 'bg-amber-500/10 text-amber-700 border-amber-200',
 }
 
 const TYPE_LABELS = {
-  [ACTIVITY_TYPES.cleanup]: 'Clean-up',
-  [ACTIVITY_TYPES.treePlanting]: 'Tree planting',
-  [ACTIVITY_TYPES.event]: 'Event',
+  cleanup: 'Clean-up',
+  tree_planting: 'Tree planting',
+  event: 'Event',
 }
 
 const QUEST_TYPE_STYLES = {
@@ -371,41 +372,6 @@ function QuestCard({
   )
 }
 
-function MockQuestCard({ activity }) {
-  const typeStyle = TYPE_STYLES[activity.type] || 'bg-gray-100 text-gray-700 border-gray-200'
-  const typeLabel = TYPE_LABELS[activity.type] || 'Activity'
-
-  return (
-    <article className="flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-      <div className="flex flex-1 flex-col p-5">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className={`inline-block w-fit rounded border px-2 py-0.5 text-xs font-medium uppercase tracking-wider ${typeStyle}`}>
-            {typeLabel}
-          </span>
-          <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
-            Mock Data
-          </span>
-        </div>
-        <h2 className="mt-3 text-lg font-semibold text-gray-900">{activity.name}</h2>
-        <p className="mt-2 flex-1 text-sm text-gray-600 line-clamp-3">{activity.description}</p>
-        <dl className="mt-4 flex flex-col gap-1.5 text-sm text-gray-500">
-          <div className="flex items-center gap-2">
-            <dt className="shrink-0 font-medium">📅</dt>
-            <dd>{activity.date}</dd>
-          </div>
-          <div className="flex items-center gap-2">
-            <dt className="shrink-0 font-medium">📍</dt>
-            <dd>{activity.location}</dd>
-          </div>
-        </dl>
-        <div className="mt-4 rounded-lg bg-gray-50 p-3 text-sm text-gray-600">
-          <p>Quest system not available. Connect to Firestore to enable seasonal quests.</p>
-        </div>
-      </div>
-    </article>
-  )
-}
-
 function CancelConfirmModal({ isOpen, onClose, onConfirm, isLoading, questTitle }) {
   if (!isOpen) return null
   
@@ -445,7 +411,7 @@ function CancelConfirmModal({ isOpen, onClose, onConfirm, isLoading, questTitle 
 }
 
 export default function CommunityActivitiesPage() {
-  const { user, loading: authLoading } = useAuth()
+  const { user, grandfatheredUnverified, loading: authLoading } = useAuth()
   const [searchParams] = useSearchParams()
   const focusQuestId = searchParams.get('focusQuestId')
   
@@ -455,7 +421,6 @@ export default function CommunityActivitiesPage() {
   const [error, setError] = useState(null)
   const [actionLoading, setActionLoading] = useState(null)
   const [activeSeason, setActiveSeason] = useState(null)
-  const [useMockData, setUseMockData] = useState(false)
   const [activeTab, setActiveTab] = useState('all')
   const [toast, setToast] = useState(null)
   const [cancelConfirm, setCancelConfirm] = useState(null)
@@ -466,6 +431,12 @@ export default function CommunityActivitiesPage() {
   const [locationError, setLocationError] = useState(null)
   const [showQRScanner, setShowQRScanner] = useState(false)
   const [codeQuest, setCodeQuest] = useState(null)
+
+  useEffect(() => {
+    autoEndStaleSeasons().catch((err) => {
+      console.warn('[Events] autoEndStaleSeasons failed (expected for non-admin):', err);
+    });
+  }, []);
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type })
@@ -482,7 +453,15 @@ export default function CommunityActivitiesPage() {
       
       if (season) {
         setActiveSeason(season)
-        let questList = await listQuestsBySeason(season.id)
+        console.log('[Events] Active season:', season.name, season.id);
+        let questList = []
+        try {
+          questList = await listActiveQuestsBySeason(season.id)
+          console.log('[Events] Loaded', questList.length, 'active quests');
+        } catch (err) {
+          console.error('[Events] Failed to load quests:', err);
+          throw err;
+        }
         if (questList.length > 0 && user) {
           questList = await reconcileOverbookedQuestSlots(questList)
         }
@@ -521,13 +500,13 @@ export default function CommunityActivitiesPage() {
             }
           }
         } else {
-          setUseMockData(true)
+          console.log('[Events] No quests found for active season');
         }
       } else {
-        setUseMockData(true)
+        console.log('[Events] No active season found');
       }
     } catch (err) {
-      console.error('Error loading quests:', err)
+      console.error('[Events] Error loading quests:', err)
       const msg = err?.message || ''
       if (msg.includes('permission') || err?.code === 'permission-denied') {
         setError(
@@ -537,8 +516,6 @@ export default function CommunityActivitiesPage() {
         setError(
           'Firestore was blocked by a browser extension. Pause ad blockers for localhost:5173 and refresh.'
         )
-      } else {
-        setUseMockData(true)
       }
     } finally {
       setLoading(false)
@@ -589,8 +566,8 @@ export default function CommunityActivitiesPage() {
     if (quest.status !== 'active') return false
 
     const now = new Date()
-    const startAt = quest.startAt ? new Date(quest.startAt) : null
-    const endAt = quest.endAt ? new Date(quest.endAt) : null
+    const startAt = toJSDate(quest.startAt)
+    const endAt = toJSDate(quest.endAt)
     const graceHours = typeof quest.gracePeriodHours === 'number' ? quest.gracePeriodHours : 24
 
     if (startAt && startAt > now) return false
@@ -626,7 +603,7 @@ export default function CommunityActivitiesPage() {
   const finishingSoonQuests = useMemo(() => {
     return quests
       .filter((q) => q.endAt && isQuestActiveNow(q))
-      .sort((a, b) => new Date(a.endAt) - new Date(b.endAt))
+      .sort((a, b) => (toJSDate(a.endAt) || 0) - (toJSDate(b.endAt) || 0))
       .slice(0, 5)
   }, [quests, isQuestActiveNow])
 
@@ -733,6 +710,10 @@ export default function CommunityActivitiesPage() {
 
   const handleJoin = async (questId) => {
     if (!user) return
+    if (!requireEmailVerified(user, showToast)) {
+      setActionLoading(null)
+      return
+    }
     setActionLoading(questId)
     setError(null)
 
@@ -806,7 +787,8 @@ export default function CommunityActivitiesPage() {
 
   const getSeasonCountdown = () => {
     if (!activeSeason?.endAt) return null
-    const endDate = new Date(activeSeason.endAt)
+    const endDate = toJSDate(activeSeason.endAt)
+    if (!endDate) return null
     const now = new Date()
     const daysLeft = Math.ceil((endDate - now) / (1000 * 60 * 60 * 24))
     if (daysLeft <= 0) return 'Season ended'
@@ -834,6 +816,7 @@ export default function CommunityActivitiesPage() {
     <div className="flex min-h-screen flex-col">
       <Navbar />
       <main className="flex-1 pb-mobile-nav">
+        {grandfatheredUnverified && <EmailVerificationBanner />}
         <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
@@ -847,21 +830,31 @@ export default function CommunityActivitiesPage() {
             </div>
           </div>
 
-          {activeSeason && (
+          {activeSeason ? (
             <div className="mt-4 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <span className="text-emerald-800 font-medium">Season: </span>
                   <strong className="text-emerald-900">{activeSeason.name}</strong>
-                  {activeSeason.startAt && activeSeason.endAt && (
-                    <span className="text-emerald-600 ml-2">
-                      ({new Date(activeSeason.startAt).toLocaleDateString()} - {new Date(activeSeason.endAt).toLocaleDateString()})
-                    </span>
-                  )}
+                  <span className="text-emerald-600 ml-2">
+                    ({formatSeasonDate(activeSeason.startAt, 'TBD')} - {formatSeasonDate(activeSeason.endAt, 'TBD')})
+                  </span>
                 </div>
                 <span className="text-sm font-medium text-emerald-700">
                   {getSeasonCountdown()}
                 </span>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-800">
+              <div className="flex items-center gap-2">
+                <span>⏸️</span>
+                <div>
+                  <div className="font-semibold">No Active Season</div>
+                  <div className="text-sm">
+                    There's currently no active tourism season. Check back later or contact the LGU.
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -912,10 +905,16 @@ export default function CommunityActivitiesPage() {
           {error && (
             <div className="mt-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3">
               <p className="text-sm text-red-700">{error}</p>
+              <button
+                onClick={() => { setLoading(true); setError(null); loadQuests(); }}
+                className="mt-2 text-sm font-medium text-red-700 underline hover:text-red-800"
+              >
+                Try again
+              </button>
             </div>
           )}
 
-          {!loading && !useMockData && quests.length > 0 && activeTab === 'all' && (
+          {!loading && quests.length > 0 && activeTab === 'all' && (
             <>
               {finishingSoonQuests.length > 0 && (
                 <section className="mt-6">
@@ -932,7 +931,7 @@ export default function CommunityActivitiesPage() {
                   </div>
                   <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
                     {finishingSoonQuests.map(quest => {
-                      const endAt = quest.endAt ? new Date(quest.endAt) : null
+                      const endAt = toJSDate(quest.endAt)
                       let daysLabel = null
                       if (endAt) {
                         const now = new Date()
@@ -1062,13 +1061,9 @@ export default function CommunityActivitiesPage() {
             <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {loading ? (
               <p className="col-span-full text-center text-gray-500">Loading quests...</p>
-            ) : useMockData ? (
-              activities.slice(0, 6).map((activity) => (
-                <MockQuestCard key={activity.id} activity={activity} />
-              ))
             ) : filteredQuests.length === 0 ? (
               <p className="col-span-full text-center text-gray-500">
-                {activeTab === 'my' ? 'You haven\'t joined any quests yet.' : 'No active quests at the moment. Check back soon!'}
+                {activeTab === 'my' ? "You haven't joined any quests yet." : 'No quests in this season yet.'}
               </p>
             ) : (
               filteredQuests.map((quest) => (

@@ -9,6 +9,8 @@ import { db } from '../lib/firebase'
 import { getDestinations as getMockDestinations } from '../data'
 import { readCache, writeCache, getCacheMeta, CACHE_KEYS } from './cache.service'
 import { sanitizeForFirestore, stripIdField } from '../utils/firestoreSanitize'
+import { inferDestinationTags } from '../utils/tagMapping'
+import { bumpDataVersion } from './appMeta.service'
 
 const USE_FIRESTORE = import.meta.env.VITE_USE_FIRESTORE_DATA === 'true'
 const DESTINATIONS_COLLECTION = 'destinations'
@@ -34,7 +36,7 @@ function normalizeDestinationDoc(docSnap) {
     images: normalizeImages(data.images),
     website: data.website || null,
     socialMedia: data.socialMedia || {},
-    tags: data.tags || [],
+    tags: data.tags || inferDestinationTags(data),
     verified: data.verified ?? false,
     isActive: data.isActive !== false,
     archivedAt: data.archivedAt || null,
@@ -101,6 +103,11 @@ export async function listDestinations({ forceRefresh = false } = {}) {
     }
 
     const merged = mergeStaticAndFirestore(getMockDestinations(), firestoreData)
+    merged.forEach(item => {
+      if (!item.tags || !Array.isArray(item.tags) || item.tags.length === 0) {
+        item.tags = inferDestinationTags(item)
+      }
+    })
     destinationsCache = merged
     writeCache(CACHE_KEYS.destinations, merged)
     const source =
@@ -458,6 +465,7 @@ export async function archiveDestination(destinationId, masterUid, reason = "", 
 
   console.log("[archiveDestination] ✅ Wrote to Firestore:", { id: idStr, hasFullData: !!fullDestinationData, isActive: false });
   clearDestinationsCache();
+  await bumpDataVersion().catch(() => {});
 }
 
 export async function restoreDestination(destinationId) {
@@ -469,6 +477,7 @@ export async function restoreDestination(destinationId) {
     archivedReason: null,
   }, { merge: true });
   clearDestinationsCache();
+  await bumpDataVersion().catch(() => {});
 }
 
 export function isStaticDestination(destination) {
@@ -507,4 +516,5 @@ export async function permanentlyDeleteDestination(destinationId, destinationDat
   const idStr = String(destinationId);
   await deleteDoc(doc(db, "destinations", idStr));
   clearDestinationsCache();
+  await bumpDataVersion().catch(() => {});
 }

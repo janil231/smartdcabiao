@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import StarRating from './StarRating'
 import { createOrUpdateReview } from '../../services/reviews.service'
+import { requireEmailVerified } from '../../utils/requireEmailVerified'
 
 export default function ReviewForm({ 
   targetType, 
@@ -14,7 +15,6 @@ export default function ReviewForm({
   const [rating, setRating] = useState(existingReview?.rating || 0)
   const [title, setTitle] = useState(existingReview?.title || '')
   const [text, setText] = useState(existingReview?.text || '')
-  const [sustainabilityNote, setSustainabilityNote] = useState(existingReview?.sustainabilityNote || '')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
@@ -42,6 +42,8 @@ export default function ReviewForm({
     e.preventDefault()
     setError('')
 
+    if (!requireEmailVerified(user, (msg) => setError(msg))) return
+
     if (rating === 0) {
       setError('Please select a rating')
       return
@@ -62,7 +64,6 @@ export default function ReviewForm({
         rating,
         title: title.trim() || null,
         text: text.trim(),
-        sustainabilityNote: sustainabilityNote.trim() || null
       })
 
       if (result.success) {
@@ -160,24 +161,6 @@ export default function ReviewForm({
           />
           <p className="mt-1 text-xs text-gray-500">
             {text.length}/1000 characters (minimum 20)
-          </p>
-        </div>
-
-        <div>
-          <label htmlFor="sustainability-note" className="block text-sm font-medium text-gray-700 mb-1">
-            Sustainability Note (optional)
-          </label>
-          <textarea
-            id="sustainability-note"
-            value={sustainabilityNote}
-            onChange={(e) => setSustainabilityNote(e.target.value)}
-            placeholder="Did you notice eco-friendly practices? (e.g., waste segregation, cleanliness, environmental initiatives)"
-            rows={2}
-            maxLength={500}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 resize-none"
-          />
-          <p className="mt-1 text-xs text-gray-500">
-            Share observations about sustainability practices
           </p>
         </div>
 

@@ -20,6 +20,7 @@ import InvalidateMapSize from '../features/map/InvalidateMapSize'
 import { getAllPlaces, clearPlacesCache } from '../features/map/mapHelpers'
 import { getBusinessById } from '../services/businesses.service'
 import { getBusinessIdsWithActiveQuests } from '../services/ownerQuests.service'
+import { getCacheTimestamp, clearPOICache } from '../utils/poiCache'
 import 'leaflet/dist/leaflet.css'
 
 // Fix default icon in webpack/vite (react-leaflet)
@@ -174,6 +175,8 @@ export default function MapPage() {
   const [loading, setLoading] = useState(true)
   const [flyTarget, setFlyTarget] = useState(null)
   const [questBusinessIds, setQuestBusinessIds] = useState(null)
+  const [cacheTime, setCacheTime] = useState(getCacheTimestamp())
+  const [refreshing, setRefreshing] = useState(false)
   const isMobile = useIsMobile()
   const mapRef = useRef(null)
   const markerRefs = useRef({})
@@ -190,9 +193,9 @@ export default function MapPage() {
     async function loadPlaces() {
       try {
         setLoading(true)
-        clearPlacesCache()
-        const places = await getAllPlaces({ forceRefresh: true })
+        const places = await getAllPlaces()
         setAllPlaces(places)
+        setCacheTime(getCacheTimestamp())
       } catch (error) {
         console.error('Error loading places:', error)
         setAllPlaces([])
@@ -317,6 +320,30 @@ export default function MapPage() {
     // Trigger fit to results in MapUtilities
     if (window.enableMapFitToResults) {
       window.enableMapFitToResults()
+    }
+  }
+
+  const getCacheAgeText = () => {
+    if (!cacheTime) return 'Live data'
+    const ageMin = Math.floor((Date.now() - cacheTime) / 60000)
+    if (ageMin < 1) return 'Just now'
+    if (ageMin === 1) return '1 min ago'
+    if (ageMin < 60) return `${ageMin} min ago`
+    return `${Math.floor(ageMin / 60)}h ago`
+  }
+
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    try {
+      clearPOICache()
+      clearPlacesCache()
+      const places = await getAllPlaces({ forceRefresh: true })
+      setAllPlaces(places)
+      setCacheTime(getCacheTimestamp())
+    } catch (err) {
+      console.error('Error refreshing places:', err)
+    } finally {
+      setRefreshing(false)
     }
   }
 
@@ -488,7 +515,29 @@ export default function MapPage() {
             />
           </MapContainer>
 
+          <div className="sm:hidden absolute top-2 right-2 z-[400]">
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="bg-white/90 backdrop-blur rounded-full shadow px-2.5 py-1 text-xs font-medium text-gray-500 hover:text-emerald-600 disabled:opacity-50 flex items-center gap-1"
+            >
+              <span>↻</span>
+              <span>{getCacheAgeText()}</span>
+              {refreshing && <span className="text-emerald-600">...</span>}
+            </button>
+          </div>
+
           <div className="absolute bottom-4 right-3 z-[400] flex flex-col gap-2 sm:hidden">
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="w-12 h-12 bg-white rounded-full shadow-lg border border-gray-200 flex items-center justify-center text-lg hover:bg-gray-50 disabled:opacity-50"
+              aria-label="Refresh data"
+            >
+              ↻
+            </button>
             <button
               type="button"
               onClick={handleMobileLocate}
@@ -576,6 +625,17 @@ export default function MapPage() {
                 <span className="ml-1 text-gray-700">Result{filteredPlaces.length !== 1 ? 's' : ''}</span>
               </h3>
               <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleRefresh}
+                disabled={refreshing}
+                className="rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-500 hover:text-emerald-600 hover:border-emerald-300 disabled:opacity-50 flex items-center gap-1"
+                title="Refresh data"
+              >
+                <span>↻</span>
+                <span>Updated {getCacheAgeText()}</span>
+                {refreshing && <span className="text-emerald-600">refreshing...</span>}
+              </button>
               <button
                 type="button"
                 onClick={handleAddPlace}

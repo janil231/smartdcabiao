@@ -230,6 +230,8 @@ export async function recomputeAggregatesForTarget({ targetType, targetId }) {
       ratingAvg = Math.round((totalRating / ratingCount) * 10) / 10
     }
 
+    console.log(`[recomputeAggregates] ${targetType}/${targetId}: ${ratingCount} approved reviews, avg ${ratingAvg.toFixed(2)}`)
+
     const targetCollection = targetType === 'business' ? BUSINESSES_COLLECTION : DESTINATIONS_COLLECTION
     const targetRef = doc(db, targetCollection, String(targetId))
 

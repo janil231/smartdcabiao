@@ -7,6 +7,7 @@ import { sanitizeForFirestore } from '../utils/firestoreSanitize'
 import { generateBusinessRewardCode } from '../utils/voucherCode'
 import { createBusinessQuestReward } from './businessQuestRewards.service'
 import { logAudit } from './audit.service'
+import { inferQuestTags } from '../utils/tagMapping'
 
 const OWNER_QUESTS_COLLECTION = 'ownerQuests'
 const PARTICIPATIONS_COLLECTION = 'ownerQuestParticipations'
@@ -215,6 +216,12 @@ export async function createOwnerQuest(ownerUid, businessId, businessName, data)
     }
   }
 
+  const resolvedTags = data.tags || inferQuestTags({
+    questType,
+    category: questType,
+    impact: null,
+  })
+
   const questData = sanitizeForFirestore({
     businessId,
     businessName,
@@ -239,6 +246,7 @@ export async function createOwnerQuest(ownerUid, businessId, businessName, data)
     quantityRequired: Number(data.quantityRequired) || 1,
     conditions: data.conditions || null,
     questInstructions: data.questInstructions || null,
+    tags: resolvedTags,
     isActive: data.isActive !== false,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),

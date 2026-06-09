@@ -93,6 +93,7 @@ export default function MyQuestsSection({ user }) {
     if (filter === 'active') return p.status === 'joined' || p.status === 'active'
     if (filter === 'completed') return p.status === 'completed'
     if (filter === 'cancelled') return p.status === 'cancelled'
+    if (filter === 'expired') return p.status === 'expired'
     return true
   })
 
@@ -100,6 +101,7 @@ export default function MyQuestsSection({ user }) {
     active: filtered.filter(p => p.status === 'joined' || p.status === 'active'),
     completed: filtered.filter(p => p.status === 'completed'),
     cancelled: filtered.filter(p => p.status === 'cancelled'),
+    expired: filtered.filter(p => p.status === 'expired'),
   }
 
   const counts = {
@@ -107,12 +109,13 @@ export default function MyQuestsSection({ user }) {
     active: participations.filter(p => p.status === 'joined' || p.status === 'active').length,
     completed: participations.filter(p => p.status === 'completed').length,
     cancelled: participations.filter(p => p.status === 'cancelled').length,
+    expired: participations.filter(p => p.status === 'expired').length,
   }
 
   return (
     <div>
       <div className="flex flex-wrap gap-2 mb-6">
-        {['all', 'active', 'completed', 'cancelled'].map(f => (
+        {['all', 'active', 'completed', 'expired', 'cancelled'].map(f => (
           <button
             key={f}
             onClick={() => setFilter(f)}
@@ -165,6 +168,25 @@ export default function MyQuestsSection({ user }) {
         </div>
       )}
 
+      {grouped.expired.length > 0 && (filter === 'all' || filter === 'expired') && (
+        <div className="mb-6">
+          <h3 className="font-bold text-gray-500 mb-3 flex items-center gap-2">
+            Expired ({grouped.expired.length})
+          </h3>
+          <div className="space-y-3">
+            {grouped.expired.map(p => (
+              <MyQuestRow
+                key={p.id}
+                participation={p}
+                quest={quests[p.questId]}
+                business={businesses[quests[p.questId]?.businessId]}
+                reward={null}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
       {grouped.cancelled.length > 0 && (filter === 'all' || filter === 'cancelled') && (
         <div className="mb-6">
           <h3 className="font-bold text-gray-700 mb-3 flex items-center gap-2">
@@ -209,6 +231,8 @@ function MyQuestRow({ participation, quest, business, reward }) {
       return <span className="text-xs font-bold text-emerald-700">Completed</span>
     if (participation.status === 'cancelled')
       return <span className="text-xs font-bold text-gray-500">Cancelled</span>
+    if (participation.status === 'expired')
+      return <span className="text-xs font-bold text-amber-600">Expired</span>
     return null
   })()
 
@@ -240,6 +264,12 @@ function MyQuestRow({ participation, quest, business, reward }) {
           >
             Copy
           </button>
+        </div>
+      )}
+
+      {participation.status === 'expired' && participation.expiredReason === 'season_ended' && (
+        <div className="mt-2 rounded-lg bg-amber-50 border border-amber-200 p-2 text-xs text-amber-800">
+          ⏰ This quest expired because the season ended before you could complete it.
         </div>
       )}
 

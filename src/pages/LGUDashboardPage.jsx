@@ -25,8 +25,13 @@ import {
   getActiveSeason, 
   listSeasons, 
   createSeason, 
-  activateSeason, 
-  closeSeason 
+  getSeasonStatus, 
+  formatSeasonDate,
+  activateSeasonStrict, 
+  endSeasonWithExpiry,
+  expireAllQuestsForSeason,
+  deleteSeasonIfEmpty,
+  autoEndStaleSeasons,
 } from '../services/seasons.service'
 import { 
   listActiveQuests, 
@@ -39,6 +44,8 @@ import {
 import { expireAllStaleParticipations } from '../services/participations.service'
 import { repairAllBusinessImages, backfillBusinessOwnerUids } from '../services/businesses.service'
 import { seedSampleQuestsForAllBusinesses, deleteAllSeededQuestsAndRewards } from '../services/seedSampleOwnerQuests.service'
+import { seedSampleReviewsForAllBusinesses } from '../services/seedSampleReviews.service'
+import { repairAllReviewAggregates } from '../services/repairReviewAggregates.service'
 import { repairAllDestinationImages } from '../services/destinations.service'
 import { listPendingReviews, setReviewStatus } from '../services/reviews.service'
 import { listTopByPoints, listTopByImpact, IMPACT_UNITS } from '../services/leaderboard.service'
@@ -55,6 +62,9 @@ import {
 import CheckInModal from '../components/quest/CheckInModal'
 import QRDisplayModal from '../components/quest/QRDisplayModal'
 import QuestDetailsModal from '../components/quest/QuestDetailsModal'
+import SeasonStatusBadge from '../components/lgu/SeasonStatusBadge'
+import EditSeasonModal from '../components/lgu/EditSeasonModal'
+import ConfirmDialog from '../components/lgu/ConfirmDialog'
 
 const TABS = {
   SUBMISSIONS: 'submissions',
@@ -922,6 +932,16 @@ function DataToolsPanel({ user }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteResult, setDeleteResult] = useState(null)
+  const [showSeedReviewsConfirm, setShowSeedReviewsConfirm] = useState(false)
+  const [seedingReviews, setSeedingReviews] = useState(false)
+  const [seedReviewsProgressMessage, setSeedReviewsProgressMessage] = useState('')
+  const [seedReviewsProgressPercent, setSeedReviewsProgressPercent] = useState(0)
+  const [seedReviewsResult, setSeedReviewsResult] = useState(null)
+  const [showRepairAggregatesConfirm, setShowRepairAggregatesConfirm] = useState(false)
+  const [repairingAggregates, setRepairingAggregates] = useState(false)
+  const [repairProgressMessage, setRepairProgressMessage] = useState('')
+  const [repairProgressPercent, setRepairProgressPercent] = useState(0)
+  const [repairAggregatesResult, setRepairAggregatesResult] = useState(null)
 
   const addLog = (entry) => setLog(prev => [...prev, entry])
 
@@ -1010,6 +1030,85 @@ function DataToolsPanel({ user }) {
   const seedProgressPct = seedProgress
     ? Math.round(((seedProgress.businessIndex - 1) * seedProgress.totalQuests + seedProgress.questIndex) / (seedProgress.totalBusinesses * seedProgress.totalQuests) * 100)
     : 0
+
+  const handleSeedReviews = async () => {
+    setShowSeedReviewsConfirm(false)
+    setSeedingReviews(true)
+    setSeedReviewsResult(null)
+    setSeedReviewsProgressMessage('Starting...')
+    setSeedReviewsProgressPercent(0)
+    addLog({ time: new Date().toLocaleTimeString(), msg: 'Starting seed sample reviews...' })
+    try {
+      const result = await seedSampleReviewsForAllBusinesses({
+        onProgress: ({ businessIndex, totalBusinesses, businessName, reviewIndex, totalReviews }) => {
+          const overallPercent = Math.round(
+            ((businessIndex - 1) / totalBusinesses + (reviewIndex / totalReviews) / totalBusinesses) * 100
+          )
+          setSeedReviewsProgressMessage(
+            `[${businessIndex}/${totalBusinesses}] ${businessName} — Review ${reviewIndex}/${totalReviews}`
+          )
+          setSeedReviewsProgressPercent(overallPercent)
+          addLog({ time: new Date().toLocaleTimeString(), msg: `[${businessIndex}/${totalBusinesses}] ${businessName} — Review ${reviewIndex}/${totalReviews}` })
+        },
+      })
+      setSeedReviewsResult(result)
+      setSeedReviewsProgressMessage(
+        `Done. Seeded: ${result.businessesSeeded}, Skipped: ${result.businessesSkipped.length}, Errors: ${result.errors.length}`
+      )
+      setSeedReviewsProgressPercent(100)
+      addLog({ time: new Date().toLocaleTimeString(), msg: `Done. Seeded: ${result.businessesSeeded}, Skipped: ${result.businessesSkipped.length}, Errors: ${result.errors.length}, Users: ${result.usersCreated} created, ${result.usersReused} reused, Reviews: ${result.reviewsCreated} total` })
+    } catch (err) {
+      console.error('[SeedReviews] Fatal error:', err)
+      setSeedReviewsResult({
+        businessesScanned: 0,
+        businessesSeeded: 0,
+        businessesSkipped: [],
+        reviewsCreated: 0,
+        usersCreated: 0,
+        usersReused: 0,
+        errors: [{ businessId: 'fatal', businessName: 'Fatal Error', error: err.message || String(err) }],
+        businessesSeededList: [],
+      })
+      addLog({ time: new Date().toLocaleTimeString(), msg: `❌ Fatal error: ${err.message}` })
+    } finally {
+      setSeedingReviews(false)
+    }
+  }
+
+  const handleRepairAggregates = async () => {
+    setShowRepairAggregatesConfirm(false)
+    setRepairingAggregates(true)
+    setRepairAggregatesResult(null)
+    setRepairProgressMessage('Starting...')
+    setRepairProgressPercent(0)
+    addLog({ time: new Date().toLocaleTimeString(), msg: 'Starting repair review aggregates...' })
+    try {
+      const result = await repairAllReviewAggregates({
+        onProgress: ({ businessIndex, totalBusinesses, businessName }) => {
+          const pct = Math.round((businessIndex / totalBusinesses) * 100)
+          setRepairProgressMessage(`[${businessIndex}/${totalBusinesses}] ${businessName}`)
+          setRepairProgressPercent(pct)
+          addLog({ time: new Date().toLocaleTimeString(), msg: `[${businessIndex}/${totalBusinesses}] ${businessName}` })
+        },
+      })
+      setRepairAggregatesResult(result)
+      setRepairProgressMessage(`Done. Repaired: ${result.businessesRepaired}, Skipped: ${result.businessesSkipped.length}, Errors: ${result.errors.length}`)
+      setRepairProgressPercent(100)
+      addLog({ time: new Date().toLocaleTimeString(), msg: `Done. Repaired: ${result.businessesRepaired}, Skipped: ${result.businessesSkipped.length}, Errors: ${result.errors.length}` })
+    } catch (err) {
+      console.error('[RepairAggregates] Fatal error:', err)
+      setRepairAggregatesResult({
+        businessesScanned: 0,
+        businessesRepaired: 0,
+        businessesSkipped: [],
+        businessesUpdated: [],
+        errors: [{ businessId: 'fatal', businessName: 'Fatal Error', error: err.message || String(err) }],
+      })
+      addLog({ time: new Date().toLocaleTimeString(), msg: `❌ Fatal error: ${err.message}` })
+    } finally {
+      setRepairingAggregates(false)
+    }
+  }
 
   return (
     <div className="h-full flex flex-col min-h-0">
@@ -1350,6 +1449,222 @@ function DataToolsPanel({ user }) {
           )}
         </div>
 
+        <div className="border-t border-gray-200 pt-6 mt-6">
+          <h3 className="text-base font-semibold text-gray-900 mb-2">
+            ⭐ Sample Data — Reviews
+          </h3>
+          <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3 mb-4 text-sm text-emerald-800">
+            💡 One-time seeding tool. Creates 5 realistic reviews per business with varied ratings and category-appropriate content. Creates 5 fake user accounts on first run. Businesses with existing reviews are skipped.
+          </div>
+          <button
+            onClick={() => setShowSeedReviewsConfirm(true)}
+            disabled={seedingReviews}
+            className="bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium px-4 py-2 disabled:bg-gray-300 disabled:cursor-not-allowed"
+          >
+            {seedingReviews ? "Seeding..." : "Seed Sample Reviews for All Businesses"}
+          </button>
+
+          {seedingReviews && (
+            <div className="mt-4">
+              <div className="text-sm text-gray-700 mb-1">{seedReviewsProgressMessage}</div>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div 
+                  className="bg-emerald-600 h-2 rounded-full transition-all duration-200" 
+                  style={{ width: `${seedReviewsProgressPercent}%` }} 
+                />
+              </div>
+            </div>
+          )}
+
+          {seedReviewsResult && (
+            <div className="mt-6 rounded-lg bg-gray-50 border border-gray-200 p-4">
+              <div className="grid grid-cols-3 gap-3 mb-4">
+                <div className="bg-emerald-50 rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-emerald-700">{seedReviewsResult.businessesSeeded}</div>
+                  <div className="text-xs text-gray-600">Seeded</div>
+                </div>
+                <div className="bg-amber-50 rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-amber-700">{seedReviewsResult.businessesSkipped.length}</div>
+                  <div className="text-xs text-gray-600">Skipped</div>
+                </div>
+                <div className="bg-red-50 rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-red-700">{seedReviewsResult.errors.length}</div>
+                  <div className="text-xs text-gray-600">Errors</div>
+                </div>
+              </div>
+              
+              <div className="text-xs text-gray-600 mb-3">
+                Users: <strong>{seedReviewsResult.usersCreated}</strong> created, <strong>{seedReviewsResult.usersReused}</strong> reused · Reviews: <strong>{seedReviewsResult.reviewsCreated}</strong> total
+              </div>
+
+              {seedReviewsResult.businessesSeededList?.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="text-sm font-semibold text-emerald-700 mb-2">
+                    Seeded ({seedReviewsResult.businessesSeededList.length})
+                  </h4>
+                  <ul className="text-sm text-emerald-700 space-y-1">
+                    {seedReviewsResult.businessesSeededList.map((s, idx) => (
+                      <li key={`${s.businessId}-${idx}`}>
+                        ✅ <strong>{s.businessName}</strong> — {s.reviewsCreated} reviews
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {seedReviewsResult.businessesSkipped.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="text-sm font-semibold text-amber-700 mb-2">
+                    Skipped ({seedReviewsResult.businessesSkipped.length})
+                  </h4>
+                  <ul className="text-sm text-amber-700 space-y-1">
+                    {seedReviewsResult.businessesSkipped.map((s, idx) => (
+                      <li key={`${s.businessId}-${idx}`}>
+                        ⊘ <strong>{s.businessName}</strong> — {s.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {seedReviewsResult.errors.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="text-sm font-semibold text-red-700 mb-2">
+                    Errors ({seedReviewsResult.errors.length})
+                  </h4>
+                  <ul className="text-sm text-red-600 space-y-1">
+                    {seedReviewsResult.errors.map((e, idx) => (
+                      <li key={`${e.businessId}-${idx}`}>
+                        ⚠️ <strong>{e.businessName}</strong> — {String(e.error)}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
+          {showSeedReviewsConfirm && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowSeedReviewsConfirm(false)}>
+              <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full mx-4" onClick={(e) => e.stopPropagation()}>
+                <h3 className="text-lg font-bold text-gray-900 mb-2">Seed Sample Reviews?</h3>
+                <p className="text-sm text-gray-600 mb-4">
+                  This will create 5 reviews per business that currently has no reviews. It will also create 5 fake demo user accounts (with @cabiaodemo.local emails) the first time you run this. Skipped businesses will be reported. This action cannot be undone automatically — reviews can be moderated or deleted individually from the Reviews moderation panel.
+                </p>
+                <div className="flex gap-2 justify-end">
+                  <button
+                    onClick={() => setShowSeedReviewsConfirm(false)}
+                    className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 font-semibold hover:bg-gray-200 text-sm"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSeedReviews}
+                    className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 text-sm"
+                  >
+                    Yes, Seed Reviews
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-gray-200 pt-6 mt-6">
+          <h3 className="text-base font-semibold text-gray-900 mb-2">
+            🔧 Repair — Review Aggregates
+          </h3>
+          <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 mb-4 text-sm text-amber-800">
+            ⚠️ Some businesses show &quot;0.0 — No ratings yet&quot; even though reviews exist. This tool recomputes the rating average and review count on each business doc from the actual approved reviews. Safe to run anytime.
+          </div>
+          <button
+            onClick={() => setShowRepairAggregatesConfirm(true)}
+            disabled={repairingAggregates}
+            className="bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium px-4 py-2 disabled:bg-gray-300 disabled:cursor-not-allowed"
+          >
+            {repairingAggregates ? "Repairing..." : "Repair All Review Aggregates"}
+          </button>
+
+          {repairingAggregates && (
+            <div className="mt-4">
+              <div className="text-sm text-gray-700 mb-1">{repairProgressMessage}</div>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div className="bg-emerald-600 h-2 rounded-full transition-all duration-200" style={{ width: `${repairProgressPercent}%` }} />
+              </div>
+            </div>
+          )}
+
+          {repairAggregatesResult && (
+            <div className="mt-6 rounded-lg bg-gray-50 border border-gray-200 p-4">
+              <div className="grid grid-cols-3 gap-3 mb-4">
+                <div className="bg-emerald-50 rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-emerald-700">{repairAggregatesResult.businessesRepaired}</div>
+                  <div className="text-xs text-gray-600">Repaired</div>
+                </div>
+                <div className="bg-amber-50 rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-amber-700">{repairAggregatesResult.businessesSkipped.length}</div>
+                  <div className="text-xs text-gray-600">Already Correct</div>
+                </div>
+                <div className="bg-red-50 rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-red-700">{repairAggregatesResult.errors.length}</div>
+                  <div className="text-xs text-gray-600">Errors</div>
+                </div>
+              </div>
+
+              {repairAggregatesResult.businessesUpdated?.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="text-sm font-semibold text-emerald-700 mb-2">Updated ({repairAggregatesResult.businessesUpdated.length})</h4>
+                  <ul className="text-sm text-emerald-700 space-y-1">
+                    {repairAggregatesResult.businessesUpdated.map((b, idx) => (
+                      <li key={`${b.businessId}-${idx}`}>
+                        ✅ <strong>{b.businessName}</strong> — {b.oldRating?.toFixed(1) ?? '0.0'} ({b.oldCount ?? 0}) → <strong>{b.newRating.toFixed(1)} ({b.newCount})</strong>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {repairAggregatesResult.errors.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="text-sm font-semibold text-red-700 mb-2">Errors ({repairAggregatesResult.errors.length})</h4>
+                  <ul className="text-sm text-red-600 space-y-1">
+                    {repairAggregatesResult.errors.map((e, idx) => (
+                      <li key={`${e.businessId}-${idx}`}>
+                        ⚠️ <strong>{e.businessName}</strong> — {String(e.error)}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
+          {showRepairAggregatesConfirm && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowRepairAggregatesConfirm(false)}>
+              <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full mx-4" onClick={(e) => e.stopPropagation()}>
+                <h3 className="text-lg font-bold text-gray-900 mb-2">Repair Review Aggregates?</h3>
+                <p className="text-sm text-gray-600 mb-4">
+                  This will scan all businesses, count their approved reviews, and update the rating average + count on each business doc. Safe to run multiple times. No reviews will be modified or deleted.
+                </p>
+                <div className="flex gap-2 justify-end">
+                  <button
+                    onClick={() => setShowRepairAggregatesConfirm(false)}
+                    className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 font-semibold hover:bg-gray-200 text-sm"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleRepairAggregates}
+                    className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 text-sm"
+                  >
+                    Yes, Repair
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
         {log.length > 0 && (
           <div className="bg-gray-900 text-gray-100 rounded-xl p-4 font-mono text-xs max-h-48 overflow-y-auto">
             {log.map((entry, i) => (
@@ -1419,6 +1734,9 @@ export default function LGUDashboardPage() {
   const [expandedOwnerQuest, setExpandedOwnerQuest] = useState(null)
   const [ownerQuestCompletions, setOwnerQuestCompletions] = useState([])
   const [completionsLoading, setCompletionsLoading] = useState(false)
+  const [editingSeason, setEditingSeason] = useState(null)
+  const [viewingSeason, setViewingSeason] = useState(null)
+  const [confirmDialog, setConfirmDialog] = useState(null)
 
   const filteredQuests = useMemo(() => {
     if (!questSearchQuery.trim()) return quests
@@ -1449,6 +1767,18 @@ export default function LGUDashboardPage() {
   }, [user])
 
   const isMaster = role === 'master'
+
+  useEffect(() => {
+    if (role !== 'master') return;
+    autoEndStaleSeasons()
+      .then((ended) => {
+        if (ended.length > 0) {
+          console.log(`[LGU] Auto-ended ${ended.length} stale season(s):`, ended);
+          loadData();
+        }
+      })
+      .catch((err) => console.error('[LGU] autoEndStaleSeasons failed:', err));
+  }, [role]);
 
   useEffect(() => {
     if (!user || !role) {
@@ -1827,30 +2157,94 @@ export default function LGUDashboardPage() {
     }
   }
 
-  const handleActivateSeason = async (seasonId) => {
-    setActionLoading(true)
-    try {
-      await activateSeason(seasonId, { uid: user.uid, email: user.email })
-      showToast('Season activated!')
-      loadData()
-    } catch (error) {
-      showToast(error.message, 'error')
-    } finally {
-      setActionLoading(false)
-    }
+  async function handleActivateSeason(season) {
+    setConfirmDialog({
+      title: `Activate "${season.name}"?`,
+      message: 'This will end the current active season (if any) and activate this one. Only one season can be active at a time.',
+      confirmLabel: 'Activate',
+      confirmVariant: 'primary',
+      loading: false,
+      onConfirm: async () => {
+        setConfirmDialog(prev => ({ ...prev, loading: true }));
+        try {
+          await activateSeasonStrict(String(season.id));
+          setConfirmDialog(null);
+          await loadData();
+        } catch (err) {
+          console.error('Activate failed:', err);
+          alert('Failed: ' + err.message);
+          setConfirmDialog(prev => ({ ...prev, loading: false }));
+        }
+      },
+    });
   }
 
-  const handleCloseSeason = async (seasonId) => {
-    setActionLoading(true)
-    try {
-      await closeSeason(seasonId, { uid: user.uid, email: user.email })
-      showToast('Season closed!')
-      loadData()
-    } catch (error) {
-      showToast(error.message, 'error')
-    } finally {
-      setActionLoading(false)
-    }
+  async function handleEndSeason(season) {
+    setConfirmDialog({
+      title: `End "${season.name}"?`,
+      message: 'This will:\n• Mark the season as ended\n• Expire ALL quests for this season\n• Expire all "joined" participations\n\nVouchers and merchant quests will NOT be affected.\n\nThis cannot be undone.',
+      confirmLabel: 'End Season',
+      confirmVariant: 'danger',
+      loading: false,
+      onConfirm: async () => {
+        setConfirmDialog(prev => ({ ...prev, loading: true }));
+        try {
+          const result = await endSeasonWithExpiry(String(season.id));
+          setConfirmDialog(null);
+          await loadData();
+          alert(`Season ended. ${result.questsExpired} quests expired, ${result.participationsExpired} participations expired.`);
+        } catch (err) {
+          console.error('End season failed:', err);
+          alert('Failed: ' + err.message);
+          setConfirmDialog(prev => ({ ...prev, loading: false }));
+        }
+      },
+    });
+  }
+
+  async function handleDeleteSeason(season) {
+    setConfirmDialog({
+      title: `Delete "${season.name}"?`,
+      message: 'This will permanently delete this season. This is only allowed for empty seasons with no quests or participations.',
+      confirmLabel: 'Delete',
+      confirmVariant: 'danger',
+      loading: false,
+      onConfirm: async () => {
+        setConfirmDialog(prev => ({ ...prev, loading: true }));
+        try {
+          await deleteSeasonIfEmpty(String(season.id));
+          setConfirmDialog(null);
+          await loadData();
+        } catch (err) {
+          console.error('Delete failed:', err);
+          alert('Cannot delete: ' + err.message);
+          setConfirmDialog(prev => ({ ...prev, loading: false }));
+        }
+      },
+    });
+  }
+
+  async function handleExpireAllQuests(season) {
+    setConfirmDialog({
+      title: `Expire All Quests for "${season.name}"?`,
+      message: 'This will deactivate ALL remaining active quests for this ended season and expire their joined participations. Use this as a cleanup tool.',
+      confirmLabel: 'Expire All',
+      confirmVariant: 'warning',
+      loading: false,
+      onConfirm: async () => {
+        setConfirmDialog(prev => ({ ...prev, loading: true }));
+        try {
+          const result = await expireAllQuestsForSeason(String(season.id));
+          setConfirmDialog(null);
+          await loadData();
+          alert(`Done. ${result.questsExpired} quests expired, ${result.participationsExpired} participations expired.`);
+        } catch (err) {
+          console.error('Expire all failed:', err);
+          alert('Failed: ' + err.message);
+          setConfirmDialog(prev => ({ ...prev, loading: false }));
+        }
+      },
+    });
   }
 
   const handleCreateQuest = async (formData) => {
@@ -2471,34 +2865,90 @@ export default function LGUDashboardPage() {
                               <tr key={season.id} className="hover:bg-gray-50">
                                 <td className="px-4 py-3 font-medium text-gray-900">{season.name}</td>
                                 <td className="px-4 py-3 text-gray-600 text-sm">
-                                  {season.startAt?.toDate ? season.startAt.toDate().toLocaleDateString() : (season.startAt || '-')}
+                                  {formatSeasonDate(season.startAt)}
                                 </td>
                                 <td className="px-4 py-3 text-gray-600 text-sm">
-                                  {season.endAt?.toDate ? season.endAt.toDate().toLocaleDateString() : (season.endAt || '-')}
+                                  {formatSeasonDate(season.endAt)}
                                 </td>
                                 <td className="px-4 py-3">
-                                  <StatusBadge status={season.status} />
+                                  <SeasonStatusBadge status={getSeasonStatus(season)} />
                                 </td>
                                 <td className="px-4 py-3">
-                                  <div className="flex gap-2">
-                                    {season.status === 'inactive' ? (
-                                      <button
-                                        onClick={() => handleActivateSeason(season.id)}
-                                        disabled={actionLoading}
-                                        className="text-sm font-medium text-emerald-600 hover:text-emerald-700 disabled:opacity-50"
-                                      >
-                                        Activate
-                                      </button>
-                                    ) : season.status === 'active' ? (
-                                      <button
-                                        onClick={() => handleCloseSeason(season.id)}
-                                        disabled={actionLoading}
-                                        className="text-sm font-medium text-red-600 hover:text-red-700 disabled:opacity-50"
-                                      >
-                                        Close
-                                      </button>
-                                    ) : null}
-                                  </div>
+                                  {(() => {
+                                    const s = getSeasonStatus(season);
+                                    return (
+                                      <div className="flex flex-wrap gap-x-3 gap-y-1">
+                                        {s === 'active' && (
+                                          <>
+                                            <button
+                                              onClick={() => setEditingSeason(season)}
+                                              className="text-sm font-medium text-emerald-600 hover:text-emerald-700"
+                                            >
+                                              Edit
+                                            </button>
+                                            <button
+                                              onClick={() => handleEndSeason(season)}
+                                              className="text-sm font-medium text-red-600 hover:text-red-700"
+                                            >
+                                              End Season
+                                            </button>
+                                          </>
+                                        )}
+                                        {s === 'scheduled' && (
+                                          <>
+                                            <button
+                                              onClick={() => handleActivateSeason(season)}
+                                              className="text-sm font-medium text-emerald-600 hover:text-emerald-700"
+                                            >
+                                              Activate
+                                            </button>
+                                            <button
+                                              onClick={() => setEditingSeason(season)}
+                                              className="text-sm font-medium text-emerald-600 hover:text-emerald-700"
+                                            >
+                                              Edit
+                                            </button>
+                                            <button
+                                              onClick={() => handleDeleteSeason(season)}
+                                              className="text-sm font-medium text-red-600 hover:text-red-700"
+                                            >
+                                              Delete
+                                            </button>
+                                          </>
+                                        )}
+                                        {s === 'draft' && (
+                                          <>
+                                            <button
+                                              onClick={() => handleActivateSeason(season)}
+                                              className="text-sm font-medium text-emerald-600 hover:text-emerald-700"
+                                            >
+                                              Activate
+                                            </button>
+                                            <button
+                                              onClick={() => setEditingSeason(season)}
+                                              className="text-sm font-medium text-emerald-600 hover:text-emerald-700"
+                                            >
+                                              Edit
+                                            </button>
+                                            <button
+                                              onClick={() => handleDeleteSeason(season)}
+                                              className="text-sm font-medium text-red-600 hover:text-red-700"
+                                            >
+                                              Delete
+                                            </button>
+                                          </>
+                                        )}
+                                        {s === 'ended' && (
+                                          <button
+                                            onClick={() => setViewingSeason(season)}
+                                            className="text-sm font-medium text-emerald-600 hover:text-emerald-700"
+                                          >
+                                            View
+                                          </button>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
                                 </td>
                               </tr>
                             ))}
@@ -3272,6 +3722,37 @@ export default function LGUDashboardPage() {
           onClose={() => setShowSeasonModal(false)}
           onSubmit={handleCreateSeason}
           isLoading={actionLoading}
+        />
+      )}
+
+      {editingSeason && (
+        <EditSeasonModal
+          season={editingSeason}
+          isOpen={!!editingSeason}
+          onClose={() => setEditingSeason(null)}
+          onSaved={() => { setEditingSeason(null); loadData(); }}
+        />
+      )}
+
+      {viewingSeason && (
+        <EditSeasonModal
+          season={viewingSeason}
+          isOpen={!!viewingSeason}
+          onClose={() => setViewingSeason(null)}
+          readOnly={true}
+        />
+      )}
+
+      {confirmDialog && (
+        <ConfirmDialog
+          isOpen={!!confirmDialog}
+          title={confirmDialog.title}
+          message={confirmDialog.message}
+          confirmLabel={confirmDialog.confirmLabel}
+          confirmVariant={confirmDialog.confirmVariant}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+          loading={confirmDialog.loading}
         />
       )}
 
