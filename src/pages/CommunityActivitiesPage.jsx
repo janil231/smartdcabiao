@@ -654,13 +654,6 @@ export default function CommunityActivitiesPage() {
     return R * c
   }
 
-  const filteredQuests = useMemo(() => {
-    if (activeTab === 'my') {
-      return quests.filter(q => myQuestIds.has(q.id))
-    }
-    return quests
-  }, [quests, activeTab, myQuestIds])
-
   const finishingSoonQuests = useMemo(() => {
     return lguQuests
       .filter((q) => q.endAt && isQuestActiveNow(q))
@@ -735,7 +728,7 @@ export default function CommunityActivitiesPage() {
       })
       .sort((a, b) => (a.points || 0) - (b.points || 0))
       .slice(0, 3)
-  }, [quests, isQuestActiveNow])
+  }, [lguQuests, isQuestActiveNow])
 
   const handleCloseOnboarding = async () => {
     setShowOnboarding(false)
