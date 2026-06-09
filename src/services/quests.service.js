@@ -10,6 +10,7 @@ import {
   orderBy,
   increment,
   writeBatch,
+  serverTimestamp,
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { logAudit } from './audit.service'
@@ -18,6 +19,7 @@ import { getActiveSeason } from './seasons.service'
 import { listBusinesses } from './businesses.service'
 import { listDestinations } from './destinations.service'
 import { bumpDataVersion } from './appMeta.service'
+import { sanitizeForFirestore } from '../utils/firestoreSanitize'
 import { generateCabiaoCoordinates } from '../constants/cabiaoGeo'
 import {
   buildQuestVerificationFields,
@@ -148,7 +150,6 @@ export async function createQuest(
   }
   
   const questId = `quest_${Date.now()}`
-  const questRef = doc(db, QUESTS_COLLECTION, questId)
 
   const verificationFields = buildQuestVerificationFields(questId, {
     questType,
@@ -160,8 +161,8 @@ export async function createQuest(
   })
 
   const questForTags = { questType, category, impact, ...verificationFields }
-  
-  await setDoc(questRef, {
+
+  const payload = sanitizeForFirestore({
     seasonId,
     title,
     description,
@@ -170,16 +171,18 @@ export async function createQuest(
     points: parseInt(points, 10),
     capacity: parseInt(capacity, 10),
     reservedCount: 0,
-    startAt,
-    endAt,
+    startAt: startAt || serverTimestamp(),
+    endAt: endAt || null,
     gracePeriodHours: parseInt(gracePeriodHours, 10) || 24,
     impact: impact || null,
     position: position || null,
     status: 'active',
-    createdAt: new Date().toISOString(),
+    createdAt: serverTimestamp(),
     tags: inferQuestTags(questForTags),
     ...verificationFields,
   })
+
+  await setDoc(doc(db, QUESTS_COLLECTION, String(questId)), payload)
   
   await logAudit({
     action: 'QUEST_CREATED',
@@ -188,7 +191,11 @@ export async function createQuest(
     details: { title, seasonId, adminUid: adminUser.uid, adminEmail: adminUser.email },
   })
 
-  await bumpDataVersion().catch(() => {})
+  try {
+    await bumpDataVersion()
+  } catch (err) {
+    console.warn('[createQuest] Failed to bump data version:', err)
+  }
 
   return { id: questId, success: true }
 }
@@ -250,7 +257,7 @@ export async function updateQuest(questId, data, adminUser) {
     return { success: true, quest }
   }
 
-  await updateDoc(questRef, updateData)
+  await updateDoc(questRef, sanitizeForFirestore(updateData))
 
   await logAudit({
     action: 'QUEST_UPDATED',
@@ -260,7 +267,11 @@ export async function updateQuest(questId, data, adminUser) {
   })
 
   const updatedQuest = await getQuestById(questId)
-  await bumpDataVersion().catch(() => {})
+  try {
+    await bumpDataVersion()
+  } catch (err) {
+    console.warn('[updateQuest] Failed to bump data version:', err)
+  }
   return { success: true, quest: updatedQuest }
 }
 
@@ -281,7 +292,11 @@ export async function activateQuest(questId, adminUser) {
     details: { title: quest.title, adminUid: adminUser.uid, adminEmail: adminUser.email },
   })
 
-  await bumpDataVersion().catch(() => {})
+  try {
+    await bumpDataVersion()
+  } catch (err) {
+    console.warn('[activateQuest] Failed to bump data version:', err)
+  }
 
   return { success: true }
 }
@@ -303,7 +318,11 @@ export async function deactivateQuest(questId, adminUser) {
     details: { title: quest.title, adminUid: adminUser.uid, adminEmail: adminUser.email },
   })
 
-  await bumpDataVersion().catch(() => {})
+  try {
+    await bumpDataVersion()
+  } catch (err) {
+    console.warn('[deactivateQuest] Failed to bump data version:', err)
+  }
 
   return { success: true }
 }
@@ -589,13 +608,13 @@ export async function seedSampleQuestsForActiveSeason() {
       questType: base.category,
       category: base.category,
     })
-    await setDoc(questRef, {
+    await setDoc(questRef, sanitizeForFirestore({
       ...base,
       ...verificationFields,
       questType: base.category,
-    }, { merge: true })
+    }), { merge: true })
   }
-  
+
   await logAudit({
     action: 'SEED_SAMPLE_QUESTS',
     targetType: 'season',
@@ -929,7 +948,7 @@ export async function seedVisitAndBuyQuestsForActiveSeason(adminUser) {
     })
     
     const questRef = doc(db, QUESTS_COLLECTION, questId)
-    await setDoc(questRef, visitQuests[i], { merge: true })
+    await setDoc(questRef, sanitizeForFirestore(visitQuests[i]), { merge: true })
   }
   
   for (let i = 0; i < 10; i++) {
@@ -992,7 +1011,7 @@ export async function seedVisitAndBuyQuestsForActiveSeason(adminUser) {
     }
     
     const questRef = doc(db, QUESTS_COLLECTION, questId)
-    await setDoc(questRef, questData, { merge: true })
+    await setDoc(questRef, sanitizeForFirestore(questData), { merge: true })
     
     buyQuests.push(questData)
   }
