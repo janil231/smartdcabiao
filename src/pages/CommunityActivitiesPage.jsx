@@ -13,6 +13,8 @@ import {
   expireMyStaleParticipations,
   reconcileOverbookedQuestSlots,
 } from '../services/participations.service'
+import { listActiveOwnerQuests } from '../services/ownerQuests.service'
+import OwnerQuestPublicCard from '../components/owner/OwnerQuestPublicCard'
 import { hasUserSeenOnboarding, setSeenOnboarding, getUserLocation, setUserLocation as saveUserLocation } from '../services/userSettings.service'
 import { CABIAO_CENTER } from '../constants/cabiaoGeo'
 import { auth } from '../lib/firebase'
@@ -82,8 +84,9 @@ function QuestCard({
   const isCancelledOrExpired = participation?.status === 'cancelled' || participation?.status === 'expired'
   
   const formatDate = (dateStr) => {
-    if (!dateStr) return ''
+    if (!dateStr) return 'No deadline'
     const date = new Date(dateStr)
+    if (isNaN(date.getTime())) return 'No deadline'
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
   }
 
@@ -431,6 +434,8 @@ export default function CommunityActivitiesPage() {
   const [locationError, setLocationError] = useState(null)
   const [showQRScanner, setShowQRScanner] = useState(false)
   const [codeQuest, setCodeQuest] = useState(null)
+  const [ownerQuests, setOwnerQuests] = useState([])
+  const [ownerQuestsLoading, setOwnerQuestsLoading] = useState(true)
 
   useEffect(() => {
     autoEndStaleSeasons().catch((err) => {
@@ -526,6 +531,21 @@ export default function CommunityActivitiesPage() {
     if (authLoading) return
     loadQuests()
   }, [loadQuests, authLoading])
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const list = await listActiveOwnerQuests()
+        if (!cancelled) setOwnerQuests(list)
+      } catch (err) {
+        console.warn('[Events] Failed to load owner quests:', err)
+      } finally {
+        if (!cancelled) setOwnerQuestsLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   const handleLocationRequest = async () => {
     if (!navigator.geolocation) {
@@ -1052,6 +1072,39 @@ export default function CommunityActivitiesPage() {
                 )}
               </section>
             </>
+          )}
+
+          {!loading && activeTab === 'all' && (
+            <section className="mt-8">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  🎁 Merchant Rewards
+                </h2>
+                <Link
+                  to="/rewards-nearby"
+                  className="text-sm text-emerald-600 hover:text-emerald-700 font-medium"
+                >
+                  View all →
+                </Link>
+              </div>
+              {ownerQuestsLoading ? (
+                <p className="text-sm text-gray-500">Loading merchant rewards...</p>
+              ) : ownerQuests.length === 0 ? (
+                <p className="text-sm text-gray-500">No merchant rewards available yet.</p>
+              ) : (
+                <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                  {ownerQuests.slice(0, 6).map(quest => (
+                    <OwnerQuestPublicCard
+                      key={quest.id}
+                      quest={quest}
+                      business={quest.businessId ? { id: quest.businessId, name: quest.businessName } : null}
+                      currentUser={user}
+                      onLoginRequired={() => showToast('Sign in to join merchant rewards', 'error')}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
           )}
 
           <div id="all-quests" className="mt-8">

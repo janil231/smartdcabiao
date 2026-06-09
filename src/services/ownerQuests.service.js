@@ -117,6 +117,25 @@ export async function listAllOwnerQuests() {
   }
 }
 
+export async function listActiveOwnerQuests() {
+  try {
+    const q = query(
+      collection(db, OWNER_QUESTS_COLLECTION),
+      where('isActive', '==', true)
+    )
+    const snapshot = await getDocs(q)
+    const list = snapshot.docs.map(normalizeQuestDoc)
+    return list.sort((a, b) => {
+      const aTime = a.createdAt?.toMillis?.() || a.createdAt?._seconds * 1000 || 0
+      const bTime = b.createdAt?.toMillis?.() || b.createdAt?._seconds * 1000 || 0
+      return bTime - aTime
+    })
+  } catch (error) {
+    if (import.meta.env.DEV) console.warn('[ownerQuests] listActive failed:', error)
+    return []
+  }
+}
+
 let questBusinessIdsCache = null
 let questBusinessIdsPromise = null
 

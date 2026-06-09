@@ -40,6 +40,7 @@ import {
   updateQuest,
   updateQuestActive,
   repairQuestReservedCounts,
+  repairQuestActiveFlags,
 } from '../services/quests.service'
 import { expireAllStaleParticipations } from '../services/participations.service'
 import { repairAllBusinessImages, backfillBusinessOwnerUids } from '../services/businesses.service'
@@ -1719,6 +1720,7 @@ export default function LGUDashboardPage() {
   const [cleanupLoading, setCleanupLoading] = useState(false)
   const [confirmToggle, setConfirmToggle] = useState(null)
   const [repairLoading, setRepairLoading] = useState(false)
+  const [repairActiveFlagsLoading, setRepairActiveFlagsLoading] = useState(false)
   const [verifyCode, setVerifyCode] = useState('')
   const [verifySearching, setVerifySearching] = useState(false)
   const [verifyResult, setVerifyResult] = useState(null)
@@ -2366,6 +2368,26 @@ export default function LGUDashboardPage() {
       showToast(`Repair failed: ${err.message}`, 'error')
     } finally {
       setRepairLoading(false)
+    }
+  }
+
+  const handleRepairActiveFlags = async () => {
+    const confirmed = window.confirm(
+      'This will backfill isActive: true on all quests that have status "active" but are missing the isActive field. Continue?'
+    )
+    if (!confirmed) return
+    setRepairActiveFlagsLoading(true)
+    try {
+      const { repairedCount } = await repairQuestActiveFlags()
+      if (repairedCount === 0) {
+        showToast('All quests already have isActive set correctly.')
+      } else {
+        showToast(`Repaired ${repairedCount} quest(s) — added isActive: true.`)
+      }
+    } catch (err) {
+      showToast(`Repair failed: ${err.message}`, 'error')
+    } finally {
+      setRepairActiveFlagsLoading(false)
     }
   }
 
@@ -3101,6 +3123,14 @@ export default function LGUDashboardPage() {
                               title="Recalculates reserved counts based on actual participations. Fixes negative numbers."
                             >
                               {repairLoading ? 'Repairing...' : '🔧 Repair Counts'}
+                            </button>
+                            <button
+                              onClick={handleRepairActiveFlags}
+                              disabled={repairActiveFlagsLoading}
+                              className="px-3 py-2 text-sm border border-blue-300 bg-blue-50 text-blue-800 rounded-lg hover:bg-blue-100 font-medium disabled:opacity-50"
+                              title="Backfills isActive: true on quests that have status active but are missing isActive."
+                            >
+                              {repairActiveFlagsLoading ? 'Repairing...' : '🔧 Repair isActive'}
                             </button>
                           </div>
                         )}

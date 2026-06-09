@@ -11,6 +11,7 @@ import {
   increment,
   writeBatch,
   serverTimestamp,
+  Timestamp,
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { logAudit } from './audit.service'
@@ -162,6 +163,10 @@ export async function createQuest(
 
   const questForTags = { questType, category, impact, ...verificationFields }
 
+  const resolvedEndAt = endAt
+    ? (typeof endAt === 'string' ? Timestamp.fromDate(new Date(endAt)) : endAt)
+    : null
+
   const payload = sanitizeForFirestore({
     seasonId,
     title,
@@ -172,11 +177,12 @@ export async function createQuest(
     capacity: parseInt(capacity, 10),
     reservedCount: 0,
     startAt: startAt || serverTimestamp(),
-    endAt: endAt || null,
+    endAt: resolvedEndAt,
     gracePeriodHours: parseInt(gracePeriodHours, 10) || 24,
     impact: impact || null,
     position: position || null,
     status: 'active',
+    isActive: true,
     createdAt: serverTimestamp(),
     tags: inferQuestTags(questForTags),
     ...verificationFields,
@@ -220,6 +226,12 @@ export async function updateQuest(questId, data, adminUser) {
   if (data.points) updateData.points = parseInt(data.points, 10)
   if (data.capacity) updateData.capacity = parseInt(data.capacity, 10)
   if (data.gracePeriodHours) updateData.gracePeriodHours = parseInt(data.gracePeriodHours, 10)
+  if (data.endAt && typeof data.endAt === 'string') {
+    updateData.endAt = Timestamp.fromDate(new Date(data.endAt))
+  }
+  if (data.startAt && typeof data.startAt === 'string') {
+    updateData.startAt = Timestamp.fromDate(new Date(data.startAt))
+  }
 
   if (
     data.verificationMethod != null &&
@@ -283,7 +295,7 @@ export async function activateQuest(questId, adminUser) {
     throw new Error('Quest not found')
   }
   
-  await updateDoc(questRef, { status: 'active' })
+  await updateDoc(questRef, { status: 'active', isActive: true })
   
   await logAudit({
     action: 'QUEST_ACTIVATED',
@@ -309,7 +321,7 @@ export async function deactivateQuest(questId, adminUser) {
     throw new Error('Quest not found')
   }
   
-  await updateDoc(questRef, { status: 'inactive' })
+  await updateDoc(questRef, { status: 'inactive', isActive: false })
   
   await logAudit({
     action: 'QUEST_DEACTIVATED',
@@ -366,6 +378,42 @@ export async function updateQuestActive(questId, isActive) {
   })
 
   return { success: true }
+}
+
+export async function repairQuestActiveFlags() {
+  const questsSnap = await getDocs(collection(db, QUESTS_COLLECTION))
+
+  let repairedCount = 0
+  const repairs = []
+
+  for (const questDoc of questsSnap.docs) {
+    const data = questDoc.data()
+    if (data.status === 'active' && !data.isActive) {
+      await updateDoc(doc(db, QUESTS_COLLECTION, questDoc.id), {
+        isActive: true,
+      })
+      repairedCount++
+      repairs.push({
+        questId: questDoc.id,
+        title: data.title,
+      })
+    }
+  }
+
+  await logAudit({
+    action: 'REPAIR_QUEST_ACTIVE_FLAGS',
+    targetType: 'quests',
+    targetId: 'all',
+    details: { repairedCount, repairs },
+  })
+
+  try {
+    await bumpDataVersion()
+  } catch (err) {
+    console.warn('[repairQuestActiveFlags] Failed to bump data version:', err)
+  }
+
+  return { repairedCount, repairs }
 }
 
 export async function repairQuestReservedCounts(seasonId) {
@@ -593,6 +641,7 @@ export async function seedSampleQuestsForActiveSeason() {
       durationDays,
       gracePeriodHours: q.gracePeriodHours,
       status: 'active',
+      isActive: true,
       impact: q.impact || null,
       position: [lat, lng],
       barangay,
@@ -729,6 +778,7 @@ export async function rescheduleDemoQuestsForSeason(seasonId, adminUser) {
       startAt: startDate.toISOString(),
       endAt: endDate.toISOString(),
       status: 'active',
+      isActive: true,
     })
   })
 
@@ -924,6 +974,7 @@ export async function seedVisitAndBuyQuestsForActiveSeason(adminUser) {
       endAt: endDate.toISOString(),
       gracePeriodHours: 24,
       status: 'active',
+      isActive: true,
       verificationMethod: 'qr',
       qrToken,
       qrPayload: buildQRPayload(questId, qrToken),
@@ -986,6 +1037,7 @@ export async function seedVisitAndBuyQuestsForActiveSeason(adminUser) {
       endAt: endDate.toISOString(),
       gracePeriodHours: 24,
       status: 'active',
+      isActive: true,
       verificationMethod: 'qr',
       qrToken: buyQrToken,
       qrPayload: buildQRPayload(questId, buyQrToken),
