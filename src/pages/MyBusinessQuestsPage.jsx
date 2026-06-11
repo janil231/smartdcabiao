@@ -14,19 +14,14 @@ import {
   generateOwnerQuestEventCode,
   regenerateBuyQuestQRToken,
   rotateBuyQuestDailyCode,
+  reactivatePausedQuestsForOwner,
+  reactivateSinglePausedQuest,
 } from '../services/ownerQuests.service'
 import BuyQuestQRDisplayModal from '../components/owner/BuyQuestQRDisplayModal'
 import BuyQuestParticipantsModal from '../components/owner/BuyQuestParticipantsModal'
 import { getBusinessRewardsForOwner, markRewardAsUsed } from '../services/businessQuestRewards.service'
+import { formatRewardLabel } from '../utils/rewardFormat'
 import QuestDetailsPanel from '../components/owner/QuestDetailsPanel'
-
-function formatReward(quest) {
-  if (quest.rewardType === 'discount_percent') return `${quest.rewardValue}% off ${quest.rewardItemName || 'items'}`
-  if (quest.rewardType === 'discount_fixed') return `₱${quest.rewardValue} off ${quest.rewardItemName || 'items'}`
-  if (quest.rewardType === 'free_item') return `Free ${quest.rewardItemName || 'item'}`
-  if (quest.rewardType === 'bogo') return `Buy 1 Get 1 on ${quest.rewardItemName || 'items'}`
-  return `${quest.rewardValue} off ${quest.rewardItemName || 'items'}`
-}
 
 export default function MyBusinessQuestsPage() {
   const { id: businessId } = useParams()
@@ -185,8 +180,9 @@ export default function MyBusinessQuestsPage() {
     )
   }
 
-  const activeQuests = quests.filter(q => q.isActive)
-  const inactiveQuests = quests.filter(q => !q.isActive)
+  const pausedQuests = quests.filter(q => q.pausedBySeasonEnd)
+  const activeQuests = quests.filter(q => q.isActive && !q.pausedBySeasonEnd)
+  const inactiveQuests = quests.filter(q => !q.isActive && !q.pausedBySeasonEnd)
   const unusedRewards = rewards.filter(r => r.status === 'unused')
 
   return (
@@ -258,6 +254,68 @@ export default function MyBusinessQuestsPage() {
             </div>
           ) : (
             <>
+              {pausedQuests.length > 0 && (
+                <div className="mb-8">
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h3 className="font-semibold text-amber-900">Quests Paused — Season Ended</h3>
+                        <p className="text-sm text-amber-700 mt-1">
+                          {pausedQuests.length} quest{pausedQuests.length > 1 ? 's' : ''} paused because the LGU season ended.
+                          Reactivate {pausedQuests.length > 1 ? 'them' : 'it'} when a new season starts.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await reactivatePausedQuestsForOwner(user.uid)
+                            const updated = await listOwnerQuestsForBusiness(businessId)
+                            setQuests(updated)
+                            showToast('All paused quests reactivated')
+                          } catch (err) {
+                            showToast('Failed to reactivate: ' + err.message)
+                          }
+                        }}
+                        className="shrink-0 px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 transition"
+                      >
+                        Reactivate All
+                      </button>
+                    </div>
+                  </div>
+                  <h2 className="text-lg font-semibold text-gray-900 mb-4">Paused Quests ({pausedQuests.length})</h2>
+                  <div className="space-y-3">
+                    {pausedQuests.map(quest => (
+                      <QuestCard
+                        key={quest.id}
+                        quest={quest}
+                        merchantUid={user?.uid}
+                        completionCount={participationCounts[quest.id] || 0}
+                        isPaused={true}
+                        onReactivateSingle={async (qid) => {
+                          try {
+                            await reactivateSinglePausedQuest(qid, user.uid)
+                            const updated = await listOwnerQuestsForBusiness(businessId)
+                            setQuests(updated)
+                            showToast('Quest reactivated')
+                          } catch (err) {
+                            showToast('Failed to reactivate: ' + err.message)
+                          }
+                        }}
+                        onToggle={handleToggle}
+                        onEdit={handleEditQuest}
+                        onGenerateQR={handleGenerateQR}
+                        onGenerateCode={handleGenerateCode}
+                        onRegenerateBuyQR={handleRegenerateBuyQR}
+                        onRotateDailyCode={handleRotateDailyCode}
+                        onShowQRDisplay={(q) => setDisplayQRQuest(q)}
+                        onShowParticipants={(q) => setParticipantsQuest(q)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {activeQuests.length > 0 && (
                 <div className="mb-8">
                   <h2 className="text-lg font-semibold text-gray-900 mb-4">Active Quests ({activeQuests.length})</h2>
@@ -268,6 +326,8 @@ export default function MyBusinessQuestsPage() {
                         quest={quest}
                         merchantUid={user?.uid}
                         completionCount={participationCounts[quest.id] || 0}
+                        isPaused={false}
+                        onReactivateSingle={null}
                         onToggle={handleToggle}
                         onEdit={handleEditQuest}
                         onGenerateQR={handleGenerateQR}
@@ -292,6 +352,8 @@ export default function MyBusinessQuestsPage() {
                         quest={quest}
                         merchantUid={user?.uid}
                         completionCount={participationCounts[quest.id] || 0}
+                        isPaused={false}
+                        onReactivateSingle={null}
                         onToggle={handleToggle}
                         onEdit={handleEditQuest}
                         onGenerateQR={handleGenerateQR}
@@ -340,6 +402,7 @@ export default function MyBusinessQuestsPage() {
         <BuyQuestQRDisplayModal
           quest={displayQRQuest}
           business={business}
+          user={user}
           onClose={() => setDisplayQRQuest(null)}
         />
       )}
@@ -357,7 +420,7 @@ export default function MyBusinessQuestsPage() {
   )
 }
 
-function QuestCard({ quest, merchantUid, completionCount, onToggle, onEdit, onGenerateQR, onGenerateCode, onRegenerateBuyQR, onRotateDailyCode, onShowQRDisplay, onShowParticipants }) {
+function QuestCard({ quest, merchantUid, completionCount, isPaused, onReactivateSingle, onToggle, onEdit, onGenerateQR, onGenerateCode, onRegenerateBuyQR, onRotateDailyCode, onShowQRDisplay, onShowParticipants }) {
   const [expanded, setExpanded] = useState(false)
   const isBuy = quest.questType === 'buy'
 
@@ -368,6 +431,11 @@ function QuestCard({ quest, merchantUid, completionCount, onToggle, onEdit, onGe
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="font-semibold text-gray-900">{quest.title}</h3>
+              {isPaused && (
+                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+                  Paused
+                </span>
+              )}
               <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
                 quest.questType === 'visit' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'
               }`}>
@@ -383,7 +451,7 @@ function QuestCard({ quest, merchantUid, completionCount, onToggle, onEdit, onGe
             </div>
             <p className="text-sm text-gray-600 mt-1 line-clamp-2">{quest.description}</p>
             <div className="flex items-center gap-3 mt-2 text-sm flex-wrap">
-              <span className="text-emerald-700 font-medium">{formatReward(quest)}</span>
+              <span className="text-emerald-700 font-medium">{formatRewardLabel(quest)}</span>
               {quest.questType === 'visit' && (
                 <span className="text-gray-500">{quest.requiredDurationMinutes} min visit</span>
               )}
@@ -402,15 +470,25 @@ function QuestCard({ quest, merchantUid, completionCount, onToggle, onEdit, onGe
             )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={quest.isActive}
-                onChange={(e) => onToggle(quest.id, e.target.checked)}
-                className="sr-only peer"
-              />
-              <div className="w-9 h-5 bg-gray-200 rounded-full peer peer-checked:bg-emerald-500 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all" />
-            </label>
+            {isPaused ? (
+              <button
+                type="button"
+                onClick={() => onReactivateSingle?.(quest.id)}
+                className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-medium hover:bg-amber-700 transition"
+              >
+                Reactivate
+              </button>
+            ) : (
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={quest.isActive}
+                  onChange={(e) => onToggle(quest.id, e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-9 h-5 bg-gray-200 rounded-full peer peer-checked:bg-emerald-500 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all" />
+              </label>
+            )}
             <button
               type="button"
               onClick={() => onEdit(quest)}

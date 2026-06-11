@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { verifyBuyQuestByCode } from '../../services/ownerQuests.service'
 
-export default function BuyQuestCodeModal({ quest, business, user, userLocation, onClose, onSuccess }) {
+export default function BuyQuestCodeModal({ quest, business, user, userLocation, onClose, onSuccess, onSwitchToScanner }) {
   const [code, setCode] = useState('')
   const [verifying, setVerifying] = useState(false)
   const [error, setError] = useState('')
@@ -21,6 +21,11 @@ export default function BuyQuestCodeModal({ quest, business, user, userLocation,
     }
   }
 
+  const handleSwitchToScanner = () => {
+    onClose()
+    onSwitchToScanner?.()
+  }
+
   return (
     <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl max-w-md w-full p-5">
@@ -33,21 +38,24 @@ export default function BuyQuestCodeModal({ quest, business, user, userLocation,
           Ask staff at <strong>{business?.name || 'the business'}</strong> for today's quest code.
         </p>
 
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3">
+            <p className="text-sm text-red-900">❌ {error}</p>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit}>
           <input
             type="text"
             value={code}
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
+            onChange={(e) => setCode(e.target.value.toUpperCase().trim())}
             placeholder="ABC123"
+            maxLength={6}
             className="w-full p-3 text-center text-lg font-mono font-bold border border-gray-300 rounded-lg mb-3 uppercase"
             autoFocus
+            autoComplete="off"
+            autoCapitalize="characters"
           />
-
-          {error && (
-            <div className="mb-3 p-2 bg-red-50 text-red-800 text-sm rounded-lg">
-              {error}
-            </div>
-          )}
 
           <div className="flex gap-2">
             <button
@@ -66,6 +74,15 @@ export default function BuyQuestCodeModal({ quest, business, user, userLocation,
             </button>
           </div>
         </form>
+
+        {onSwitchToScanner && (
+          <button
+            onClick={handleSwitchToScanner}
+            className="w-full border border-gray-300 rounded-lg py-2 text-gray-700 text-sm hover:bg-gray-50 mt-3"
+          >
+            📷 Scan QR Code Instead
+          </button>
+        )}
       </div>
     </div>
   )

@@ -10,6 +10,7 @@ import {
   cancelOwnerQuestParticipation,
 } from '../../services/ownerQuests.service'
 import { getMyBusinessQuestRewards } from '../../services/businessQuestRewards.service'
+import { formatRewardLabel } from '../../utils/rewardFormat'
 import BuyQuestScannerModal from './BuyQuestScannerModal'
 import BuyQuestCodeModal from './BuyQuestCodeModal'
 import QuestDetailsPanel from './QuestDetailsPanel'
@@ -24,14 +25,6 @@ function haversineDistance(lat1, lng1, lat2, lng2) {
   const dLng = (lng2 - lng1) * Math.PI / 180
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-}
-
-function formatRewardText(quest) {
-  if (quest.rewardType === 'discount_percent') return `${quest.rewardValue}% off ${quest.rewardItemName || 'items'}`
-  if (quest.rewardType === 'discount_fixed') return `₱${quest.rewardValue} off ${quest.rewardItemName || 'items'}`
-  if (quest.rewardType === 'free_item') return `Free ${quest.rewardItemName || 'item'}`
-  if (quest.rewardType === 'bogo') return `Buy 1 Get 1 on ${quest.rewardItemName || 'items'}`
-  return 'Reward'
 }
 
 function formatTime(sec) {
@@ -335,7 +328,7 @@ export default function OwnerQuestPublicCard({ quest, business, currentUser, onP
     showToast('Code copied!')
   }
 
-  const rewardText = formatRewardText(quest)
+  const rewardText = formatRewardLabel(quest)
   const cardBg = onPhoto ? 'bg-white/95 backdrop-blur' : 'bg-white border border-emerald-300'
 
   return (
@@ -637,6 +630,7 @@ export default function OwnerQuestPublicCard({ quest, business, currentUser, onP
         userLocation={userLocation}
         onClose={() => setShowScanner(false)}
         onSuccess={handleVerificationSuccess}
+        onSwitchToCode={() => setShowCodeModal(true)}
       />
     )}
 
@@ -648,6 +642,7 @@ export default function OwnerQuestPublicCard({ quest, business, currentUser, onP
         userLocation={userLocation}
         onClose={() => setShowCodeModal(false)}
         onSuccess={handleVerificationSuccess}
+        onSwitchToScanner={() => { setShowCodeModal(false); setShowScanner(true); }}
       />
     )}
 
