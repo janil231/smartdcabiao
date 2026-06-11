@@ -45,7 +45,18 @@ export async function createBusinessQuestReward(uid, userEmail, quest, participa
   if (!quest) throw new Error('Missing quest data')
 
   const code = generateBusinessRewardCode()
-  const description = assembleRewardDescription(quest.rewardType, quest.rewardValue, quest.rewardItemName)
+
+  let rewardValue = quest.rewardValue
+  let rewardItemName = quest.rewardItemName || ''
+  let rewardDescription
+
+  if (quest.rewardType === 'other') {
+    rewardDescription = quest.rewardDescription || ''
+    rewardValue = undefined
+    rewardItemName = ''
+  } else {
+    rewardDescription = assembleRewardDescription(quest.rewardType, quest.rewardValue, quest.rewardItemName)
+  }
 
   const rewardData = sanitizeForFirestore({
     uid,
@@ -56,9 +67,9 @@ export async function createBusinessQuestReward(uid, userEmail, quest, participa
     businessName: quest.businessName,
     ownerUid: quest.ownerUid,
     rewardType: quest.rewardType,
-    rewardValue: quest.rewardValue,
-    rewardItemName: quest.rewardItemName || '',
-    rewardDescription: description,
+    rewardValue,
+    rewardItemName,
+    rewardDescription,
     code,
     status: 'unused',
     completedAt: serverTimestamp(),

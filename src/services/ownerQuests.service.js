@@ -1,12 +1,13 @@
 import {
   collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
-  addDoc, query, where, orderBy, serverTimestamp, Timestamp
+  addDoc, query, where, orderBy, serverTimestamp, Timestamp, writeBatch
 } from 'firebase/firestore'
 import { db, auth } from '../lib/firebase'
 import { sanitizeForFirestore } from '../utils/firestoreSanitize'
 import { generateBusinessRewardCode } from '../utils/voucherCode'
 import { createBusinessQuestReward } from './businessQuestRewards.service'
 import { logAudit } from './audit.service'
+import { bumpDataVersion } from './appMeta.service'
 import { inferQuestTags } from '../utils/tagMapping'
 
 const OWNER_QUESTS_COLLECTION = 'ownerQuests'
@@ -46,6 +47,7 @@ function normalizeQuestDoc(docSnap) {
     rewardType: data.rewardType || 'discount_percent',
     rewardValue: data.rewardValue || 0,
     rewardItemName: data.rewardItemName || '',
+    rewardDescription: data.rewardDescription || '',
     itemPhotoUrl: data.itemPhotoUrl || null,
     itemDetails: data.itemDetails || null,
     minimumPurchase: data.minimumPurchase || 0,
@@ -53,6 +55,9 @@ function normalizeQuestDoc(docSnap) {
     conditions: data.conditions || null,
     questInstructions: data.questInstructions || null,
     isActive: data.isActive !== false,
+    pausedBySeasonEnd: data.pausedBySeasonEnd || false,
+    pausedAt: data.pausedAt || null,
+    reactivatedAt: data.reactivatedAt || null,
     createdAt: data.createdAt || null,
     updatedAt: data.updatedAt || null,
   }
@@ -90,9 +95,7 @@ export async function listOwnerQuestsForBusiness(businessId) {
     )
     const snapshot = await getDocs(q)
     const list = snapshot.docs.map(normalizeQuestDoc)
-    return list
-      .filter(q => q.isActive !== false)
-      .sort((a, b) => {
+    return list.sort((a, b) => {
         const aTime = a.createdAt?.toMillis?.() || a.createdAt?._seconds * 1000 || 0
         const bTime = b.createdAt?.toMillis?.() || b.createdAt?._seconds * 1000 || 0
         return bTime - aTime
@@ -257,8 +260,9 @@ export async function createOwnerQuest(ownerUid, businessId, businessName, data)
     dailyCodeRotatedAt,
     autoRotateDaily,
     rewardType: data.rewardType || 'discount_percent',
-    rewardValue: parseFloat(data.rewardValue) || 0,
-    rewardItemName: data.rewardItemName || '',
+    rewardValue: data.rewardType === 'other' ? undefined : (parseFloat(data.rewardValue) || 0),
+    rewardItemName: data.rewardType === 'other' ? '' : (data.rewardItemName || ''),
+    rewardDescription: data.rewardDescription || '',
     itemPhotoUrl: data.itemPhotoUrl || null,
     itemDetails: data.itemDetails || null,
     minimumPurchase: Number(data.minimumPurchase) || 0,
@@ -291,10 +295,13 @@ export async function updateOwnerQuest(questId, data) {
 
 export async function toggleOwnerQuestActive(questId, isActive) {
   const idStr = String(questId)
-  await updateDoc(doc(db, OWNER_QUESTS_COLLECTION, idStr), {
-    isActive,
-    updatedAt: serverTimestamp(),
-  })
+  const payload = { isActive, updatedAt: serverTimestamp() }
+  if (isActive) {
+    payload.pausedBySeasonEnd = false
+    payload.pausedAt = null
+    payload.reactivatedAt = serverTimestamp()
+  }
+  await updateDoc(doc(db, OWNER_QUESTS_COLLECTION, idStr), sanitizeForFirestore(payload))
   return { success: true }
 }
 
@@ -792,6 +799,113 @@ function generateQRToken() {
   }
   for (let i = 0; i < length; i++) result += chars.charAt(array[i] % chars.length)
   return result
+}
+
+export async function pauseAllOwnerQuestsForSeasonEnd() {
+  const q = query(collection(db, OWNER_QUESTS_COLLECTION), where('isActive', '==', true))
+  const snap = await getDocs(q)
+
+  if (snap.empty) return { paused: 0 }
+
+  const batch = writeBatch(db)
+  let paused = 0
+
+  snap.docs.forEach(docSnap => {
+    batch.update(docSnap.ref, sanitizeForFirestore({
+      isActive: false,
+      pausedBySeasonEnd: true,
+      pausedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }))
+    paused++
+  })
+
+  await batch.commit()
+
+  try { await bumpDataVersion() } catch (err) { console.warn('[pauseAll] bumpDataVersion failed:', err) }
+  try {
+    await logAudit({
+      action: 'auto_pause_owner_quests_season_end',
+      targetType: 'ownerQuests',
+      meta: { count: paused },
+    })
+  } catch (err) { console.warn('[pauseAll] logAudit failed:', err) }
+
+  return { paused }
+}
+
+export async function getPausedQuestsCountForOwner(ownerUid) {
+  if (!ownerUid) return 0
+  const q = query(
+    collection(db, OWNER_QUESTS_COLLECTION),
+    where('ownerUid', '==', String(ownerUid)),
+    where('pausedBySeasonEnd', '==', true)
+  )
+  const snap = await getDocs(q)
+  return snap.size
+}
+
+export async function reactivatePausedQuestsForOwner(ownerUid) {
+  if (!ownerUid) throw new Error('ownerUid required')
+
+  const q = query(
+    collection(db, OWNER_QUESTS_COLLECTION),
+    where('ownerUid', '==', String(ownerUid)),
+    where('pausedBySeasonEnd', '==', true)
+  )
+  const snap = await getDocs(q)
+  if (snap.empty) return { reactivated: 0 }
+
+  const batch = writeBatch(db)
+  let reactivated = 0
+
+  snap.docs.forEach(docSnap => {
+    batch.update(docSnap.ref, sanitizeForFirestore({
+      isActive: true,
+      pausedBySeasonEnd: false,
+      pausedAt: null,
+      reactivatedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }))
+    reactivated++
+  })
+
+  await batch.commit()
+
+  try { await bumpDataVersion() } catch (err) { console.warn('[reactivateAll] bumpDataVersion failed:', err) }
+  try {
+    await logAudit({
+      action: 'reactivate_paused_owner_quests',
+      targetType: 'ownerQuests',
+      meta: { ownerUid, count: reactivated },
+    })
+  } catch (err) { console.warn('[reactivateAll] logAudit failed:', err) }
+
+  return { reactivated }
+}
+
+export async function reactivateSinglePausedQuest(questId, ownerUid) {
+  if (!questId || !ownerUid) throw new Error('questId and ownerUid required')
+
+  const questRef = doc(db, OWNER_QUESTS_COLLECTION, String(questId))
+  await updateDoc(questRef, sanitizeForFirestore({
+    isActive: true,
+    pausedBySeasonEnd: false,
+    pausedAt: null,
+    reactivatedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }))
+
+  try { await bumpDataVersion() } catch (err) { console.warn('[reactivateSingle] bumpDataVersion failed:', err) }
+  try {
+    await logAudit({
+      action: 'reactivate_single_owner_quest',
+      targetType: 'ownerQuests',
+      meta: { questId, ownerUid },
+    })
+  } catch (err) { console.warn('[reactivateSingle] logAudit failed:', err) }
+
+  return { reactivated: 1 }
 }
 
 function generateEventCode() {

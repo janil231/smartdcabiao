@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { collection, getDocs, doc, getDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { getFirstValidImage } from '../utils/imageUrl'
+import { formatRewardLabelShort } from '../utils/rewardFormat'
 
 function shuffleArray(arr) {
   const a = [...arr]
@@ -11,14 +12,6 @@ function shuffleArray(arr) {
     [a[i], a[j]] = [a[j], a[i]]
   }
   return a
-}
-
-function formatRewardText(quest) {
-  if (quest.rewardType === 'discount_percent') return `${quest.rewardValue}% off`
-  if (quest.rewardType === 'discount_fixed') return `₱${quest.rewardValue} off`
-  if (quest.rewardType === 'free_item') return `Free ${quest.rewardItemName || 'item'}`
-  if (quest.rewardType === 'bogo') return `BOGO ${quest.rewardItemName || 'items'}`
-  return 'Reward'
 }
 
 function RewardCard({ quest }) {
@@ -46,7 +39,7 @@ function RewardCard({ quest }) {
         </h3>
         <div className="bg-white/95 backdrop-blur text-gray-900 rounded-lg p-2.5 mb-2">
           <div className="text-[10px] font-bold text-amber-700 uppercase">🎁 Reward</div>
-          <div className="text-sm font-bold">{formatRewardText(quest)}</div>
+          <div className="text-sm font-bold">{formatRewardLabelShort(quest)}</div>
           {quest.questType === 'buy' && quest.rewardItemName && (
             <div className="mt-1 flex items-center gap-2">
               {quest.itemPhotoUrl && (

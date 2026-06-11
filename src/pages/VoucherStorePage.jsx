@@ -8,6 +8,7 @@ import EmailVerificationBanner from '../components/EmailVerificationBanner'
 import { requireEmailVerified } from '../utils/requireEmailVerified'
 import { getOrCreateSeasonBalance, rebuildSeasonBalanceFromLedger } from '../services/seasonBalances.service'
 import { listMyRedemptions, redeemVoucher } from '../services/voucherRedemptions.service'
+import { toJSDate } from '../services/seasons.service'
 
 function VoucherDetailsModal({ redemption, seasonId, onClose, onCopyCode }) {
   const status = redemption.status || 'unused'
@@ -272,11 +273,14 @@ export default function VoucherStorePage() {
                 <div>
                   <span className="text-emerald-800 font-medium">Season: </span>
                   <strong className="text-emerald-900">{season.name}</strong>
-                  {season.startAt && season.endAt && (
-                    <span className="text-emerald-600 ml-2">
-                      ({new Date(season.startAt).toLocaleDateString()} - {new Date(season.endAt).toLocaleDateString()})
-                    </span>
-                  )}
+                  {(() => {
+                    const startDate = toJSDate(season.startAt)
+                    const endDate = toJSDate(season.endAt)
+                    const dateStr = startDate && endDate ? `${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}` : null
+                    return dateStr ? (
+                      <span className="text-emerald-600 ml-2">({dateStr})</span>
+                    ) : null
+                  })()}
                 </div>
               </div>
             </div>

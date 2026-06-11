@@ -1,4 +1,4 @@
-# SMARTDCABIAO — Full Project Context Brief (Updated: June 7, 2026)
+# SMARTDCABIAO — Full Project Context Brief (Updated: June 11, 2026)
 
 ---
 
@@ -443,15 +443,16 @@ Each quest has an `impactUnit` (e.g., `trash_kg`, `trees`, `co2_kg`, `plastic_kg
 
 | File | Key Exports | What It Does |
 |---|---|---|
-| `seasons.service.js` | `getActiveSeason`, `getSeasonById`, `listSeasons`, `createSeason`, `activateSeason`, `closeSeason`, `updateSeason` | Season CRUD + activation |
+| `seasons.service.js` | `getActiveSeason`, `getSeasonById`, `listSeasons`, `createSeason`, `activateSeason`, `closeSeason`, `updateSeason`, `endSeasonWithExpiry`, `activateSeasonStrict`, `autoEndStaleSeasons`, `deleteSeasonIfEmpty`, `updateSeasonDetails`, `getSeasonStatus`, `getSeasonStatusConfig`, `formatSeasonDate`, `toJSDate` | Season CRUD + lifecycle (activate, close, end with expiry, auto-end stale), auto-pauses owner quests on end |
 | `vouchers.service.js` | `listSeasonVouchers`, `createVoucher`, `updateVoucher`, `seedSampleVouchersForActiveSeason`, `seedPercentOffVouchersForActiveSeason` | Voucher catalog CRUD + seed data |
 | `voucherRedemptions.service.js` | `listMyRedemptions`, `listSeasonRedemptions`, `findRedemptionByCode`, `redeemVoucher` (transactional), `adminMarkVoucherUsed` | Voucher redemption lifecycle |
 | `seasonBalances.service.js` | `rebuildSeasonBalanceFromLedger`, `getMySeasonBalance`, `ensureBalanceDoc`, `getOrCreateSeasonBalance`, `incrementEarnedPoints`, `spendPoints` | Point balance management |
-| `quests.service.js` | `listActiveQuests`, `getQuestById`, `listQuestsBySeason`, `listAllQuests`, `createQuest`, `updateQuest`, `activateQuest`, `deactivateQuest`, `adjustQuestReservedCount`, `repairQuestReservedCounts`, `seedSampleQuestsForActiveSeason`, `ensureQuestVerificationTokensAdmin`, `recommendQuests`, `seedVisitAndBuyQuestsForActiveSeason`, + more | Full quest CRUD + maintenance |
+| `quests.service.js` | `listActiveQuests`, `getQuestById`, `listActiveQuestsBySeason`, `listQuestsBySeason`, `listAllQuests`, `createQuest`, `updateQuest`, `activateQuest`, `deactivateQuest`, `adjustQuestReservedCount`, `repairQuestReservedCounts`, `seedSampleQuestsForActiveSeason`, `ensureQuestVerificationTokensAdmin`, `recommendQuests`, `seedVisitAndBuyQuestsForActiveSeason`, + more | Full quest CRUD + maintenance |
 | `participations.service.js` | `getUserParticipation`, `getUserParticipations`, `getQuestParticipations`, `countActiveJoinedParticipations`, `syncQuestReservedCount`, `joinQuest`, `cancelQuest`, `expireMyStaleParticipations`, `expireAllStaleParticipations`, `adminMarkCompleted`, `markQuestCompletedByUser` | Quest participation lifecycle |
 | `pointsLedger.service.js` | `addPointsEntry`, `getUserPointsLedger`, `getUserPointsForSeason`, `getUserSeasonPointsSummary` | Points ledger read/write |
 | `impactLedger.service.js` | `addImpactEntry`, `listUserImpact`, `listSeasonImpact`, `sumImpactByUnit` | Impact ledger read/write |
 | `adminRole.service.js` | `isAdmin`, `getUserRole`, `getAdminDoc`, `clearAdminCache` | Admin role check (in-memory cached), returns master/admin/null |
+| `ownerQuests.service.js` | `listOwnerQuestsForBusiness`, `listOwnerQuestsByOwner`, `getOwnerQuestById`, `createOwnerQuest`, `updateOwnerQuest`, `toggleOwnerQuestActive`, `joinOwnerQuest`, `completeOwnerQuest`, `verifyOwnerQuestByQR`, `verifyOwnerQuestByCode`, `verifyBuyQuestByQR`, `verifyBuyQuestByCode`, `merchantMarkParticipationComplete`, `pauseAllOwnerQuestsForSeasonEnd`, `getPausedQuestsCountForOwner`, `reactivatePausedQuestsForOwner`, `reactivateSinglePausedQuest`, + participation/timer/geofence helpers | Owner/business quest CRUD, buy quest verification (QR/code), merchant manual complete, auto-pause on season end, bulk/single reactivation |
 | `businesses.service.js` | `listBusinesses`, `getBusinessById`, `searchBusinesses`, `getFeaturedBusinesses`, `clearBusinessesCache`, `archiveBusiness`, `restoreBusiness`, `permanentlyDeleteBusiness`, `listBusinessesWithFilter`, `resyncBusinessImagesFromSubmission`, `repairAllBusinessImages`, `manuallySetBusinessImages`, `isStaticBusiness` | Business listing with Firestore/mock fallback + soft delete + image re-sync + manual upload + static item protection |
 | `destinations.service.js` | `listDestinations`, `getDestinationById`, `getDestinationBarangays`, `searchDestinations`, `clearDestinationsCache`, `archiveDestination`, `restoreDestination`, `permanentlyDeleteDestination`, `listDestinationsWithFilter`, `resyncDestinationImagesFromSubmission`, `repairAllDestinationImages`, `manuallySetDestinationImages`, `isStaticDestination` | Destination listing with Firestore/mock fallback + soft delete + image re-sync + manual upload + static item protection |
 | `reviews.service.js` | `createOrUpdateReview`, `getMyReview`, `listApprovedReviews`, `listPendingReviews`, `setReviewStatus`, `recomputeAggregatesForTarget` | Full review system with moderation + rating aggregation |
@@ -1391,7 +1392,77 @@ Three feature areas shipped in this multi-session effort: (A) buy quest verifica
 | `SESSION_CONTEXT.md` | Updated with this session |
 
 ### Build Status
-- `npm run build` passes with zero errors (pre-existing warnings: chunk size ~1935kB, circular dynamic imports).
+- `npm run build` passes with zero errors
+
+---
+
+## Session: June 11, 2026 — Auto-Pause Owner Quests When Season Ends
+
+### Overview
+When an LGU season ends (via `closeSeason()` or `endSeasonWithExpiry()`), all owner/business quests (`ownerQuests` collection) are automatically paused (`isActive: false`, `pausedBySeasonEnd: true`). Merchants can reactivate them with one click when a new season starts. Customer-facing pages hide paused quests and show a notice if a paused quest's detail modal is opened.
+
+---
+
+### A. Auto-Pause on Season End
+
+**`src/services/ownerQuests.service.js`:**
+- Added `pauseAllOwnerQuestsForSeasonEnd()` — batch-writes `isActive: false`, `pausedBySeasonEnd: true`, `pausedAt: serverTimestamp()` on ALL active owner quests. Wrapped in `sanitizeForFirestore()`. Calls `bumpDataVersion()` and `logAudit()` with individual try/catch.
+- Added `getPausedQuestsCountForOwner(ownerUid)` — queries `ownerQuests(ownerUid, pausedBySeasonEnd == true)`, returns count.
+- Added `reactivatePausedQuestsForOwner(ownerUid)` — batch reactivates all paused quests for a merchant: `isActive: true`, `pausedBySeasonEnd: false`, `pausedAt: null`, `reactivatedAt: serverTimestamp()`. Calls `bumpDataVersion()` and `logAudit()`.
+- Added `reactivateSinglePausedQuest(questId, ownerUid)` — same as above but for a single quest.
+- Updated `normalizeQuestDoc()` to include `pausedBySeasonEnd`, `pausedAt`, `reactivatedAt` fields.
+- Removed `.filter(q => q.isActive !== false)` from `listOwnerQuestsForBusiness()` so paused quests appear in merchant dashboard.
+- Updated `toggleOwnerQuestActive()` — when activating (`isActive: true`), also clears `pausedBySeasonEnd` and sets `reactivatedAt`.
+
+**`src/services/seasons.service.js`:**
+- Imported `pauseAllOwnerQuestsForSeasonEnd`.
+- Wired into `closeSeason()` — called after `updateDoc` in a try/catch (non-blocking).
+- Wired into `endSeasonWithExpiry()` — called before audit log in a try/catch (non-blocking).
+
+---
+
+### B. Merchant Dashboard Banner + Paused Badge
+
+**`src/pages/MyBusinessQuestsPage.jsx`:**
+- Imported `reactivatePausedQuestsForOwner`, `reactivateSinglePausedQuest`.
+- Quests split into 3 groups: paused (`pausedBySeasonEnd`), active (`isActive && !pausedBySeasonEnd`), inactive (`!isActive && !pausedBySeasonEnd`).
+- Amber banner at top of page showing "Quests Paused — Season Ended" with count and "Reactivate All" button.
+- Paused quests rendered in their own section ("Paused Quests (N)"), each card gets:
+  - Amber "Paused" badge next to the quest type badge.
+  - "Reactivate" button (amber) replacing the toggle switch.
+  - `onReactivateSingle` handler refreshes quest list after reactivation.
+
+---
+
+### C. Customer-Facing Paused Notice
+
+**`src/components/owner/QuestDetailsViewModal.jsx`:**
+- When `quest.pausedBySeasonEnd` is true: renders an amber notice banner with info icon and text: _"This quest has been paused because the LGU season ended. It will be available again when the business owner reactivates it."_
+- All action sections (Join, Start, Scan QR, Enter Code, Cancel, timer, completed) are hidden when paused — gated by `!quest.pausedBySeasonEnd`.
+
+---
+
+### D. Composite Index
+
+**`firestore.indexes.json`:**
+- Added composite index: `ownerQuests(ownerUid ASC, pausedBySeasonEnd ASC)` — required by `getPausedQuestsCountForOwner` and `reactivatePausedQuestsForOwner` queries.
+
+---
+
+### E. Build Status
+
+- `npm run build` passes with zero errors (pre-existing warnings: chunk size ~1990kB, circular dynamic imports).
+
+### Files Changed
+
+| File | Change |
+|---|---|
+| `src/services/ownerQuests.service.js` | 3 new functions + normalizeQuestDoc update + filter removal + toggleOwnerQuestActive update |
+| `src/services/seasons.service.js` | Import + try/catch call in closeSeason and endSeasonWithExpiry |
+| `src/pages/MyBusinessQuestsPage.jsx` | Paused quests section, amber banner, reactivate buttons, paused badge |
+| `src/components/owner/QuestDetailsViewModal.jsx` | Paused notice banner + action section gating |
+| `firestore.indexes.json` | ownerUid + pausedBySeasonEnd composite index |
+| `SESSION_CONTEXT.md` | Updated with this session | (pre-existing warnings: chunk size ~1935kB, circular dynamic imports).
 
 ---
 

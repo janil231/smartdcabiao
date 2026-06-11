@@ -83,16 +83,14 @@ service cloud.firestore {
     // ============ PARTICIPATIONS ============
 
     match /participations/{participationId} {
-      allow read: if hasLguAccess() ||
-                  (isSignedIn() && resource.data.uid == request.auth.uid);
-      allow create: if isSignedIn() &&
-                    request.resource.data.uid == request.auth.uid &&
-                    request.resource.data.questId is string &&
-                    request.resource.data.seasonId is string;
-      allow update: if isSignedIn() && (
-        resource.data.uid == request.auth.uid
-        || isMasterAdmin()
-      );
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (
+        request.resource.data.uid == request.auth.uid ||
+        isMasterAdmin()
+      ) && request.resource.data.questId is string &&
+         request.resource.data.seasonId is string;
+      allow update: if isMasterAdmin() ||
+                    (isSignedIn() && resource.data.uid == request.auth.uid);
       allow delete: if isMasterAdmin();
     }
 
@@ -101,20 +99,21 @@ service cloud.firestore {
     match /pointsLedger/{entryId} {
       allow read: if hasLguAccess() ||
                   (isSignedIn() && resource.data.uid == request.auth.uid);
-      allow create: if isSignedIn();
-      allow update, delete: if false;
+      allow create: if isSignedIn() && (
+        request.resource.data.uid == request.auth.uid ||
+        isMasterAdmin()
+      );
+      allow update, delete: if isMasterAdmin();
     }
 
     // ============ SEASON BALANCES ============
 
     match /seasonBalances/{balanceId} {
-      allow read: if hasLguAccess() ||
-                  (isSignedIn() && balanceId.matches('.*_' + request.auth.uid + '$'));
-      allow create: if isSignedIn() &&
-                    request.resource.data.uid == request.auth.uid;
-      allow update: if hasLguAccess() ||
-                    (isSignedIn() && request.resource.data.uid == request.auth.uid);
-      allow delete: if false;
+      allow read: if isSignedIn() &&
+                  (balanceId.matches('.*_' + request.auth.uid + '$') || hasLguAccess());
+      allow create, update: if isMasterAdmin() ||
+                    (isSignedIn() && balanceId.matches('.*_' + request.auth.uid + '$'));
+      allow delete: if isMasterAdmin();
     }
 
     // ============ IMPACT LEDGER ============
@@ -122,19 +121,21 @@ service cloud.firestore {
     match /impactLedger/{entryId} {
       allow read: if hasLguAccess() ||
                   (isSignedIn() && resource.data.uid == request.auth.uid);
-      allow create: if hasLguAccess() ||
+      allow create: if isMasterAdmin() ||
+                    (hasLguAccess()) ||
                     (isSignedIn() &&
                      request.resource.data.uid == request.auth.uid &&
                      request.resource.data.reason == 'quest_completed');
-      allow update, delete: if false;
+      allow update, delete: if isMasterAdmin();
     }
 
     // ============ SEASON USER STATS (leaderboard) ============
 
     match /seasonUserStats/{statsId} {
       allow read: if true;
-      allow create, update: if hasLguAccess() || isSignedIn();
-      allow delete: if false;
+      allow create, update: if isMasterAdmin() ||
+                    (isSignedIn() && request.resource.data.uid == request.auth.uid);
+      allow delete: if isMasterAdmin();
     }
 
     // ============ SUBMISSIONS ============
@@ -187,33 +188,28 @@ service cloud.firestore {
     // Used by Manage Admins panel for searchable user list
 
     match /users/{uid} {
-      // READ: Allowed if you are the user OR if you have any admin doc
-      allow read: if request.auth != null && (
+      allow read: if isSignedIn() && (
         request.auth.uid == uid ||
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        hasLguAccess()
       );
 
-      // CREATE: A signed-in user can create their own profile doc; master admin can create any
-      allow create: if request.auth != null && (
-        request.auth.uid == uid ||
+      allow create, update: if isMasterAdmin() ||
+        (request.auth != null && request.auth.uid == uid);
+
+      allow delete: if isMasterAdmin();
+    }
+
+    match /userBadges/{docId} {
+      allow read: if isSignedIn() && (
+        docId.matches('.*_' + request.auth.uid + '$') ||
+        hasLguAccess()
+      );
+
+      allow create, update: if request.auth != null && (
+        docId.matches('.*_' + request.auth.uid + '$') ||
         isMasterAdmin()
       );
 
-      // UPDATE: A signed-in user can update their own profile doc; master admin can update any
-      allow update: if request.auth != null && (
-        request.auth.uid == uid ||
-        isMasterAdmin()
-      ) && (
-        // interests field must have at most 8 entries
-        !request.resource.data.keys().hasAny(['interests']) ||
-        request.resource.data.interests.size() <= 8
-      ) && (
-        // interestsSetAt is a server timestamp, no size constraint
-        !request.resource.data.keys().hasAny(['interestsSetAt']) ||
-        request.resource.data.interestsSetAt is timestamp
-      );
-
-      // DELETE: Only allowed via Firebase Console (admin SDK)
       allow delete: if false;
     }
 
@@ -240,20 +236,10 @@ service cloud.firestore {
     }
 
     match /ownerQuestParticipations/{participationId} {
-      allow read: if isSignedIn() && (
-        resource == null ||
-        resource.data.uid == request.auth.uid ||
-        resource.data.ownerUid == request.auth.uid ||
-        hasLguAccess()
-      );
-      allow create: if isSignedIn()
-        && request.resource.data.uid == request.auth.uid;
-      allow update: if isSignedIn() && (
-        resource.data.uid == request.auth.uid ||
-        resource.data.ownerUid == request.auth.uid ||
-        hasLguAccess()
-      );
-      allow delete: if false;
+      allow read: if isSignedIn();
+      allow create, update: if isMasterAdmin() ||
+        (isSignedIn() && request.resource.data.uid == request.auth.uid);
+      allow delete: if isMasterAdmin();
     }
 
     match /businessQuestRewards/{rewardId} {

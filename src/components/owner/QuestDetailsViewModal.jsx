@@ -8,15 +8,8 @@ import {
   cancelOwnerQuestParticipation,
 } from '../../services/ownerQuests.service'
 import { checkUserWithinGeofence } from '../../services/ownerQuests.service'
+import { formatRewardLabel } from '../../utils/rewardFormat'
 import QuestDetailsPanel from './QuestDetailsPanel'
-
-function formatRewardText(quest) {
-  if (quest.rewardType === 'discount_percent') return `${quest.rewardValue}% off ${quest.rewardItemName || 'items'}`
-  if (quest.rewardType === 'discount_fixed') return `₱${quest.rewardValue} off ${quest.rewardItemName || 'items'}`
-  if (quest.rewardType === 'free_item') return `Free ${quest.rewardItemName || 'item'}`
-  if (quest.rewardType === 'bogo') return `Buy 1 Get 1 on ${quest.rewardItemName || 'items'}`
-  return 'Reward'
-}
 
 export default function QuestDetailsViewModal({
   quest,
@@ -148,7 +141,7 @@ export default function QuestDetailsViewModal({
   if (!isOpen) return null
 
   const isBuyQuest = quest.questType === 'buy'
-  const rewardText = formatRewardText(quest)
+  const rewardText = formatRewardLabel(quest)
 
   const statusBadge = () => {
     if (resolvedParticipationState === 'completed') return <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-0.5 rounded-full">Completed</span>
@@ -230,8 +223,23 @@ export default function QuestDetailsViewModal({
             </div>
           )}
 
+          {/* Paused by season end notice */}
+          {quest.pausedBySeasonEnd && (
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+              <div className="flex items-center gap-2 mb-1">
+                <svg className="w-5 h-5 text-amber-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p className="font-semibold text-amber-900 text-sm">Quest Paused</p>
+              </div>
+              <p className="text-xs text-amber-700 ml-7">
+                This quest has been paused because the LGU season ended. It will be available again when the business owner reactivates it.
+              </p>
+            </div>
+          )}
+
           {/* Action section */}
-          {resolvedParticipationState === 'not_joined' && (
+          {quest.pausedBySeasonEnd ? null : resolvedParticipationState === 'not_joined' && (
             <div className="pt-2">
               {onJoinClick ? (
                 <button
@@ -252,7 +260,7 @@ export default function QuestDetailsViewModal({
             </div>
           )}
 
-          {resolvedParticipationState === 'joined_idle' && (
+          {!quest.pausedBySeasonEnd && resolvedParticipationState === 'joined_idle' && (
             <div className="pt-2 space-y-2">
               {propDistanceText && (
                 <div className="text-xs text-gray-500 text-center">{propDistanceText}</div>
@@ -301,7 +309,7 @@ export default function QuestDetailsViewModal({
             </div>
           )}
 
-          {resolvedParticipationState === 'active' && (
+          {!quest.pausedBySeasonEnd && resolvedParticipationState === 'active' && (
             <div className="pt-2 space-y-3">
               <div className="text-center py-4 bg-emerald-50 rounded-xl">
                 <div className="text-4xl font-bold text-emerald-700 font-mono">
@@ -318,7 +326,7 @@ export default function QuestDetailsViewModal({
             </div>
           )}
 
-          {resolvedParticipationState === 'paused' && (
+          {!quest.pausedBySeasonEnd && resolvedParticipationState === 'paused' && (
             <div className="pt-2 space-y-3">
               <div className="text-center py-4 bg-amber-50 rounded-xl">
                 <div className="text-4xl font-bold text-amber-700 font-mono">
@@ -338,7 +346,7 @@ export default function QuestDetailsViewModal({
             </div>
           )}
 
-          {resolvedParticipationState === 'completed' && (
+          {!quest.pausedBySeasonEnd && resolvedParticipationState === 'completed' && (
             <div className="pt-2 space-y-3">
               <div className="text-center">
                 <div className="text-3xl mb-1">🎉</div>

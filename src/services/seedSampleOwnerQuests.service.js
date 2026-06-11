@@ -7,104 +7,77 @@ import { sanitizeForFirestore } from '../utils/firestoreSanitize'
 import { logAudit } from './audit.service'
 import { inferQuestTags } from '../utils/tagMapping'
 
-const QUEST_TEMPLATES = [
-  {
-    title: 'Drop By & Check Us Out',
-    description: 'Visit this local business and stay for at least 15 minutes to explore what they offer. Great way to discover something new in Cabiao!',
-    questType: 'visit',
-    visitDurationMinutes: 15,
-    points: 30,
-    reward: {
-      title: '₱20 Off Your Next Visit',
-      description: 'Get ₱20 off on your next purchase at this business',
-      terms: 'Valid for 90 days. One redemption per customer. Cannot be combined with other offers.',
-    },
-  },
-  {
-    title: 'Make a Purchase',
-    description: 'Buy something from this business (minimum ₱100) to support local entrepreneurship. Show the staff the QR code at checkout to verify.',
-    questType: 'buy',
-    buyVerificationMethod: 'qr',
-    minimumPurchase: 100,
-    quantityRequired: 1,
-    points: 50,
-    autoRotateDaily: false,
-    itemDetails: 'Any item from the menu or store. Staff will scan QR at checkout.',
-    conditions: 'Minimum ₱100 purchase required. Show QR before payment.',
-    reward: {
-      title: '10% Off Voucher',
-      description: 'Save 10% on your next purchase at this business',
-      terms: 'Valid for 90 days. Minimum ₱100 purchase. One redemption per customer.',
-    },
-  },
-  {
-    title: 'Try Something New',
-    description: 'Try a featured item from this business (minimum ₱200 purchase). Staff will give you a daily code to enter to verify your purchase.',
-    questType: 'buy',
-    buyVerificationMethod: 'code',
-    minimumPurchase: 200,
-    quantityRequired: 1,
-    points: 75,
-    autoRotateDaily: true,
-    itemDetails: 'Any featured or signature item. Ask staff for today\'s code after purchase.',
-    conditions: 'Minimum ₱200 purchase. Daily code rotates each day.',
-    reward: {
-      title: 'Free Item Voucher',
-      description: 'Redeem for one complimentary item from this business',
-      terms: 'Valid for 90 days. Subject to item availability. One redemption per customer.',
-    },
-  },
-  {
-    title: 'Stay & Experience',
-    description: 'Spend at least 30 minutes at this business to truly experience what they have to offer. Perfect for slow-paced exploration.',
-    questType: 'visit',
-    visitDurationMinutes: 30,
-    points: 60,
-    reward: {
-      title: '15% Off Voucher',
-      description: 'Get 15% off your next purchase at this business',
-      terms: 'Valid for 90 days. One redemption per customer. Cannot be combined with other offers.',
-    },
-  },
-  {
-    title: 'Support Local — Big Spender',
-    description: 'Make a substantial purchase (minimum ₱500) to strongly support this local business. Show the QR code at checkout for verification.',
-    questType: 'buy',
-    buyVerificationMethod: 'qr',
-    minimumPurchase: 500,
-    quantityRequired: 1,
-    points: 120,
-    autoRotateDaily: false,
-    itemDetails: 'Any combination of items totaling at least ₱500. Staff will scan QR at checkout.',
-    conditions: 'Minimum ₱500 purchase required. Single transaction.',
-    reward: {
-      title: '₱100 Off Voucher',
-      description: 'Save ₱100 on your next purchase at this business',
-      terms: 'Valid for 90 days. Minimum ₱500 purchase. One redemption per customer.',
-    },
-  },
+const OWNER_QUEST_TEMPLATES = [
+  { questType: 'visit', title: 'Discover Our Spot', description: 'Visit us and explore what makes our business special. Take a photo with our staff!', reward: '5% off your next visit', duration: 30 },
+  { questType: 'visit', title: 'First-Time Visitor Welcome', description: 'New to our place? Drop by and enjoy a complimentary welcome treat.', reward: 'Free welcome drink/snack', duration: 15 },
+  { questType: 'visit', title: 'Loyalty Check-In', description: 'Visit us once a week for a month and earn a special loyalty reward.', reward: '20% off your 4th visit', duration: 20 },
+  { questType: 'buy', title: 'Support Local — Big Spender', description: 'Make a substantial purchase (minimum ₱500) to strongly support this local business.', reward: '₱100 off items', duration: null, minimumPurchase: 500 },
+  { questType: 'buy', title: 'Quick Treat Quest', description: 'Try our most popular item! Small purchase, big experience.', reward: 'Free upgrade or topping', duration: null, minimumPurchase: 100 },
+  { questType: 'buy', title: 'Family Bundle Buyer', description: 'Buy a family-sized order to share the love.', reward: '15% off bundle', duration: null, minimumPurchase: 800 },
+  { questType: 'buy', title: 'Try Something New', description: 'Try a featured item from this business. Staff will give you a daily code to enter to verify.', reward: 'Free Complimentary Item', duration: null, minimumPurchase: 200 },
+  { questType: 'visit', title: 'Stay & Experience', description: 'Spend at least 30 minutes here to truly experience what we offer. Perfect for slow-paced exploration.', reward: '15% off items', duration: 30 },
+  { questType: 'buy', title: 'Bring a Friend', description: 'Bring a friend who has never visited before and both enjoy a discount.', reward: 'Buy 1 get 1 50% off', duration: null, minimumPurchase: 300 },
+  { questType: 'visit', title: 'Photo Op Quest', description: 'Take a selfie at our signature spot and tag us on social media.', reward: 'Free small item', duration: 10 },
 ]
 
-const REWARD_TYPES = ['discount_fixed', 'discount_percent', 'free_item', 'discount_percent', 'discount_fixed']
+const REWARD_META = [
+  { type: 'discount_percent', value: 5, itemName: '' },
+  { type: 'free_item', value: 0, itemName: 'Welcome Drink/Snack' },
+  { type: 'discount_percent', value: 20, itemName: '' },
+  { type: 'discount_fixed', value: 100, itemName: '' },
+  { type: 'free_item', value: 0, itemName: 'Free Upgrade or Topping' },
+  { type: 'discount_percent', value: 15, itemName: '' },
+  { type: 'free_item', value: 0, itemName: 'Complimentary Item' },
+  { type: 'discount_percent', value: 15, itemName: '' },
+  { type: 'discount_percent', value: 50, itemName: '' },
+  { type: 'free_item', value: 0, itemName: 'Free Small Item' },
+]
 
-function getRewardType(index) {
-  return REWARD_TYPES[index] || 'discount_percent'
+const REWARD_DETAILS = [
+  { title: '5% Off Your Next Visit', description: 'Save 5% on your next visit to this business', terms: 'Valid for 90 days. One redemption per customer. Cannot be combined with other offers.' },
+  { title: 'Free Welcome Drink/Snack', description: 'Enjoy a complimentary welcome drink or snack on us', terms: 'One per customer. Available with any visit.' },
+  { title: '20% Off Your 4th Visit', description: 'Get 20% off on your 4th visit as a loyalty reward', terms: 'Valid for 90 days. Must complete 3 prior visits. Cannot be combined.' },
+  { title: '₱100 Off Items', description: 'Get ₱100 off on your next purchase at this business', terms: 'Valid for 90 days. Minimum ₱500 purchase. One redemption per customer.' },
+  { title: 'Free Upgrade or Topping', description: 'Upgrade your order or add a topping for free', terms: 'One per visit. Subject to availability.' },
+  { title: '15% Off Bundle', description: 'Save 15% on family-sized bundle orders', terms: 'Valid for 90 days. Minimum ₱800 purchase. One redemption per customer.' },
+  { title: 'Free Complimentary Item', description: 'Redeem for one complimentary item from this business', terms: 'Valid for 90 days. Subject to item availability. One redemption per customer.' },
+  { title: '15% Off Items', description: 'Get 15% off your next purchase at this business', terms: 'Valid for 90 days. One redemption per customer. Cannot be combined.' },
+  { title: 'Buy 1 Get 1 50% Off', description: 'Buy one item and get a second one at 50% off', terms: 'Equal or lesser value. One per visit.' },
+  { title: 'Free Small Item', description: 'Get a complimentary small item from this business', terms: 'One per customer. Available with any visit.' },
+]
+
+function getQuestsForBusiness(business, businessIndex) {
+  const startIdx = (businessIndex * 3) % OWNER_QUEST_TEMPLATES.length
+  const selected = []
+  for (let i = 0; i < 5; i++) {
+    selected.push(OWNER_QUEST_TEMPLATES[(startIdx + i) % OWNER_QUEST_TEMPLATES.length])
+  }
+  return selected
 }
 
-function getRewardValue(template) {
-  const index = QUEST_TEMPLATES.indexOf(template)
-  if (index === 0) return 20
-  if (index === 1) return 10
-  if (index === 2) return 0
-  if (index === 3) return 15
-  if (index === 4) return 100
-  return 0
+function getRewardType(index, businessIndex) {
+  const globalIdx = (businessIndex * 3 + index) % REWARD_META.length
+  return REWARD_META[globalIdx].type || 'discount_percent'
 }
 
-function getRewardItemName(template) {
-  const index = QUEST_TEMPLATES.indexOf(template)
-  if (index === 2) return 'Complimentary Item'
-  return ''
+function getRewardValue(index, businessIndex) {
+  const globalIdx = (businessIndex * 3 + index) % REWARD_META.length
+  return REWARD_META[globalIdx].value || 0
+}
+
+function getRewardItemName(index, businessIndex) {
+  const globalIdx = (businessIndex * 3 + index) % REWARD_META.length
+  return REWARD_META[globalIdx].itemName || ''
+}
+
+function getRewardDetails(index, businessIndex) {
+  const globalIdx = (businessIndex * 3 + index) % REWARD_DETAILS.length
+  return REWARD_DETAILS[globalIdx]
+}
+
+function randomDaysAgo(maxDays = 90) {
+  const ms = Math.floor(Math.random() * maxDays * 24 * 60 * 60 * 1000)
+  return new Date(Date.now() - ms)
 }
 
 export async function seedSampleQuestsForAllBusinesses({ onProgress } = {}) {
@@ -153,12 +126,15 @@ export async function seedSampleQuestsForAllBusinesses({ onProgress } = {}) {
       continue
     }
 
+    const templatesForBusiness = getQuestsForBusiness(business, bi)
+
     const perQuestErrors = []
     let questsCreatedForThisBusiness = 0
     let rewardsCreatedForThisBusiness = 0
 
-    for (let qi = 0; qi < QUEST_TEMPLATES.length; qi++) {
-      const template = QUEST_TEMPLATES[qi]
+    for (let qi = 0; qi < templatesForBusiness.length; qi++) {
+      const template = templatesForBusiness[qi]
+      const createdAt = randomDaysAgo(90)
 
       if (onProgress) {
         onProgress({
@@ -166,7 +142,7 @@ export async function seedSampleQuestsForAllBusinesses({ onProgress } = {}) {
           totalBusinesses: realBusinesses.length,
           businessName,
           questIndex: qi + 1,
-          totalQuests: QUEST_TEMPLATES.length,
+          totalQuests: templatesForBusiness.length,
         })
       }
 
@@ -174,25 +150,30 @@ export async function seedSampleQuestsForAllBusinesses({ onProgress } = {}) {
         const questForTags = { questType: template.questType, category: template.questType, impact: null }
         const questTags = inferQuestTags(questForTags, business)
 
+        const rewardMeta = getRewardDetails(qi, bi)
+
         const questData = sanitizeForFirestore({
           title: template.title,
           description: template.description,
           questType: template.questType,
-          requiredDurationMinutes: template.visitDurationMinutes || 0,
-          verificationMethod: template.questType === 'visit' ? 'location' : (template.buyVerificationMethod === 'code' ? 'code' : 'qr'),
-          rewardType: getRewardType(qi),
-          rewardValue: getRewardValue(template),
-          rewardItemName: getRewardItemName(template),
+          requiredDurationMinutes: template.duration || 0,
+          verificationMethod: template.questType === 'visit' ? 'location' : 'qr',
+          rewardType: getRewardType(qi, bi),
+          rewardValue: getRewardValue(qi, bi),
+          rewardItemName: getRewardItemName(qi, bi),
           isActive: true,
-          buyVerificationMethod: template.questType === 'buy' ? (template.buyVerificationMethod || 'qr') : null,
+          buyVerificationMethod: template.questType === 'buy' ? 'qr' : null,
           minimumPurchase: template.minimumPurchase || 0,
-          quantityRequired: template.quantityRequired || 1,
-          itemDetails: template.itemDetails || null,
-          conditions: template.conditions || null,
-          autoRotateDaily: template.questType === 'buy' ? (template.autoRotateDaily || false) : null,
+          quantityRequired: 1,
+          itemDetails: template.questType === 'buy' ? (template.description || null) : null,
+          conditions: template.questType === 'buy' ? (`Minimum ₱${template.minimumPurchase || 100} purchase required.`) : null,
+          autoRotateDaily: template.questType === 'buy' ? false : null,
           itemPhotoUrl: null,
-          questInstructions: null,
+          questInstructions: template.questType === 'visit' ? (`Spend at least ${template.duration || 15} minutes here.`) : null,
           tags: questTags,
+          createdAt: Timestamp.fromDate(createdAt),
+          updatedAt: Timestamp.fromDate(createdAt),
+          _seeded: true,
         })
 
         const quest = await createOwnerQuest(business.ownerUid || user.uid, businessId, businessName, questData)
@@ -213,16 +194,17 @@ export async function seedSampleQuestsForAllBusinesses({ onProgress } = {}) {
             businessName,
             questId: quest.id,
             questTitle: template.title,
-            rewardTitle: template.reward.title,
-            rewardDescription: template.reward.description,
-            rewardTerms: template.reward.terms,
+            rewardTitle: rewardMeta.title,
+            rewardDescription: rewardMeta.description,
+            rewardTerms: rewardMeta.terms,
             stockTotal: 50,
             stockRemaining: 50,
             expiresAt: Timestamp.fromDate(new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)),
             isActive: true,
-            createdAt: serverTimestamp(),
+            createdAt: Timestamp.fromDate(createdAt),
             createdBy: user.uid,
             createdByEmail: user.email,
+            _seeded: true,
           })
 
           const rewardRef = await addDoc(collection(db, 'businessQuestRewards'), rewardPayload)
@@ -234,7 +216,7 @@ export async function seedSampleQuestsForAllBusinesses({ onProgress } = {}) {
             targetId: rewardRef.id,
             adminUid: user.uid,
             adminEmail: user.email,
-            meta: { businessId, businessName, questId: quest.id, rewardTitle: template.reward.title },
+            meta: { businessId, businessName, questId: quest.id, rewardTitle: rewardMeta.title },
           })
         } catch (rewardError) {
           perQuestErrors.push({
@@ -255,7 +237,7 @@ export async function seedSampleQuestsForAllBusinesses({ onProgress } = {}) {
           error: questError.message || String(questError),
           code: questError.code || null,
         })
-        console.error(`[SeedQuests] Quest ${qi + 1}/${QUEST_TEMPLATES.length} for ${businessName} FAILED:`, questError)
+        console.error(`[SeedQuests] Quest ${qi + 1}/${templatesForBusiness.length} for ${businessName} FAILED:`, questError)
       }
     }
 
@@ -274,7 +256,7 @@ export async function seedSampleQuestsForAllBusinesses({ onProgress } = {}) {
       result.errors.push({
         businessId: String(business.id),
         businessName: business.name,
-        error: `${perQuestErrors.length} of ${QUEST_TEMPLATES.length} quests failed`,
+        error: `${perQuestErrors.length} of ${templatesForBusiness.length} quests failed`,
         details: perQuestErrors,
       })
     }
@@ -306,8 +288,11 @@ export async function deleteAllSeededQuestsAndRewards() {
   const user = auth.currentUser
   if (!user) throw new Error('Must be signed in')
 
-  const questsSnap = await getDocs(collection(db, 'ownerQuests'))
-  const rewardsSnap = await getDocs(collection(db, 'businessQuestRewards'))
+  const questsQuery = query(collection(db, 'ownerQuests'), where('_seeded', '==', true))
+  const rewardsQuery = query(collection(db, 'businessQuestRewards'), where('_seeded', '==', true))
+
+  const questsSnap = await getDocs(questsQuery)
+  const rewardsSnap = await getDocs(rewardsQuery)
 
   let deletedQuests = 0
   let deletedRewards = 0

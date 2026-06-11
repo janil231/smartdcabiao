@@ -45,7 +45,11 @@ import {
 import { expireAllStaleParticipations } from '../services/participations.service'
 import { repairAllBusinessImages, backfillBusinessOwnerUids } from '../services/businesses.service'
 import { seedSampleQuestsForAllBusinesses, deleteAllSeededQuestsAndRewards } from '../services/seedSampleOwnerQuests.service'
+import { seedRealisticLGUQuests, deleteSeededLGUQuests } from '../services/seedRealisticLGUQuests.service'
+import { seedRealisticVouchers, deleteSeededVouchers } from '../services/seedRealisticVouchers.service'
 import { seedSampleReviewsForAllBusinesses } from '../services/seedSampleReviews.service'
+import { seedFakeUsers, deleteSeededUsers } from '../services/seedFakeUsers.service'
+import { seedQuestActivity, deleteSeededQuestActivity } from '../services/seedQuestActivity.service'
 import { repairAllReviewAggregates } from '../services/repairReviewAggregates.service'
 import { repairAllDestinationImages } from '../services/destinations.service'
 import { listPendingReviews, setReviewStatus } from '../services/reviews.service'
@@ -933,6 +937,18 @@ function DataToolsPanel({ user }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteResult, setDeleteResult] = useState(null)
+
+  const [seedingLGUPhase1, setSeedingLGUPhase1] = useState(false)
+  const [lguPhase1Progress, setLguPhase1Progress] = useState(null)
+  const [lguPhase1ProgressPct, setLguPhase1ProgressPct] = useState(0)
+  const [lguPhase1Result, setLguPhase1Result] = useState(null)
+  const [seedingOwnerPhase1, setSeedingOwnerPhase1] = useState(false)
+  const [ownerPhase1Result, setOwnerPhase1Result] = useState(null)
+  const [seedingVoucherPhase1, setSeedingVoucherPhase1] = useState(false)
+  const [voucherPhase1Progress, setVoucherPhase1Progress] = useState(null)
+  const [voucherPhase1Result, setVoucherPhase1Result] = useState(null)
+  const [resettingPhase1, setResettingPhase1] = useState(false)
+
   const [showSeedReviewsConfirm, setShowSeedReviewsConfirm] = useState(false)
   const [seedingReviews, setSeedingReviews] = useState(false)
   const [seedReviewsProgressMessage, setSeedReviewsProgressMessage] = useState('')
@@ -943,6 +959,13 @@ function DataToolsPanel({ user }) {
   const [repairProgressMessage, setRepairProgressMessage] = useState('')
   const [repairProgressPercent, setRepairProgressPercent] = useState(0)
   const [repairAggregatesResult, setRepairAggregatesResult] = useState(null)
+  const [phase2SeedingUsers, setPhase2SeedingUsers] = useState(false)
+  const [phase2UsersProgress, setPhase2UsersProgress] = useState(null)
+  const [phase2UsersResult, setPhase2UsersResult] = useState(null)
+  const [phase2SeedingActivity, setPhase2SeedingActivity] = useState(false)
+  const [phase2ActivityProgress, setPhase2ActivityProgress] = useState(null)
+  const [phase2ActivityResult, setPhase2ActivityResult] = useState(null)
+  const [phase2Resetting, setPhase2Resetting] = useState(false)
 
   const addLog = (entry) => setLog(prev => [...prev, entry])
 
@@ -1032,6 +1055,95 @@ function DataToolsPanel({ user }) {
     ? Math.round(((seedProgress.businessIndex - 1) * seedProgress.totalQuests + seedProgress.questIndex) / (seedProgress.totalBusinesses * seedProgress.totalQuests) * 100)
     : 0
 
+  const handleSeedRealisticLGUQuests = async () => {
+    if (!window.confirm('Seed 18 realistic LGU quests across active + ended seasons?')) return
+    setSeedingLGUPhase1(true)
+    setLguPhase1Result(null)
+    setLguPhase1Progress(null)
+    setLguPhase1ProgressPct(0)
+    addLog({ time: new Date().toLocaleTimeString(), msg: 'Starting Phase 1: LGU Quests...' })
+    try {
+      const result = await seedRealisticLGUQuests({
+        onProgress: ({ current, total }) => {
+          const pct = Math.round((current / total) * 100)
+          setLguPhase1Progress(`${current}/${total}`)
+          setLguPhase1ProgressPct(pct)
+        },
+      })
+      setLguPhase1Result(result)
+      addLog({ time: new Date().toLocaleTimeString(), msg: result.skipped ? `⏭️ ${result.reason}` : `✅ Created ${result.created} LGU quests` })
+    } catch (err) {
+      setLguPhase1Result({ error: err.message })
+      addLog({ time: new Date().toLocaleTimeString(), msg: `❌ LGU Quests error: ${err.message}` })
+    } finally {
+      setSeedingLGUPhase1(false)
+    }
+  }
+
+  const handleSeedOwnerPhase1 = async () => {
+    if (!window.confirm('Seed varied owner quests for all qualifying businesses?')) return
+    setSeedingOwnerPhase1(true)
+    setOwnerPhase1Result(null)
+    addLog({ time: new Date().toLocaleTimeString(), msg: 'Starting Phase 1: Owner Quests (varied)...' })
+    try {
+      const result = await seedSampleQuestsForAllBusinesses({
+        onProgress: (p) => {
+          addLog({ time: new Date().toLocaleTimeString(), msg: `[${p.businessIndex}/${p.totalBusinesses}] ${p.businessName} — Quest ${p.questIndex}/${p.totalQuests}` })
+        },
+      })
+      setOwnerPhase1Result(result)
+      addLog({ time: new Date().toLocaleTimeString(), msg: `✅ Seeded: ${result.businessesSeeded} businesses, ${result.questsCreated} quests, ${result.rewardsCreated} rewards` })
+    } catch (err) {
+      setOwnerPhase1Result({ error: err.message })
+      addLog({ time: new Date().toLocaleTimeString(), msg: `❌ Owner Quests error: ${err.message}` })
+    } finally {
+      setSeedingOwnerPhase1(false)
+    }
+  }
+
+  const handleSeedVoucherPhase1 = async () => {
+    if (!window.confirm('Seed vouchers across all seasons?')) return
+    setSeedingVoucherPhase1(true)
+    setVoucherPhase1Result(null)
+    setVoucherPhase1Progress(null)
+    addLog({ time: new Date().toLocaleTimeString(), msg: 'Starting Phase 1: Vouchers...' })
+    try {
+      const result = await seedRealisticVouchers({
+        onProgress: ({ current, season, voucher }) => {
+          setVoucherPhase1Progress(`${current} created`)
+        },
+      })
+      setVoucherPhase1Result(result)
+      addLog({ time: new Date().toLocaleTimeString(), msg: result.skipped ? `⏭️ ${result.reason}` : `✅ Created ${result.created} vouchers across ${Object.keys(result.perSeason || {}).length} seasons` })
+    } catch (err) {
+      setVoucherPhase1Result({ error: err.message })
+      addLog({ time: new Date().toLocaleTimeString(), msg: `❌ Vouchers error: ${err.message}` })
+    } finally {
+      setSeedingVoucherPhase1(false)
+    }
+  }
+
+  const handleResetPhase1 = async () => {
+    if (!window.confirm('Delete ALL Phase 1 seeded data (LGU quests, owner quests, vouchers)? Only _seeded: true docs will be removed. Real data is safe.')) return
+    setResettingPhase1(true)
+    addLog({ time: new Date().toLocaleTimeString(), msg: 'Starting Phase 1 reset...' })
+    try {
+      const [lguRes, ownerRes, voucherRes] = await Promise.all([
+        deleteSeededLGUQuests(),
+        deleteAllSeededQuestsAndRewards(),
+        deleteSeededVouchers(),
+      ])
+      addLog({ time: new Date().toLocaleTimeString(), msg: `✅ Reset complete. Deleted: ${lguRes.deleted} LGU quests, ${ownerRes.deletedQuests || 0} owner quests + ${ownerRes.deletedRewards || 0} rewards, ${voucherRes.deleted} vouchers` })
+      setLguPhase1Result(null)
+      setOwnerPhase1Result(null)
+      setVoucherPhase1Result(null)
+    } catch (err) {
+      addLog({ time: new Date().toLocaleTimeString(), msg: `❌ Reset error: ${err.message}` })
+    } finally {
+      setResettingPhase1(false)
+    }
+  }
+
   const handleSeedReviews = async () => {
     setShowSeedReviewsConfirm(false)
     setSeedingReviews(true)
@@ -1108,6 +1220,69 @@ function DataToolsPanel({ user }) {
       addLog({ time: new Date().toLocaleTimeString(), msg: `❌ Fatal error: ${err.message}` })
     } finally {
       setRepairingAggregates(false)
+    }
+  }
+
+  const handleSeedFakeUsers = async () => {
+    if (!window.confirm('Create 25 fake seeded user accounts with random Cabiao locations and interests? Only runs once — use Reset to re-run.')) return
+    setPhase2SeedingUsers(true)
+    setPhase2UsersResult(null)
+    setPhase2UsersProgress(null)
+    addLog({ time: new Date().toLocaleTimeString(), msg: 'Starting Phase 2: Seed Fake Users...' })
+    try {
+      const result = await seedFakeUsers({
+        onProgress: ({ current, total, name }) => {
+          setPhase2UsersProgress(`${current}/${total} — ${name}`)
+        },
+      })
+      setPhase2UsersResult(result)
+      addLog({ time: new Date().toLocaleTimeString(), msg: result.skipped ? `⏭️ ${result.reason}` : `✅ Created ${result.created} fake users` })
+    } catch (err) {
+      setPhase2UsersResult({ error: err.message })
+      addLog({ time: new Date().toLocaleTimeString(), msg: `❌ Seed users error: ${err.message}` })
+    } finally {
+      setPhase2SeedingUsers(false)
+    }
+  }
+
+  const handleSeedQuestActivity = async () => {
+    if (!window.confirm('Generate realistic quest activity (LGU participations, owner participations, points ledger, impact ledger, season balances, season user stats) for all seeded fake users? Run this AFTER seeding fake users.')) return
+    setPhase2SeedingActivity(true)
+    setPhase2ActivityResult(null)
+    setPhase2ActivityProgress(null)
+    addLog({ time: new Date().toLocaleTimeString(), msg: 'Starting Phase 2: Seed Quest Activity...' })
+    try {
+      const result = await seedQuestActivity({
+        onProgress: ({ phase, current, total }) => {
+          setPhase2ActivityProgress(`${phase} — ${current}/${total}`)
+        },
+      })
+      setPhase2ActivityResult(result)
+      addLog({ time: new Date().toLocaleTimeString(), msg: result.skipped ? `⏭️ ${result.reason}` : `✅ Created ${result.participations} LGU + ${result.ownerParticipations} owner participations, ${result.pointsLedger} points, ${result.impactLedger} impact, ${result.seasonBalances} balances, ${result.seasonUserStats} stats` })
+    } catch (err) {
+      setPhase2ActivityResult({ error: err.message })
+      addLog({ time: new Date().toLocaleTimeString(), msg: `❌ Seed activity error: ${err.message}` })
+    } finally {
+      setPhase2SeedingActivity(false)
+    }
+  }
+
+  const handleResetPhase2 = async () => {
+    if (!window.confirm('Delete ALL Phase 2 seeded data (fake users, participations, points, impact, balances, stats)? Only _seeded: true docs will be removed. Real data is safe.')) return
+    setPhase2Resetting(true)
+    addLog({ time: new Date().toLocaleTimeString(), msg: 'Starting Phase 2 reset...' })
+    try {
+      const [usersRes, activityRes] = await Promise.all([
+        deleteSeededUsers(),
+        deleteSeededQuestActivity(),
+      ])
+      addLog({ time: new Date().toLocaleTimeString(), msg: `✅ Reset complete. Deleted: ${usersRes.deleted} users, Activity: ${Object.entries(activityRes).map(([k, v]) => `${k}: ${v}`).join(', ')}` })
+      setPhase2UsersResult(null)
+      setPhase2ActivityResult(null)
+    } catch (err) {
+      addLog({ time: new Date().toLocaleTimeString(), msg: `❌ Reset error: ${err.message}` })
+    } finally {
+      setPhase2Resetting(false)
     }
   }
 
@@ -1662,6 +1837,152 @@ function DataToolsPanel({ user }) {
                   </button>
                 </div>
               </div>
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-xl border border-emerald-200 bg-white p-4 shadow-sm mb-4">
+          <h3 className="text-lg font-semibold mb-2">🌱 Realistic Seed — Phase 1: Content</h3>
+          <p className="text-sm text-gray-600 mb-4">
+            Seeds varied LGU quests, owner quests, and vouchers to populate the platform with realistic content.
+            Run this BEFORE Phase 2 (user activity).
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <button
+              onClick={handleSeedRealisticLGUQuests}
+              disabled={seedingLGUPhase1}
+              className="bg-emerald-600 text-white rounded-lg py-2 px-4 font-medium hover:bg-emerald-700 disabled:opacity-50 text-sm"
+            >
+              {seedingLGUPhase1 ? `Creating... ${lguPhase1Progress || ''}` : '🎯 Seed 18 LGU Quests'}
+            </button>
+
+            <button
+              onClick={handleSeedOwnerPhase1}
+              disabled={seedingOwnerPhase1}
+              className="bg-emerald-600 text-white rounded-lg py-2 px-4 font-medium hover:bg-emerald-700 disabled:opacity-50 text-sm"
+            >
+              {seedingOwnerPhase1 ? 'Creating...' : '🏪 Seed Varied Owner Quests'}
+            </button>
+
+            <button
+              onClick={handleSeedVoucherPhase1}
+              disabled={seedingVoucherPhase1}
+              className="bg-emerald-600 text-white rounded-lg py-2 px-4 font-medium hover:bg-emerald-700 disabled:opacity-50 text-sm"
+            >
+              {seedingVoucherPhase1 ? `Creating... ${voucherPhase1Progress || ''}` : '🎟️ Seed Vouchers'}
+            </button>
+          </div>
+
+          {(lguPhase1Result || ownerPhase1Result || voucherPhase1Result) && (
+            <div className="mt-4 p-3 bg-gray-50 rounded-lg text-sm space-y-2">
+              {lguPhase1Result && (
+                <div>
+                  <strong>LGU Quests:</strong> {lguPhase1Result.skipped ? `⏭️ ${lguPhase1Result.reason}` : lguPhase1Result.error ? `❌ ${lguPhase1Result.error}` : `✅ Created ${lguPhase1Result.created} quests`}
+                </div>
+              )}
+              {ownerPhase1Result && (
+                <div>
+                  <strong>Owner Quests:</strong> {ownerPhase1Result.error ? `❌ ${ownerPhase1Result.error}` : `✅ ${ownerPhase1Result.businessesSeeded || 0} businesses, ${ownerPhase1Result.questsCreated || 0} quests, ${ownerPhase1Result.rewardsCreated || 0} rewards`}
+                </div>
+              )}
+              {voucherPhase1Result && (
+                <div>
+                  <strong>Vouchers:</strong> {voucherPhase1Result.skipped ? `⏭️ ${voucherPhase1Result.reason}` : voucherPhase1Result.error ? `❌ ${voucherPhase1Result.error}` : `✅ Created ${voucherPhase1Result.created} vouchers`}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="mt-4 pt-4 border-t border-gray-200">
+            <button
+              onClick={handleResetPhase1}
+              disabled={resettingPhase1}
+              className="bg-red-600 text-white rounded-lg py-2 px-4 font-medium hover:bg-red-700 disabled:opacity-50 text-sm"
+            >
+              {resettingPhase1 ? 'Deleting...' : '🗑️ Reset Phase 1 Seeded Data'}
+            </button>
+            <p className="text-xs text-gray-500 mt-1">
+              Only deletes docs tagged with <code className="text-xs bg-gray-100 px-1 rounded">_seeded: true</code>. Safe for real data.
+            </p>
+          </div>
+        </div>
+
+        {seedingLGUPhase1 && lguPhase1Progress && (
+          <div className="mt-3">
+            <div className="flex justify-between text-xs text-gray-600 mb-1">
+              <span>Seeding LGU quests...</span>
+              <span>{lguPhase1Progress}</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2.5">
+              <div className="bg-emerald-500 h-2.5 rounded-full transition-all duration-300" style={{ width: `${lguPhase1ProgressPct}%` }} />
+            </div>
+          </div>
+        )}
+
+        <div className="rounded-xl border border-purple-200 bg-white p-4 shadow-sm mb-4">
+          <h3 className="text-lg font-semibold mb-2">👥 Realistic Seed — Phase 2: Users + Activity</h3>
+          <p className="text-sm text-gray-600 mb-4">
+            Seeds fake user accounts, then generates realistic quest participation activity
+            (LGU + owner quests, points, impact, leaderboard data). Requires Phase 1 content first.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <button
+              onClick={handleSeedFakeUsers}
+              disabled={phase2SeedingUsers}
+              className="bg-emerald-600 text-white rounded-lg py-2 px-4 font-medium hover:bg-emerald-700 disabled:opacity-50 text-sm"
+            >
+              {phase2SeedingUsers ? `Creating... ${phase2UsersProgress || ''}` : '👤 Seed 25 Fake Users'}
+            </button>
+
+            <button
+              onClick={handleSeedQuestActivity}
+              disabled={phase2SeedingActivity}
+              className="bg-emerald-600 text-white rounded-lg py-2 px-4 font-medium hover:bg-emerald-700 disabled:opacity-50 text-sm"
+            >
+              {phase2SeedingActivity ? `Seeding... ${phase2ActivityProgress || ''}` : '🎯 Seed Quest Activity'}
+            </button>
+
+            <button
+              onClick={handleResetPhase2}
+              disabled={phase2Resetting}
+              className="bg-red-600 text-white rounded-lg py-2 px-4 font-medium hover:bg-red-700 disabled:opacity-50 text-sm"
+            >
+              {phase2Resetting ? 'Deleting...' : '🗑️ Reset Phase 2 Seeded Data'}
+            </button>
+          </div>
+
+          {phase2SeedingUsers && (
+            <div className="mt-3">
+              <div className="flex justify-between text-xs text-gray-600 mb-1">
+                <span>Seeding fake users...</span>
+                <span>{phase2UsersProgress}</span>
+              </div>
+            </div>
+          )}
+
+          {phase2SeedingActivity && (
+            <div className="mt-3">
+              <div className="flex justify-between text-xs text-gray-600 mb-1">
+                <span>Seeding quest activity...</span>
+                <span>{phase2ActivityProgress}</span>
+              </div>
+            </div>
+          )}
+
+          {(phase2UsersResult || phase2ActivityResult) && (
+            <div className="mt-4 p-3 bg-gray-50 rounded-lg text-sm space-y-2">
+              {phase2UsersResult && (
+                <div>
+                  <strong>Fake Users:</strong> {phase2UsersResult.skipped ? `⏭️ ${phase2UsersResult.reason}` : phase2UsersResult.error ? `❌ ${phase2UsersResult.error}` : `✅ Created ${phase2UsersResult.created} users`}
+                </div>
+              )}
+              {phase2ActivityResult && (
+                <div>
+                  <strong>Quest Activity:</strong> {phase2ActivityResult.skipped ? `⏭️ ${phase2ActivityResult.reason}` : phase2ActivityResult.error ? `❌ ${phase2ActivityResult.error}` : `✅ ${phase2ActivityResult.participations} LGU + ${phase2ActivityResult.ownerParticipations} owner parts, ${phase2ActivityResult.pointsLedger} pts, ${phase2ActivityResult.impactLedger} impact, ${phase2ActivityResult.seasonBalances} balances, ${phase2ActivityResult.seasonUserStats} stats`}
+                </div>
+              )}
             </div>
           )}
         </div>

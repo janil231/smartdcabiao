@@ -16,6 +16,7 @@ import { db } from '../lib/firebase'
 import { auth } from '../lib/firebase'
 import { sanitizeForFirestore } from '../utils/firestoreSanitize'
 import { logAudit } from './audit.service'
+import { pauseAllOwnerQuestsForSeasonEnd } from './ownerQuests.service'
 
 const SEASONS_COLLECTION = 'seasons'
 
@@ -113,6 +114,8 @@ export async function closeSeason(seasonId, adminUser) {
   }
   
   await updateDoc(seasonRef, { isActive: false })
+
+  try { await pauseAllOwnerQuestsForSeasonEnd() } catch (err) { console.warn('[closeSeason] pauseAllOwnerQuestsForSeasonEnd failed:', err) }
   
   await logAudit({
     action: 'SEASON_CLOSED',
@@ -330,6 +333,8 @@ export async function endSeasonWithExpiry(seasonId, { reason = 'manual', endedBy
     }),
     { merge: true }
   );
+
+  try { await pauseAllOwnerQuestsForSeasonEnd() } catch (err) { console.warn('[endSeasonWithExpiry] pauseAllOwnerQuestsForSeasonEnd failed:', err) }
 
   await logAudit({
     action: 'season_ended',

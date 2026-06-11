@@ -5,6 +5,7 @@ import L from 'leaflet'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
 import { useAuth } from '../contexts/AuthContext'
+import EmailVerificationBanner from '../components/EmailVerificationBanner'
 import { useLanguage } from '../contexts/LanguageContext'
 import { submitBusinessRegistration } from '../services/submissions.service'
 import { CABIAO_BARANGAYS, BUSINESS_CATEGORIES } from '../constants/cabiaoBarangays'
@@ -163,7 +164,7 @@ const initialFormData = {
 }
 
 export default function RegisterBusinessPage() {
-  const { user, loading: authLoading } = useAuth()
+  const { user, loading: authLoading, isOAuth, grandfatheredUnverified } = useAuth()
   const { t } = useLanguage()
   const navigate = useNavigate()
   const fileInputRef = useRef(null)
@@ -609,6 +610,12 @@ export default function RegisterBusinessPage() {
           </div>
         </div>
       </header>
+
+      {grandfatheredUnverified && (
+        <div className="max-w-3xl mx-auto px-4 mt-6">
+          <EmailVerificationBanner />
+        </div>
+      )}
 
       <main className="max-w-3xl mx-auto px-4 py-6 sm:py-8 pb-44 sm:pb-8">
         <div className="flex items-center justify-between mb-4 sm:mb-8 sticky top-16 z-30 bg-white/80 backdrop-blur rounded-2xl p-4 shadow-sm border border-gray-200">

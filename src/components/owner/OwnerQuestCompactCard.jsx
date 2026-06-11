@@ -1,20 +1,13 @@
 import { useState } from 'react'
+import { formatRewardLabel } from '../../utils/rewardFormat'
 import QuestDetailsViewModal from './QuestDetailsViewModal'
-
-function formatRewardText(quest) {
-  if (quest.rewardType === 'discount_percent') return `${quest.rewardValue}% off ${quest.rewardItemName || 'items'}`
-  if (quest.rewardType === 'discount_fixed') return `₱${quest.rewardValue} off ${quest.rewardItemName || 'items'}`
-  if (quest.rewardType === 'free_item') return `Free ${quest.rewardItemName || 'item'}`
-  if (quest.rewardType === 'bogo') return `Buy 1 Get 1 on ${quest.rewardItemName || 'items'}`
-  return 'Special reward'
-}
 
 export default function OwnerQuestCompactCard({ quest, businessId, businessName, businessImage, isJoined = false }) {
   const [showModal, setShowModal] = useState(false)
 
   const isBuyQuest = quest.questType === 'buy'
   const minPurchase = quest.minimumPurchase || 0
-  const rewardText = formatRewardText(quest)
+  const rewardText = formatRewardLabel(quest)
 
   return (
     <>

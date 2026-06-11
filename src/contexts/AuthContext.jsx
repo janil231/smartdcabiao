@@ -10,6 +10,9 @@ import {
   sendPasswordResetEmail,
   sendEmailVerification,
   updateProfile,
+  updatePassword,
+  reauthenticateWithCredential,
+  EmailAuthProvider,
 } from 'firebase/auth'
 import { auth } from '../lib/firebase'
 import { upsertUserProfile, getUserProfile } from '../services/users.service'
@@ -96,6 +99,16 @@ export function AuthProvider({ children }) {
   const resetPassword = (email) =>
     sendPasswordResetEmail(auth, email)
 
+  const changePassword = async (currentPassword, newPassword) => {
+    const user = auth.currentUser
+    if (!user) throw new Error('Not signed in')
+    if (!user.email) throw new Error('No email on account (OAuth users cannot change password here)')
+
+    const credential = EmailAuthProvider.credential(user.email, currentPassword)
+    await reauthenticateWithCredential(user, credential)
+    await updatePassword(user, newPassword)
+  }
+
   const resendVerificationEmail = async () => {
     if (!auth.currentUser) throw new Error('Not signed in')
     if (auth.currentUser.emailVerified) throw new Error('Email already verified')
@@ -129,17 +142,7 @@ export function AuthProvider({ children }) {
   const needsSignupWizard = async (u) => {
     if (!u) return false
 
-    const oauth = u.providerData?.some(
-      p => p.providerId === 'google.com' || p.providerId === 'facebook.com'
-    )
-    if (oauth) {
-      const profile = await getUserProfile(u.uid)
-      return !profile?.interestsSetAt
-    }
-
-    if (!u.emailVerified) return true
-
-    const profile = await getUserProfile(u.uid)
+    const profile = await getUserProfile(u.uid).catch(() => null)
     return !profile?.interestsSetAt
   }
 
@@ -165,6 +168,7 @@ export function AuthProvider({ children }) {
     signInWithGoogle,
     signInWithFacebook,
     resetPassword,
+    changePassword,
     resendVerificationEmail,
     refreshUser,
     needsSignupWizard,

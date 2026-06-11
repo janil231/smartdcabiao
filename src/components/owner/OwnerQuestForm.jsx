@@ -3,12 +3,14 @@ import { useAuth } from '../../contexts/AuthContext'
 import { createOwnerQuest, updateOwnerQuest } from '../../services/ownerQuests.service'
 import { uploadToCloudinary } from '../../utils/cloudinary'
 import { compressImage } from '../../utils/compressImage'
+import { formatRewardLabel } from '../../utils/rewardFormat'
 
 const REWARD_TYPES = [
   { value: 'discount_percent', label: 'Discount (%)', unit: '%' },
   { value: 'discount_fixed', label: 'Fixed Amount (₱)', unit: '₱' },
   { value: 'free_item', label: 'Free Item', unit: '' },
   { value: 'bogo', label: 'Buy 1 Get 1', unit: '' },
+  { value: 'other', label: 'Other (custom description)', unit: '' },
 ]
 
 export default function OwnerQuestForm({ businessId, businessName, quest, onSaved }) {
@@ -23,14 +25,13 @@ export default function OwnerQuestForm({ businessId, businessName, quest, onSave
   const [autoRotateDaily, setAutoRotateDaily] = useState(quest?.autoRotateDaily || false)
   const [itemPhotoUrl, setItemPhotoUrl] = useState(quest?.itemPhotoUrl || '')
   const [itemDetails, setItemDetails] = useState(quest?.itemDetails || '')
-  const [minimumPurchase, setMinimumPurchase] = useState(quest?.minimumPurchase || 0)
-  const [quantityRequired, setQuantityRequired] = useState(quest?.quantityRequired || 1)
   const [conditions, setConditions] = useState(quest?.conditions || '')
   const [questInstructions, setQuestInstructions] = useState(quest?.questInstructions || '')
   const [photoUploading, setPhotoUploading] = useState(false)
   const [rewardType, setRewardType] = useState(quest?.rewardType || 'discount_percent')
   const [rewardValue, setRewardValue] = useState(quest?.rewardValue || '')
   const [rewardItemName, setRewardItemName] = useState(quest?.rewardItemName || '')
+  const [rewardDescription, setRewardDescription] = useState(quest?.rewardDescription || '')
   const [isActive, setIsActive] = useState(quest?.isActive !== false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -65,13 +66,7 @@ export default function OwnerQuestForm({ businessId, businessName, quest, onSave
   }
 
   const rewardLabel = REWARD_TYPES.find(r => r.value === rewardType)
-  const rewardPreview = (() => {
-    if (rewardType === 'discount_percent') return `${rewardValue}% off ${rewardItemName || 'selected items'}`
-    if (rewardType === 'discount_fixed') return `₱${rewardValue} off ${rewardItemName || 'selected items'}`
-    if (rewardType === 'free_item') return `Free ${rewardItemName || 'item'}`
-    if (rewardType === 'bogo') return `Buy 1 Get 1 on ${rewardItemName || 'selected items'}`
-    return ''
-  })()
+  const rewardPreview = formatRewardLabel({ rewardType, rewardValue: Number(rewardValue) || 0, rewardItemName, rewardDescription })
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -87,7 +82,9 @@ export default function OwnerQuestForm({ businessId, businessName, quest, onSave
     }
     if (!isVisit && questType === 'buy' && buyVerificationMethod === 'code') {
     }
-    if (rewardType !== 'free_item' && rewardType !== 'bogo') {
+    if (rewardType === 'other') {
+      if (!rewardDescription.trim()) { setError('Please enter a reward description'); return }
+    } else if (rewardType !== 'free_item' && rewardType !== 'bogo') {
       const val = parseFloat(rewardValue)
       if (isNaN(val) || val <= 0) { setError('Please enter a valid reward value'); return }
     }
@@ -103,10 +100,9 @@ export default function OwnerQuestForm({ businessId, businessName, quest, onSave
         rewardType,
         rewardValue: parseFloat(rewardValue) || 0,
         rewardItemName: rewardItemName.trim() || '',
+        rewardDescription: rewardDescription.trim() || '',
         itemPhotoUrl: itemPhotoUrl || null,
         itemDetails: itemDetails?.trim() || null,
-        minimumPurchase: Number(minimumPurchase) || 0,
-        quantityRequired: Number(quantityRequired) || 1,
         conditions: conditions?.trim() || null,
         questInstructions: questInstructions?.trim() || null,
         isActive,
@@ -290,10 +286,7 @@ export default function OwnerQuestForm({ businessId, businessName, quest, onSave
 
       {!isVisit && (
         <div className="border border-emerald-200 rounded-xl p-4 bg-emerald-50/30 mb-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-bold text-emerald-900 text-sm">📋 What to Buy Details</h3>
-            <span className="text-xs text-gray-500">(Optional but recommended)</span>
-          </div>
+          <h3 className="font-bold text-emerald-900 text-sm mb-3">📋 What to Buy Details</h3>
 
           <div className="mb-3">
             <label className="block text-xs font-semibold text-gray-700 mb-1">
@@ -355,38 +348,6 @@ export default function OwnerQuestForm({ businessId, businessName, quest, onSave
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 mb-3">
-            <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">
-                Minimum Purchase (₱)
-              </label>
-              <input
-                type="number"
-                value={minimumPurchase}
-                onChange={(e) => setMinimumPurchase(e.target.value)}
-                placeholder="0"
-                min="0"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-              />
-              <p className="text-xs text-gray-500 mt-1">0 = no minimum</p>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">
-                Quantity Required
-              </label>
-              <input
-                type="number"
-                value={quantityRequired}
-                onChange={(e) => setQuantityRequired(e.target.value)}
-                placeholder="1"
-                min="1"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-              />
-              <p className="text-xs text-gray-500 mt-1">e.g., 'Buy 2 to qualify'</p>
-            </div>
-          </div>
-
           <div>
             <label className="block text-xs font-semibold text-gray-700 mb-1">
               Conditions
@@ -422,34 +383,57 @@ export default function OwnerQuestForm({ businessId, businessName, quest, onSave
               ))}
             </select>
           </div>
-          {rewardType !== 'free_item' && rewardType !== 'bogo' && (
-            <div>
-              <label htmlFor="oq-reward-val" className="block text-sm text-gray-600 mb-1">
-                Value {rewardLabel?.unit && `(${rewardLabel.unit})`}
-              </label>
-              <input
-                id="oq-reward-val"
-                type="number"
-                value={rewardValue}
-                onChange={(e) => setRewardValue(e.target.value)}
-                min={1}
-                placeholder={rewardType === 'discount_percent' ? '10' : '50'}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+          {rewardType === 'other' ? (
+            <div className="sm:col-span-2">
+              <label htmlFor="oq-reward-desc" className="block text-sm text-gray-600 mb-1">Reward Description *</label>
+              <textarea
+                id="oq-reward-desc"
+                value={rewardDescription}
+                onChange={(e) => setRewardDescription(e.target.value)}
+                placeholder="e.g. Free tote bag with logo, Buy 1 take 1 on Tuesdays"
+                maxLength={120}
+                rows={2}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 resize-none"
               />
+              <div className="flex justify-between mt-1">
+                <p className="text-xs text-gray-500">Describe the reward in your own words</p>
+                <p className="text-xs text-gray-500">{rewardDescription.length}/120</p>
+              </div>
             </div>
+          ) : (
+            <>
+              {rewardType !== 'free_item' && rewardType !== 'bogo' && (
+                <div>
+                  <label htmlFor="oq-reward-val" className="block text-sm text-gray-600 mb-1">
+                    Value {rewardLabel?.unit && `(${rewardLabel.unit})`}
+                  </label>
+                  <input
+                    id="oq-reward-val"
+                    type="number"
+                    value={rewardValue}
+                    onChange={(e) => setRewardValue(e.target.value)}
+                    min={1}
+                    placeholder={rewardType === 'discount_percent' ? '10' : '50'}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
+              )}
+            </>
           )}
         </div>
-        <div className="mt-3">
-          <label htmlFor="oq-item" className="block text-sm text-gray-600 mb-1">Applies to which item?</label>
-          <input
-            id="oq-item"
-            type="text"
-            value={rewardItemName}
-            onChange={(e) => setRewardItemName(e.target.value)}
-            placeholder="e.g. Iced Coffee, Any item, Whole menu"
-            className="w-full max-w-xs rounded-lg border border-gray-300 px-3 py-2.5 text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-          />
-        </div>
+        {rewardType !== 'other' && (
+          <div className="mt-3">
+            <label htmlFor="oq-item" className="block text-sm text-gray-600 mb-1">Applies to which item?</label>
+            <input
+              id="oq-item"
+              type="text"
+              value={rewardItemName}
+              onChange={(e) => setRewardItemName(e.target.value)}
+              placeholder="e.g. Iced Coffee, Any item, Whole menu"
+              className="w-full max-w-xs rounded-lg border border-gray-300 px-3 py-2.5 text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            />
+          </div>
+        )}
         {rewardPreview && (
           <div className="mt-2 px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200">
             <p className="text-sm text-emerald-800 font-medium">

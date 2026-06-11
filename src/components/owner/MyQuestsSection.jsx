@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { collection, getDocs, query, where, limit } from 'firebase/firestore'
 import { db } from '../../lib/firebase'
 import { getMyBusinessQuestRewards } from '../../services/businessQuestRewards.service'
+import { formatRewardLabel } from '../../utils/rewardFormat'
 import QuestDetailsPanel from './QuestDetailsPanel'
 
 export default function MyQuestsSection({ user }) {
@@ -212,13 +213,7 @@ export default function MyQuestsSection({ user }) {
 function MyQuestRow({ participation, quest, business, reward }) {
   if (!quest || !business) return null
 
-  const rewardText = (() => {
-    if (quest.rewardType === 'discount_percent') return `${quest.rewardValue}% off ${quest.rewardItemName || 'items'}`
-    if (quest.rewardType === 'discount_fixed') return `₱${quest.rewardValue} off ${quest.rewardItemName || 'items'}`
-    if (quest.rewardType === 'free_item') return `Free ${quest.rewardItemName || 'item'}`
-    if (quest.rewardType === 'bogo') return `Buy 1 Get 1 on ${quest.rewardItemName || 'items'}`
-    return 'Reward'
-  })()
+  const rewardText = formatRewardLabel(quest)
 
   const statusBadge = (() => {
     if (participation.status === 'active' && participation.timerStatus === 'running')

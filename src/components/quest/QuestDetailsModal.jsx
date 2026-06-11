@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import { createPortal } from 'react-dom'
+import { formatDate, formatDateTime } from '../../utils/dateHelpers'
 
 function StatusBadge({ status }) {
   const styles = {
@@ -236,18 +237,14 @@ export default function QuestDetailsModal({ quest, participations, impactForQues
           {quest.deadline && (
             <div>
               <p className="text-sm font-medium text-gray-500 mb-1">Deadline</p>
-              <p className="text-sm text-gray-900">
-                {quest.deadline.toDate ? quest.deadline.toDate().toLocaleString() : quest.deadline}
-              </p>
+              <p className="text-sm text-gray-900">{formatDateTime(quest.deadline)}</p>
             </div>
           )}
 
           {quest.createdAt && (
             <div>
               <p className="text-sm font-medium text-gray-500 mb-1">Created</p>
-              <p className="text-sm text-gray-900">
-                {quest.createdAt.toDate ? quest.createdAt.toDate().toLocaleString() : quest.createdAt}
-              </p>
+              <p className="text-sm text-gray-900">{formatDateTime(quest.createdAt)}</p>
             </div>
           )}
 
@@ -308,7 +305,7 @@ export default function QuestDetailsModal({ quest, participations, impactForQues
                           </span>
                         </td>
                         <td className="px-4 py-2.5 text-gray-600 text-sm">
-                          {p.joinedAt ? new Date(p.joinedAt.toDate ? p.joinedAt.toDate() : p.joinedAt).toLocaleDateString() : '-'}
+                          {formatDate(p.joinedAt)}
                         </td>
                         <td className="px-4 py-2.5 text-gray-600">{quest.points || 0} pts</td>
                       </tr>

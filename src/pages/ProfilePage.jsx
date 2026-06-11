@@ -9,12 +9,15 @@ import { useFavorites } from '../contexts/FavoritesContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import BadgeCard from '../components/badges/BadgeCard'
 import InterestSelectionModal from '../components/InterestSelectionModal'
+import ChangePasswordModal from '../components/ChangePasswordModal'
+import EmailVerificationBanner from '../components/EmailVerificationBanner'
 import { getMySeasonStats, getUserSeasonWithActive, IMPACT_UNIT_CONFIG } from '../services/profileStats.service'
 import { computeBadges } from '../features/badges/badgesEngine'
 import { BADGE_CATALOG } from '../features/badges/badgesCatalog'
 import { getUserSeasonStats, updateUserLeaderboardSettings } from '../services/leaderboard.service'
 import { getMyBusinessSubmissions, getMyDestinationSubmissions } from '../services/submissions.service'
 import { getUserProfile, updateUserInterests } from '../services/users.service'
+import { getPersistedBadges, persistEarnedBadges } from '../services/userBadges.service'
 
 function StatusBadge({ status }) {
   const styles = {
@@ -84,7 +87,7 @@ function LoginPrompt() {
 }
 
 export default function ProfilePage() {
-  const { user, logout, loading: authLoading } = useAuth()
+  const { user, logout, loading: authLoading, isOAuth, grandfatheredUnverified } = useAuth()
   const { favorites = [] } = useFavorites()
   const { t } = useLanguage()
   
@@ -102,6 +105,7 @@ export default function ProfilePage() {
 
   const [profileInterests, setProfileInterests] = useState([])
   const [showInterestModal, setShowInterestModal] = useState(false)
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false)
   const [profileData, setProfileData] = useState(null)
   const [season, setSeason] = useState(null)
   const [seasonStats, setSeasonStats] = useState({
@@ -196,9 +200,21 @@ export default function ProfilePage() {
             reviewsCount: stats?.approvedReviewsCount || 0,
             favoritesCount: favorites?.length || 0
           })
-          
-          setEarnedBadges(earned || [])
+
+          const persistedBadgeIds = await getPersistedBadges(user.uid, seasonId)
+          const computedIds = new Set(earned.map(b => b.id))
+          const persistedSet = new Set(persistedBadgeIds || [])
+          const allEarnedIds = new Set([...computedIds, ...persistedSet])
+          const mergedEarned = allEarnedIds.size > 0
+            ? Array.from(allEarnedIds).map(id => BADGE_CATALOG.find(b => b.id === id)).filter(Boolean)
+            : earned
+
+          setEarnedBadges(mergedEarned)
           setBadgeProgress(progress || {})
+
+          if (allEarnedIds.size > (persistedBadgeIds?.length || 0)) {
+            persistEarnedBadges(user.uid, seasonId, Array.from(allEarnedIds))
+          }
 
           const userSeasonStats = await getUserSeasonStats(user.uid, seasonId)
           if (mounted && userSeasonStats) {
@@ -293,8 +309,19 @@ export default function ProfilePage() {
                 <p className="text-sm font-semibold text-gray-900 break-words">{user.email}</p>
                 <p className="text-xs text-gray-500 mt-0.5">Member since {memberSince}</p>
               </div>
+              {!isOAuth && (
+                <button
+                  type="button"
+                  onClick={() => setShowChangePasswordModal(true)}
+                  className="shrink-0 px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                >
+                  Change Password
+                </button>
+              )}
             </div>
           </div>
+
+          {grandfatheredUnverified && <div className="mb-6"><EmailVerificationBanner /></div>}
 
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
             <div className="flex items-center justify-between mb-3">
@@ -331,6 +358,11 @@ export default function ProfilePage() {
             onSkip={() => setShowInterestModal(false)}
             initialSelected={profileInterests}
             showSkip={true}
+          />
+
+          <ChangePasswordModal
+            isOpen={showChangePasswordModal}
+            onClose={() => setShowChangePasswordModal(false)}
           />
 
           <div className="flex gap-2 mb-6 overflow-x-auto">

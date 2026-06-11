@@ -3,20 +3,33 @@ import { useAuth } from '../../contexts/AuthContext'
 import { INTEREST_TAGS } from '../../constants/interests'
 import { updateUserInterests, markInterestsSkipped } from '../../services/users.service'
 import { showToast } from '../../utils/toast'
+import { auth } from '../../lib/firebase'
 
 const STEPS = { ACCOUNT: 1, VERIFY: 2, INTERESTS: 3 }
 
 export default function SignupWizard({ onComplete, onSwitchToLogin, onStepChange }) {
   const { user, emailVerified, signUp, signInWithGoogle, resendVerificationEmail, refreshUser, logout } = useAuth()
 
-  const isOAuthUser = user?.providerData?.some(
-    p => p.providerId === 'google.com' || p.providerId === 'facebook.com'
-  )
-
   const [step, setStep] = useState(() => {
-    if (isOAuthUser) return STEPS.INTERESTS
     const saved = localStorage.getItem('smartdcabiao:signup_wizard_step')
-    return saved ? parseInt(saved, 10) : STEPS.ACCOUNT
+    if (saved) {
+      const parsed = parseInt(saved, 10)
+      if ([STEPS.ACCOUNT, STEPS.VERIFY, STEPS.INTERESTS].includes(parsed)) {
+        return parsed
+      }
+    }
+
+    const currentUser = auth.currentUser
+    if (currentUser) {
+      const isOAuth = currentUser.providerData?.some(
+        p => p.providerId === 'google.com' || p.providerId === 'facebook.com'
+      )
+      if (isOAuth) return STEPS.INTERESTS
+      if (!currentUser.emailVerified) return STEPS.VERIFY
+      return STEPS.INTERESTS
+    }
+
+    return STEPS.ACCOUNT
   })
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -244,6 +257,24 @@ export default function SignupWizard({ onComplete, onSwitchToLogin, onStepChange
             Log in
           </button>
         </p>
+
+        {auth.currentUser && (
+          <div className="mt-6 pt-4 border-t border-amber-200 bg-amber-50 -mx-6 -mb-6 px-6 py-4 rounded-b-xl">
+            <p className="text-sm text-amber-900 mb-2">
+              <strong>You're signed in as:</strong> {auth.currentUser.email}
+            </p>
+            <p className="text-xs text-amber-800 mb-3">
+              You shouldn't be seeing this step. Click below to sign out and start fresh.
+            </p>
+            <button
+              type="button"
+              onClick={handleUseDifferentEmail}
+              className="text-sm text-amber-900 underline hover:text-amber-700"
+            >
+              Sign out and use a different email
+            </button>
+          </div>
+        )}
       </div>
     )
   }
@@ -374,6 +405,22 @@ export default function SignupWizard({ onComplete, onSwitchToLogin, onStepChange
             {loading ? 'Saving...' : 'Save & Continue'}
           </button>
         </div>
+
+        {user && (
+          <div className="mt-4 pt-4 border-t border-gray-200 text-center">
+            <button
+              type="button"
+              onClick={async () => {
+                if (confirm('Sign out and abandon signup?')) {
+                  await handleUseDifferentEmail()
+                }
+              }}
+              className="text-xs text-gray-500 hover:text-gray-700 underline"
+            >
+              Sign out
+            </button>
+          </div>
+        )}
       </div>
     )
   }

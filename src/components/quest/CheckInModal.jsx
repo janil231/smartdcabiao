@@ -4,6 +4,7 @@ import { collection, query, where, getDocs, orderBy } from 'firebase/firestore'
 import { db } from '../../lib/firebase'
 import { adminMarkCompleted } from '../../services/participations.service'
 import { useAuth } from '../../contexts/AuthContext'
+import { formatDateTime } from '../../utils/dateHelpers'
 
 export default function CheckInModal({ quest, onClose, onSuccess }) {
   const { user } = useAuth()
@@ -125,7 +126,7 @@ export default function CheckInModal({ quest, onClose, onSuccess }) {
                     </p>
                     <p className="text-xs text-gray-500 truncate">{p.userEmail || p.uid}</p>
                     <p className="text-xs text-gray-400 mt-0.5">
-                      Joined: {p.joinedAt?.toDate?.().toLocaleString() || '—'}
+                      Joined: {formatDateTime(p.joinedAt)}
                     </p>
                   </div>
 
