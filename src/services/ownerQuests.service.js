@@ -627,17 +627,41 @@ export async function rotateBuyQuestDailyCode(questId, ownerUid) {
   return code
 }
 
-export async function verifyBuyQuestByQR(uid, questId, scannedToken, userLocation) {
-  if (!uid || !questId) throw new Error('Missing uid or questId')
-  if (!scannedToken) throw new Error('QR code is required')
+export async function verifyBuyQuestByQR(uid, scannedPayload, userLocation) {
+  if (!uid) throw new Error('User not signed in')
+  if (!scannedPayload) throw new Error('No QR data received')
   if (!userLocation?.lat || !userLocation?.lng) throw new Error('Location access required for verification')
+
+  let questId = null
+  let qrToken = null
+
+  if (typeof scannedPayload === 'string' && scannedPayload.startsWith('BQ:')) {
+    const parts = scannedPayload.split(':')
+    if (parts.length >= 3) {
+      questId = parts[1]
+      qrToken = parts.slice(2).join(':')
+    }
+  }
+
+  if (!questId || !qrToken) {
+    try {
+      const parsed = JSON.parse(scannedPayload)
+      questId = parsed.questId
+      qrToken = parsed.qrToken
+    } catch (e) {
+    }
+  }
+
+  if (!questId || !qrToken) {
+    throw new Error('QR code format not recognized. Please use the merchant code instead.')
+  }
 
   const quest = await getOwnerQuestById(questId)
   if (!quest) throw new Error('Quest not found')
   if (quest.questType !== 'buy') throw new Error('This is not a buy quest')
   if (quest.buyVerificationMethod !== 'qr') throw new Error('This quest does not use QR verification')
   if (!quest.isActive) throw new Error('Quest is not active')
-  if (quest.qrToken !== scannedToken) throw new Error('QR code doesn\'t match this quest')
+  if (quest.qrToken !== qrToken) throw new Error('QR code doesn\'t match this quest')
 
   const bizPos = quest.businessId ? await getBusinessPosition(quest.businessId) : null
   if (bizPos) {

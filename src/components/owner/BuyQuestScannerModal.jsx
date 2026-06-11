@@ -49,7 +49,7 @@ export default function BuyQuestScannerModal({ quest, business, user, userLocati
     await safeStop()
 
     try {
-      await verifyBuyQuestByQR(user.uid, quest.id, decodedText, userLocation)
+      await verifyBuyQuestByQR(user.uid, decodedText, userLocation)
       onSuccess?.()
       onClose()
     } catch (err) {
