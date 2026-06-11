@@ -20,6 +20,8 @@ import {
 import BuyQuestQRDisplayModal from '../components/owner/BuyQuestQRDisplayModal'
 import BuyQuestParticipantsModal from '../components/owner/BuyQuestParticipantsModal'
 import { getBusinessRewardsForOwner, markRewardAsUsed } from '../services/businessQuestRewards.service'
+import RedeemRewardModal from '../components/owner/RedeemRewardModal'
+import RedemptionHistorySection from '../components/owner/RedemptionHistorySection'
 import { formatRewardLabel } from '../utils/rewardFormat'
 import QuestDetailsPanel from '../components/owner/QuestDetailsPanel'
 
@@ -38,6 +40,7 @@ export default function MyBusinessQuestsPage() {
   const [toast, setToast] = useState(null)
   const [displayQRQuest, setDisplayQRQuest] = useState(null)
   const [participantsQuest, setParticipantsQuest] = useState(null)
+  const [showRedeemModal, setShowRedeemModal] = useState(false)
 
   const showToast = useCallback((message) => {
     setToast(message)
@@ -242,6 +245,18 @@ export default function MyBusinessQuestsPage() {
             </div>
           )}
 
+          <div className="mb-6">
+            <button
+              onClick={() => setShowRedeemModal(true)}
+              className="w-full sm:w-auto bg-amber-500 hover:bg-amber-600 text-white rounded-lg px-6 py-3 font-semibold inline-flex items-center gap-2 shadow-sm"
+            >
+              🎟️ Redeem Customer Reward
+            </button>
+            <p className="text-xs text-gray-500 mt-2">
+              Customer at the counter? Enter their reward code here to mark it as claimed.
+            </p>
+          </div>
+
           {quests.length === 0 && !showForm ? (
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
               <div className="w-16 h-16 mx-auto bg-gray-100 rounded-full flex items-center justify-center mb-4">
@@ -393,10 +408,22 @@ export default function MyBusinessQuestsPage() {
                   </div>
                 </div>
               )}
+
+              <RedemptionHistorySection businessId={businessId} />
             </>
           )}
         </div>
       </main>
+
+      {showRedeemModal && (
+        <RedeemRewardModal
+          isOpen={showRedeemModal}
+          onClose={() => setShowRedeemModal(false)}
+          businessId={businessId}
+          businessName={business?.name}
+          onRedeemed={() => {}}
+        />
+      )}
 
       {displayQRQuest && (
         <BuyQuestQRDisplayModal

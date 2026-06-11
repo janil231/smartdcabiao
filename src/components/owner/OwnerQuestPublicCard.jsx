@@ -11,6 +11,7 @@ import {
 } from '../../services/ownerQuests.service'
 import { getMyBusinessQuestRewards } from '../../services/businessQuestRewards.service'
 import { formatRewardLabel } from '../../utils/rewardFormat'
+import { formatDate } from '../../utils/dateHelpers'
 import BuyQuestScannerModal from './BuyQuestScannerModal'
 import BuyQuestCodeModal from './BuyQuestCodeModal'
 import QuestDetailsPanel from './QuestDetailsPanel'
@@ -38,6 +39,12 @@ function formatDistance(m) {
   if (m === null) return null
   if (m < 1000) return `${Math.round(m)}m away`
   return `${(m / 1000).toFixed(1)}km away`
+}
+
+function isExpired(expiresAt) {
+  if (!expiresAt) return false
+  const expiresMs = expiresAt?.toMillis?.() || 0
+  return expiresMs > 0 && Date.now() > expiresMs
 }
 
 function getQuestSteps(quest) {
@@ -554,18 +561,45 @@ export default function OwnerQuestPublicCard({ quest, business, currentUser, onP
           </div>
           {reward?.code && (
             <>
-              <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-3 mb-2 text-center">
-                <div className="text-xs font-bold text-gray-500 uppercase mb-1">Reward Code</div>
-                <div className="font-mono font-bold text-base text-gray-900 tracking-wider mb-2">
-                  {reward.code}
+              {reward.status === 'used' ? (
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-2">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-xl">✓</span>
+                    <span className="font-semibold text-gray-700">Redeemed</span>
+                  </div>
+                  <p className="text-sm text-gray-600">
+                    Claimed on {formatDate(reward.usedAt)}
+                  </p>
+                  <p className="text-xs font-mono text-gray-500 mt-2 line-through">{reward.code}</p>
                 </div>
-                <button
-                  onClick={handleCopyCode}
-                  className="text-xs bg-emerald-600 text-white px-3 py-1 rounded-md hover:bg-emerald-700"
-                >
-                  Copy Code
-                </button>
-              </div>
+              ) : isExpired(reward.expiresAt) ? (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-2">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-xl">⏰</span>
+                    <span className="font-semibold text-red-900">Expired</span>
+                  </div>
+                  <p className="text-sm text-red-800">
+                    This reward expired on {formatDate(reward.expiresAt)}.
+                  </p>
+                  <p className="text-xs font-mono text-red-700 mt-2 line-through">{reward.code}</p>
+                </div>
+              ) : (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 mb-2">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-xl">🎁</span>
+                    <span className="font-semibold text-emerald-900">Ready to Redeem</span>
+                  </div>
+                  <p className="text-sm text-emerald-800 mb-2">
+                    Show this code at the counter:
+                  </p>
+                  <p className="text-2xl font-bold font-mono tracking-widest text-emerald-900 text-center bg-white rounded-lg py-2 border-2 border-emerald-300">
+                    {reward.code}
+                  </p>
+                  <p className="text-xs text-emerald-700 mt-2 text-center">
+                    Expires {formatDate(reward.expiresAt)}
+                  </p>
+                </div>
+              )}
               {business?.name && (
                 <p className="text-xs text-gray-600 text-center mb-3">
                   Show this to staff at <strong>{business.name}</strong> to redeem

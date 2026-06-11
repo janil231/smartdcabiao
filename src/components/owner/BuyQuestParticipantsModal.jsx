@@ -1,7 +1,57 @@
 import { useEffect, useState } from 'react'
+import { doc, getDoc } from 'firebase/firestore'
+import { db } from '../../lib/firebase'
 import { getQuestParticipationsForMerchant, merchantMarkParticipationComplete } from '../../services/ownerQuests.service'
+import { markRewardRedeemed } from '../../services/businessQuestRewards.service'
+import { useAuth } from '../../contexts/AuthContext'
+import { formatDate } from '../../utils/dateHelpers'
+
+function ParticipantRewardStatus({ rewardCodeId, onRedeemClick }) {
+  const [reward, setReward] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (!rewardCodeId) { setLoading(false); return }
+    let cancelled = false
+    getDoc(doc(db, 'businessQuestRewards', String(rewardCodeId)))
+      .then(snap => {
+        if (!cancelled) {
+          setReward(snap.exists() ? { id: snap.id, ...snap.data() } : null)
+          setLoading(false)
+        }
+      })
+      .catch(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [rewardCodeId])
+
+  if (loading) return <span className="text-xs text-gray-400">…</span>
+  if (!reward) return <span className="text-xs text-gray-400">No reward</span>
+
+  if (reward.status === 'used') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs bg-emerald-100 text-emerald-800 px-2 py-1 rounded-full whitespace-nowrap">
+        ✓ Redeemed {formatDate(reward.usedAt)}
+      </span>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className="inline-flex items-center gap-1 text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded-full font-mono whitespace-nowrap">
+        {reward.code}
+      </span>
+      <button
+        onClick={() => onRedeemClick(reward)}
+        className="text-xs text-emerald-700 hover:text-emerald-800 font-medium underline whitespace-nowrap"
+      >
+        Mark Redeemed
+      </button>
+    </div>
+  )
+}
 
 export default function BuyQuestParticipantsModal({ quest, merchantUid, onClose }) {
+  const { user } = useAuth()
   const [participations, setParticipations] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('pending')
@@ -44,6 +94,16 @@ export default function BuyQuestParticipantsModal({ quest, merchantUid, onClose 
       showToast(err.message || 'Failed to complete')
     } finally {
       setConfirming(false)
+    }
+  }
+
+  const handleMarkRedeemed = async (reward) => {
+    if (!confirm(`Mark reward ${reward.code} as redeemed for ${reward.userEmail || 'this customer'}?`)) return
+    try {
+      await markRewardRedeemed(reward.id, user.uid, user.email)
+      showToast('Reward marked as redeemed')
+    } catch (err) {
+      showToast(err.message || 'Failed to mark redeemed')
     }
   }
 
@@ -123,9 +183,10 @@ export default function BuyQuestParticipantsModal({ quest, merchantUid, onClose 
                     </p>
                   </div>
                   {p.status === 'completed' ? (
-                    <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full">
-                      Completed
-                    </span>
+                    <ParticipantRewardStatus
+                      rewardCodeId={p.rewardCodeId}
+                      onRedeemClick={handleMarkRedeemed}
+                    />
                   ) : confirmId === p.id ? (
                     <div className="flex gap-1">
                       <button

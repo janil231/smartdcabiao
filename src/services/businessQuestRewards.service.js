@@ -1,6 +1,6 @@
 import {
   collection, doc, getDoc, getDocs, query, where, orderBy,
-  serverTimestamp, addDoc, updateDoc
+  serverTimestamp, Timestamp, addDoc, updateDoc, limit
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { sanitizeForFirestore } from '../utils/firestoreSanitize'
@@ -35,8 +35,10 @@ function normalizeReward(docSnap) {
     code: data.code || '',
     status: data.status || 'unused',
     completedAt: data.completedAt || null,
+    expiresAt: data.expiresAt || null,
     usedAt: data.usedAt || null,
     usedByOwnerUid: data.usedByOwnerUid || null,
+    usedByMerchantEmail: data.usedByMerchantEmail || null,
   }
 }
 
@@ -73,12 +75,133 @@ export async function createBusinessQuestReward(uid, userEmail, quest, participa
     code,
     status: 'unused',
     completedAt: serverTimestamp(),
+    expiresAt: Timestamp.fromDate(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)),
     usedAt: null,
     usedByOwnerUid: null,
+    usedByMerchantEmail: null,
   })
 
   const docRef = await addDoc(collection(db, REWARDS_COLLECTION), rewardData)
   return { id: docRef.id, ...rewardData }
+}
+
+export async function findRewardByCode(code, merchantBusinessId) {
+  if (!code || !merchantBusinessId) {
+    return { found: false, reason: 'Missing code or business ID' }
+  }
+
+  const normalized = String(code).trim().toUpperCase()
+
+  const q = query(
+    collection(db, REWARDS_COLLECTION),
+    where('code', '==', normalized),
+    limit(1)
+  )
+  const snap = await getDocs(q)
+
+  if (snap.empty) {
+    return { found: false, reason: 'Reward code not found' }
+  }
+
+  const docSnap = snap.docs[0]
+  const reward = { id: docSnap.id, ...docSnap.data() }
+
+  if (String(reward.businessId) !== String(merchantBusinessId)) {
+    return { found: false, reason: 'This reward belongs to a different business' }
+  }
+
+  if (reward.status === 'used') {
+    return {
+      found: true,
+      valid: false,
+      reason: 'This reward was already redeemed',
+      reward,
+    }
+  }
+
+  const now = Date.now()
+  const expiresMs = reward.expiresAt?.toMillis?.() || 0
+  if (expiresMs > 0 && now > expiresMs) {
+    return {
+      found: true,
+      valid: false,
+      reason: 'This reward has expired',
+      reward,
+    }
+  }
+
+  return { found: true, valid: true, reward }
+}
+
+export async function markRewardRedeemed(rewardId, merchantUid, merchantEmail) {
+  if (!rewardId || !merchantUid) throw new Error('rewardId and merchantUid required')
+
+  const ref = doc(db, REWARDS_COLLECTION, String(rewardId))
+  const snap = await getDoc(ref)
+
+  if (!snap.exists()) throw new Error('Reward not found')
+
+  const data = snap.data()
+
+  if (data.status === 'used') {
+    throw new Error('Reward was already redeemed')
+  }
+
+  const now = Date.now()
+  const expiresMs = data.expiresAt?.toMillis?.() || 0
+  if (expiresMs > 0 && now > expiresMs) {
+    throw new Error('Reward has expired')
+  }
+
+  await updateDoc(ref, sanitizeForFirestore({
+    status: 'used',
+    usedAt: serverTimestamp(),
+    usedByOwnerUid: String(merchantUid),
+    usedByMerchantEmail: merchantEmail || null,
+  }))
+
+  const { logAudit } = await import('./audit.service')
+  try {
+    await logAudit({
+      action: 'redeem_business_quest_reward',
+      targetType: REWARDS_COLLECTION,
+      targetId: rewardId,
+      meta: {
+        rewardCode: data.code,
+        customerUid: data.uid,
+        merchantUid,
+      },
+    })
+  } catch (err) {
+    console.warn('logAudit failed:', err)
+  }
+
+  return { success: true }
+}
+
+export async function listBusinessRewards(businessId) {
+  if (!businessId) return []
+
+  const q = query(
+    collection(db, REWARDS_COLLECTION),
+    where('businessId', '==', String(businessId)),
+    orderBy('completedAt', 'desc')
+  )
+
+  const snap = await getDocs(q)
+  return snap.docs.map(normalizeReward)
+}
+
+export async function listRewardsForCustomer(customerUid) {
+  if (!customerUid) return []
+
+  const q = query(
+    collection(db, REWARDS_COLLECTION),
+    where('uid', '==', String(customerUid)),
+    orderBy('completedAt', 'desc')
+  )
+  const snap = await getDocs(q)
+  return snap.docs.map(normalizeReward)
 }
 
 export async function getMyBusinessQuestRewards(uid) {

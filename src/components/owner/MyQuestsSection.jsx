@@ -4,6 +4,7 @@ import { collection, getDocs, query, where, limit } from 'firebase/firestore'
 import { db } from '../../lib/firebase'
 import { getMyBusinessQuestRewards } from '../../services/businessQuestRewards.service'
 import { formatRewardLabel } from '../../utils/rewardFormat'
+import { formatDate } from '../../utils/dateHelpers'
 import QuestDetailsPanel from './QuestDetailsPanel'
 
 export default function MyQuestsSection({ user }) {
@@ -210,6 +211,12 @@ export default function MyQuestsSection({ user }) {
   )
 }
 
+function isExpired(expiresAt) {
+  if (!expiresAt) return false
+  const expiresMs = expiresAt?.toMillis?.() || 0
+  return expiresMs > 0 && Date.now() > expiresMs
+}
+
 function MyQuestRow({ participation, quest, business, reward }) {
   if (!quest || !business) return null
 
@@ -251,14 +258,49 @@ function MyQuestRow({ participation, quest, business, reward }) {
       </div>
 
       {reward?.code && (
-        <div className="flex items-center gap-2 mb-3 p-2 bg-amber-50 rounded-lg">
-          <div className="font-mono text-sm font-bold text-amber-900 flex-1">{reward.code}</div>
-          <button
-            onClick={handleCopy}
-            className="text-xs bg-emerald-600 text-white px-2 py-1 rounded hover:bg-emerald-700"
-          >
-            Copy
-          </button>
+        <div className={`mb-3 p-3 rounded-lg ${
+          reward.status === 'used'
+            ? 'bg-gray-50 border border-gray-200'
+            : isExpired(reward.expiresAt)
+              ? 'bg-red-50 border border-red-200'
+              : 'bg-emerald-50 border border-emerald-200'
+        }`}>
+          {reward.status === 'used' ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm">✓</span>
+              <div className="flex-1">
+                <span className="text-sm font-semibold text-gray-700">Redeemed</span>
+                <p className="text-xs text-gray-500">{formatDate(reward.usedAt)}</p>
+              </div>
+              <p className="text-xs font-mono text-gray-500 line-through">{reward.code}</p>
+            </div>
+          ) : isExpired(reward.expiresAt) ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm">⏰</span>
+              <div className="flex-1">
+                <span className="text-sm font-semibold text-red-900">Expired</span>
+                <p className="text-xs text-red-700">{formatDate(reward.expiresAt)}</p>
+              </div>
+              <p className="text-xs font-mono text-red-700 line-through">{reward.code}</p>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="text-sm">🎁</span>
+              <div className="flex-1">
+                <span className="text-sm font-semibold text-emerald-900">Ready</span>
+                <p className="text-xs text-emerald-700">Expires {formatDate(reward.expiresAt)}</p>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="font-mono text-sm font-bold text-emerald-900">{reward.code}</span>
+                <button
+                  onClick={handleCopy}
+                  className="text-xs bg-emerald-600 text-white px-2 py-1 rounded hover:bg-emerald-700"
+                >
+                  Copy
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
