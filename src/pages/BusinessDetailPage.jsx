@@ -18,6 +18,7 @@ import { getBusinessImages } from '../utils/placeImages'
 import { getBusinessById } from '../services/businesses.service'
 import { listApprovedReviews, getMyReview } from '../services/reviews.service'
 import { listOwnerQuestsForBusiness } from '../services/ownerQuests.service'
+import { getActiveSeason } from '../services/seasons.service'
 import { BUSINESS_TYPES } from '../data'
 import 'leaflet/dist/leaflet.css'
 
@@ -111,6 +112,11 @@ export default function BusinessDetailPage() {
     async function loadQuests() {
       setOwnerQuestsLoading(true)
       try {
+        const activeSeason = await getActiveSeason()
+        if (!activeSeason) {
+          if (mounted) setOwnerQuests([])
+          return
+        }
         const quests = await listOwnerQuestsForBusiness(business.id)
         if (mounted) setOwnerQuests(quests)
       } catch {
