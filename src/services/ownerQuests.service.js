@@ -5,6 +5,7 @@ import {
 import { db, auth } from '../lib/firebase'
 import { sanitizeForFirestore } from '../utils/firestoreSanitize'
 import { generateBusinessRewardCode } from '../utils/voucherCode'
+import { getActiveSeason } from './seasons.service'
 import { createBusinessQuestReward } from './businessQuestRewards.service'
 import { logAudit } from './audit.service'
 import { bumpDataVersion } from './appMeta.service'
@@ -201,6 +202,9 @@ export async function getOwnerQuestById(questId) {
 export async function createOwnerQuest(ownerUid, businessId, businessName, data) {
   if (!businessId) throw new Error('Missing businessId')
   if (!data.title) throw new Error('Title is required')
+
+  const activeSeason = await getActiveSeason()
+  if (!activeSeason) throw new Error('Cannot create a quest: no active tourism season. Quests are only available during an active season.')
 
   const user = auth.currentUser
   if (!user) throw new Error('Must be signed in to create a quest')
