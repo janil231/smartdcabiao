@@ -16,7 +16,7 @@ import {
 import { db } from '../lib/firebase'
 import { logAudit } from './audit.service'
 import { getQuestSlotInfo } from '../utils/questSlots'
-import { getActiveSeason } from './seasons.service'
+import { getActiveSeason, getSeasonById } from './seasons.service'
 import { listBusinesses } from './businesses.service'
 import { listDestinations } from './destinations.service'
 import { bumpDataVersion } from './appMeta.service'
@@ -149,7 +149,18 @@ export async function createQuest(
   if (capacityNum < 1) {
     throw new Error('Capacity must be at least 1')
   }
-  
+
+  if (endAt && seasonId) {
+    const season = await getSeasonById(seasonId)
+    if (season && season.endAt) {
+      const questEnd = typeof endAt === 'string' ? new Date(endAt) : (endAt.toDate ? endAt.toDate() : new Date(endAt))
+      const seasonEnd = season.endAt.toDate ? season.endAt.toDate() : new Date(season.endAt)
+      if (questEnd > seasonEnd) {
+        throw new Error(`Quest deadline cannot be after the season end date`)
+      }
+    }
+  }
+
   const questId = `quest_${Date.now()}`
 
   const verificationFields = buildQuestVerificationFields(questId, {

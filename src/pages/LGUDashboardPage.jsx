@@ -774,7 +774,8 @@ function SeasonFormModal({ onClose, onSubmit, isLoading }) {
   )
 }
 
-function QuestFormModal({ quest, onClose, onSubmit, isLoading }) {
+function QuestFormModal({ quest, onClose, onSubmit, isLoading, seasonEndAt }) {
+  const seasonMaxDate = seasonEndAt ? (seasonEndAt.toDate ? seasonEndAt.toDate().toISOString().split('T')[0] : new Date(seasonEndAt).toISOString().split('T')[0]) : ''
   const [form, setForm] = useState({
     title: quest?.title || '',
     category: quest?.category || 'eco_challenge',
@@ -881,8 +882,12 @@ function QuestFormModal({ quest, onClose, onSubmit, isLoading }) {
               type="date"
               value={form.deadline}
               onChange={(e) => setForm({ ...form, deadline: e.target.value })}
+              max={seasonMaxDate}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
+            {seasonMaxDate && (
+              <p className="text-xs text-gray-500 mt-1">Must be on or before season end ({seasonMaxDate})</p>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Verification Method</label>
@@ -2577,6 +2582,13 @@ export default function LGUDashboardPage() {
       if (!seasonId) {
         throw new Error('No active season selected')
       }
+      if (formData.deadline && activeSeason?.endAt) {
+        const deadlineDate = new Date(formData.deadline)
+        const seasonEnd = activeSeason.endAt.toDate ? activeSeason.endAt.toDate() : new Date(activeSeason.endAt)
+        if (deadlineDate > seasonEnd) {
+          throw new Error(`Quest deadline cannot be after the season end date (${seasonEnd.toLocaleDateString()})`)
+        }
+      }
       await createQuest({ ...formData, seasonId }, { uid: user.uid, email: user.email })
       showToast('Quest created successfully!')
       setShowQuestModal(false)
@@ -4112,6 +4124,7 @@ export default function LGUDashboardPage() {
           onClose={() => setShowQuestModal(false)}
           onSubmit={handleCreateQuest}
           isLoading={actionLoading}
+          seasonEndAt={activeSeason?.endAt}
         />
       )}
 
@@ -4121,6 +4134,7 @@ export default function LGUDashboardPage() {
           onClose={() => setSelectedQuest(null)}
           onSubmit={(data) => handleUpdateQuest(selectedQuest.id, data)}
           isLoading={actionLoading}
+          seasonEndAt={activeSeason?.endAt}
         />
       )}
 
