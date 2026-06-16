@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { createReport } from '../services/reports.service'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -27,6 +28,19 @@ export default function ReportIssueModal({
     'Location coordinates are wrong',
     'Other issue'
   ]
+
+  useEffect(() => {
+    if (!isOpen) return
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = '' }
+  }, [isOpen])
+
+  useEffect(() => {
+    if (!isOpen) return
+    const handleEsc = (e) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', handleEsc)
+    return () => document.removeEventListener('keydown', handleEsc)
+  }, [isOpen, onClose])
 
   const validateForm = () => {
     const newErrors = {}
@@ -118,12 +132,12 @@ export default function ReportIssueModal({
 
   if (!isOpen) return null
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 overflow-y-auto">
       <div className="flex min-h-full items-center justify-center p-4">
-        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={handleClose} />
+        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={(e) => { if (e.target === e.currentTarget) handleClose() }} />
         
-        <div className="relative bg-white rounded-xl shadow-xl max-w-lg w-full p-6">
+        <div className="relative bg-white rounded-xl shadow-xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
           {/* Modal Header */}
           <div className="flex items-start justify-between mb-4">
             <div>
@@ -259,6 +273,7 @@ export default function ReportIssueModal({
           </form>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

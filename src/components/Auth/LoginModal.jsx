@@ -257,9 +257,9 @@ export default function LoginModal({ isOpen, onClose, initialMode = 'login' }) {
   )
 
   const modal = (
-    <div className="fixed inset-0 z-[100] flex items-stretch sm:items-center justify-center p-0 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="login-modal-title">
-      <div className="absolute inset-0 bg-black/50" onClick={isWizardLocked ? undefined : handleClose} aria-hidden />
-      <div className="relative z-10 w-full h-full sm:h-auto sm:max-w-md bg-white sm:rounded-2xl p-6 sm:shadow-xl overflow-y-auto pb-[env(safe-area-inset-bottom)]">
+    <div className="fixed inset-0 z-[100] flex items-stretch sm:items-center justify-center p-0 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="login-modal-title" onClick={(e) => { if (e.target === e.currentTarget && !isWizardLocked) handleClose() }}>
+      <div className="absolute inset-0 bg-black/50" aria-hidden />
+      <div className="relative z-10 w-full h-full sm:h-auto sm:max-w-md bg-white sm:rounded-2xl p-6 sm:shadow-xl max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)]">
         {mode === 'signup-wizard' ? (
           <div className="pb-2">
             {!isWizardLocked && (

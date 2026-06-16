@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { findRewardByCode, markRewardRedeemed } from '../../services/businessQuestRewards.service'
 import { useAuth } from '../../contexts/AuthContext'
 import { formatDate } from '../../utils/dateHelpers'
@@ -80,7 +81,7 @@ export default function RedeemRewardModal({ isOpen, onClose, businessId, busines
     }
   }
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
@@ -231,6 +232,7 @@ export default function RedeemRewardModal({ isOpen, onClose, businessId, busines
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

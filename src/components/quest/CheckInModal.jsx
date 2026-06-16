@@ -80,9 +80,9 @@ export default function CheckInModal({ quest, onClose, onSuccess }) {
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4">
-      <div className="fixed inset-0 bg-black/60" onClick={onClose} />
+      <div className="fixed inset-0 bg-black/60" onClick={(e) => { if (e.target === e.currentTarget) onClose() }} />
 
-      <div className="relative w-full h-full sm:h-auto sm:max-w-2xl sm:max-h-[85vh] bg-white sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+      <div className="relative w-full h-full sm:h-auto sm:max-w-2xl sm:max-h-[85vh] max-h-[90vh] bg-white sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden">
         <div className="shrink-0 bg-gradient-to-r from-emerald-600 to-emerald-500 px-5 py-4 flex items-start justify-between">
           <div>
             <h3 className="text-white font-bold text-lg">✅ Check In Participants</h3>

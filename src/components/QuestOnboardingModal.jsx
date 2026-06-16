@@ -1,3 +1,5 @@
+import { useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { getQuestSlotInfo } from '../utils/questSlots'
 
@@ -64,6 +66,19 @@ export default function QuestOnboardingModal({
   onJoinQuest,
   onViewAllQuests 
 }) {
+  useEffect(() => {
+    if (!isOpen) return
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = '' }
+  }, [isOpen])
+
+  useEffect(() => {
+    if (!isOpen) return
+    const handleEsc = (e) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', handleEsc)
+    return () => document.removeEventListener('keydown', handleEsc)
+  }, [isOpen, onClose])
+
   if (!isOpen) return null
 
   const steps = [
@@ -72,9 +87,9 @@ export default function QuestOnboardingModal({
     'Earn points → Redeem vouchers → Support sustainable tourism'
   ]
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60" onClick={onClose}></div>
+      <div className="absolute inset-0 bg-black/60" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}></div>
       
       <div className="relative bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl">
         <div className="p-6">
@@ -135,6 +150,7 @@ export default function QuestOnboardingModal({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

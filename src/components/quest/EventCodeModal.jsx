@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { verifyQuestByCode } from '../../services/questVerification.service'
 import { uploadToCloudinary } from '../../utils/cloudinary'
 import { compressImage } from '../../utils/compressImage'
@@ -11,6 +12,19 @@ export default function EventCodeModal({ isOpen, onClose, quest, onSuccess }) {
   const [photoPreview, setPhotoPreview] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!isOpen) return
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = '' }
+  }, [isOpen])
+
+  useEffect(() => {
+    if (!isOpen) return
+    const handler = (e) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [isOpen, onClose])
 
   if (!isOpen || !quest) return null
 
@@ -70,9 +84,12 @@ export default function EventCodeModal({ isOpen, onClose, quest, onSuccess }) {
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-0 sm:p-4">
-      <div className="w-full h-full sm:h-auto sm:max-w-md bg-white sm:rounded-2xl overflow-y-auto flex flex-col max-h-[100dvh]">
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-0 sm:p-4"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="w-full h-full sm:h-auto sm:max-w-md bg-white sm:rounded-2xl overflow-y-auto flex flex-col max-h-[90vh]">
         <div className="flex items-center justify-between p-4 border-b sticky top-0 bg-white z-10">
           <h3 className="font-semibold">🔢 Enter Event Code</h3>
           <button type="button" onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
@@ -142,6 +159,7 @@ export default function EventCodeModal({ isOpen, onClose, quest, onSuccess }) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

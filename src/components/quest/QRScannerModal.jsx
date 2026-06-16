@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Html5Qrcode } from 'html5-qrcode'
 import { verifyQuestByQR } from '../../services/questVerification.service'
 import { useAuth } from '../../contexts/AuthContext'
@@ -134,11 +135,27 @@ export default function QRScannerModal({ isOpen, onClose, onSuccess }) {
     }
   }, [isOpen, user?.uid])
 
+  useEffect(() => {
+    if (!isOpen) return
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = '' }
+  }, [isOpen])
+
+  useEffect(() => {
+    if (!isOpen) return
+    const handler = (e) => { if (e.key === 'Escape') handleClose() }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [isOpen, handleClose])
+
   if (!isOpen) return null
 
-  return (
-    <div className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-0 sm:p-4">
-      <div className="w-full h-full sm:h-auto sm:max-w-md bg-white sm:rounded-2xl overflow-hidden flex flex-col">
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-0 sm:p-4"
+      onClick={(e) => e.target === e.currentTarget && handleClose()}
+    >
+      <div className="w-full h-full sm:h-auto sm:max-w-md bg-white sm:rounded-2xl overflow-y-auto flex flex-col max-h-[90vh]">
         <div className="flex items-center justify-between p-4 border-b">
           <h3 className="font-semibold">📱 Scan QR Code</h3>
           <button type="button" onClick={handleClose} className="p-2 hover:bg-gray-100 rounded-lg">
@@ -188,6 +205,7 @@ export default function QRScannerModal({ isOpen, onClose, onSuccess }) {
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

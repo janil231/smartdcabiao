@@ -17,6 +17,7 @@ import { auth } from '../lib/firebase'
 import { sanitizeForFirestore } from '../utils/firestoreSanitize'
 import { logAudit } from './audit.service'
 import { pauseAllOwnerQuestsForSeasonEnd } from './ownerQuests.service'
+import { listSeasonImpact, sumImpactByUnit } from './impactLedger.service'
 
 const SEASONS_COLLECTION = 'seasons'
 
@@ -467,4 +468,42 @@ export async function autoEndStaleSeasons() {
     }
   }
   return endedSeasons;
+}
+
+export async function getLastEndedSeason() {
+  const seasons = await listSeasons()
+  const ended = seasons
+    .filter(s => {
+      const status = getSeasonStatus(s)
+      return status === 'ended'
+    })
+    .sort((a, b) => {
+      const aEnd = toJSDate(a.endAt)
+      const bEnd = toJSDate(b.endAt)
+      return (bEnd?.getTime() || 0) - (aEnd?.getTime() || 0)
+    })
+  return ended[0] || null
+}
+
+export async function getSeasonSummaryStats(seasonId) {
+  if (!seasonId) return { totalQuestsCompleted: 0, totalParticipants: 0, impactByUnit: {} }
+
+  const statsRef = collection(db, 'seasonUserStats')
+  const statsQ = query(statsRef, where('seasonId', '==', seasonId))
+  const statsSnap = await getDocs(statsQ)
+
+  let totalQuestsCompleted = 0
+  statsSnap.docs.forEach(d => {
+    const data = d.data()
+    totalQuestsCompleted += data.completedQuestsCount || 0
+  })
+
+  const impactEntries = await listSeasonImpact(seasonId)
+  const impactByUnit = sumImpactByUnit(impactEntries)
+
+  return {
+    totalQuestsCompleted,
+    totalParticipants: statsSnap.size,
+    impactByUnit,
+  }
 }

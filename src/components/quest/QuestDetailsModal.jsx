@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { formatDate, formatDateTime } from '../../utils/dateHelpers'
 
@@ -17,6 +17,17 @@ function StatusBadge({ status }) {
 
 export default function QuestDetailsModal({ quest, participations, impactForQuest, isMaster, questDetails, onClose }) {
   const [participationSearch, setParticipationSearch] = useState('')
+
+  useEffect(() => {
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = '' }
+  }, [])
+
+  useEffect(() => {
+    const handler = (e) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
 
   const filteredParticipations = useMemo(() => {
     if (!participationSearch.trim()) return participations
@@ -89,7 +100,7 @@ export default function QuestDetailsModal({ quest, participations, impactForQues
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
-      <div className="fixed inset-0 bg-black/60" onClick={onClose} />
+      <div className="fixed inset-0 bg-black/60" onClick={(e) => { if (e.target === e.currentTarget) onClose() }} />
       <div className="relative w-full max-w-3xl bg-white rounded-2xl shadow-2xl my-8 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between rounded-t-2xl z-10">
           <h3 className="font-semibold text-lg text-gray-900">Quest Details</h3>

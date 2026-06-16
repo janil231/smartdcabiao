@@ -23,6 +23,13 @@ export default function InterestSelectionModal({
     return () => { document.body.style.overflow = '' }
   }, [isOpen, initialSelected])
 
+  useEffect(() => {
+    if (!isOpen) return
+    const handler = (e) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [isOpen, onClose])
+
   const toggle = (id) => {
     setSelected(prev =>
       prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
@@ -54,14 +61,12 @@ export default function InterestSelectionModal({
   return createPortal(
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center p-4"
-      onClick={onClose}
       role="dialog"
       aria-modal="true"
     >
-      <div className="absolute inset-0 bg-black/50" />
+      <div className="absolute inset-0 bg-black/50" onClick={(e) => { if (e.target === e.currentTarget) onClose() }} />
       <div
         className="relative z-10 w-full max-w-lg bg-white rounded-xl p-6 max-h-[90vh] overflow-y-auto shadow-xl"
-        onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-xl font-semibold text-gray-900">{title}</h2>

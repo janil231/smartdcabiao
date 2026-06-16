@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import QRCode from 'qrcode'
 import { rotateBuyQuestDailyCode } from '../../services/ownerQuests.service'
 
@@ -31,6 +32,17 @@ export default function BuyQuestQRDisplayModal({ quest, business, onClose, user 
     })
   }, [qrPayload])
 
+  useEffect(() => {
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = '' }
+  }, [])
+
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
+
   const handleRotateCode = async () => {
     if (!confirm('Generate a new daily code? The current code will stop working.')) return
     if (!user?.uid) return
@@ -46,8 +58,11 @@ export default function BuyQuestQRDisplayModal({ quest, business, onClose, user 
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+    >
       <div className="bg-white rounded-2xl max-w-sm w-full p-6 text-center max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-gray-900 text-lg">Quest QR Code</h3>
@@ -142,6 +157,7 @@ export default function BuyQuestQRDisplayModal({ quest, business, onClose, user 
           Close
         </button>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

@@ -1,4 +1,4 @@
-# SMARTDCABIAO — Full Project Context Brief (Updated: June 11, 2026)
+# SMARTDCABIAO — Full Project Context Brief (Updated: June 16, 2026)
 
 ---
 
@@ -99,7 +99,6 @@ smartdcabiao-frontend/
 │   ├── index.css                       # Tailwind imports + global styles + animations
 │   ├── lib/
 │   │   └── firebase.js                 # Firebase init (app, auth, db, storage)
-│   ├── config/                         # (empty directory, no files)
 │   ├── contexts/
 │   │   ├── AuthContext.jsx             # Firebase Auth state + login/signup/logout/OAuth methods
 │   │   ├── FavoritesContext.jsx        # localStorage-based favorites (businesses + destinations)
@@ -202,9 +201,7 @@ smartdcabiao-frontend/
 │   │   ├── en.js                       # English translations (~650 keys)
 │   │   ├── fil.js                      # Filipino translations (~650 keys)
 │   │   └── index.js                    # Exports { translations: { en, fil }, languages }
-│   ├── data/                           # (empty or unused directory)
-│   ├── api/
-│   │   └── participation.js            # Legacy participation API (replaced by services/participations.service.js)
+│   ├── data/                           # Static/mock data (businesses, destinations, activities, rewards, heroImages)
 │   └── assets/
 │       └── placeholders/               # 9 SVG placeholder images (generic, service, event, destination, park, landmark, shop, market, restaurant)
 ├── dist/                               # Build output (gitignored)
@@ -213,12 +210,12 @@ smartdcabiao-frontend/
 ├── firestore.rules                     # Deployed Firestore security rules
 ├── firestore.indexes.json              # Deployed composite indexes
 ├── .firebaserc                         # Default Firebase project: smartdcabiao
+├── AGENTS.md                           # Agentic coding guide (build/lint commands, code style, conventions)
 ├── .env.example                        # Env var template
 ├── .gitignore
 ├── .gitattributes
 ├── eslint.config.js                    # ESLint flat config
 ├── vite.config.js                      # Vite config (React + Tailwind plugins)
-├── postcss.config.js                   # PostCSS config (autoprefixer)
 ├── package.json
 └── FIRESTORE_RULES_VOUCHERS.md         # Docs for voucher-related Firestore rules
 ```
@@ -782,8 +779,7 @@ All tabs render inline (no route change, just state-switching). The dashboard is
 3. **Negative reservedCount on quests:** If a quest has `reservedCount < 0`, the UI clamps to 0 via `Math.max(0, reserved)` in `questSlots.js`. A "Repair Counts" button in the LGU dashboard calls `repairQuestReservedCounts()` to fix by recounting actual participations.
 
 4. **Legacy/unused files:**
-   - `src/api/participation.js` — replaced by `services/participations.service.js`
-   - `src/data/` directory — appears to be empty/unused
+   - `src/utils/imageUtils.js` — deleted (overlapped with `src/utils/placeImages.js`)
    - `src/utils/imageUtils.js` — overlaps with `src/utils/placeImages.js` (both define the same functions)
    - `src/config/` — empty directory
 

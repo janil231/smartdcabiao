@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode'
 import { verifyBuyQuestByQR } from '../../services/ownerQuests.service'
 
@@ -122,6 +123,17 @@ export default function BuyQuestScannerModal({ quest, business, user, userLocati
   }
 
   useEffect(() => {
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = '' }
+  }, [])
+
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  useEffect(() => {
     initScanner()
 
     return () => {
@@ -129,9 +141,12 @@ export default function BuyQuestScannerModal({ quest, business, user, userLocati
     }
   }, [])
 
-  return (
-    <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl max-w-md w-full p-5">
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div className="bg-white rounded-2xl max-w-md w-full p-5 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-bold text-gray-900">Scan Quest QR</h3>
           <button onClick={handleClose} className="text-gray-400 hover:text-gray-600 text-lg">✕</button>
@@ -203,6 +218,7 @@ export default function BuyQuestScannerModal({ quest, business, user, userLocati
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

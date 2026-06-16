@@ -406,4 +406,17 @@ export default {
     pinOutsideCabiao: "Mangyaring mag-pin sa loob ng Cabiao.",
     locationRequired: "Mangyaring i-pin ang lokasyon ng negosyo sa mapa",
   },
+  events: {
+    noActiveSeason: "Walang aktibong tourism season sa kasalukuyan. Balikan mo na lang o makipag-ugnayan sa LGU.",
+    noActiveSeasonTitle: "Walang Aktibong Season",
+    noActiveSeasonDesc: "Ang mga seasonal quest ay available lamang sa panahon ng aktibong tourism season. Pakibalik kapag nagbukas na ang susunod na season.",
+    lastSeasonRecap: "Recap ng Huling Season",
+    participants: "Mga Kalahok",
+    questsCompleted: "Nakumpletong Quest",
+    noSeasonsYet: "Wala pang season na tumakbo.",
+    waitForNextSeason: "Ang mga quest ay available lamang sa panahon ng aktibong tourism season. Pakibalik kapag nagbukas na ang susunod na season.",
+    ended: "Natapos",
+    endsToday: "Matatapos ngayong araw",
+    endsIn: "Matatapos sa {days} araw",
+  },
 }

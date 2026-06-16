@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { verifyBuyQuestByCode } from '../../services/ownerQuests.service'
 
 export default function BuyQuestCodeModal({ quest, business, user, userLocation, onClose, onSuccess, onSwitchToScanner }) {
@@ -26,9 +27,23 @@ export default function BuyQuestCodeModal({ quest, business, user, userLocation,
     onSwitchToScanner?.()
   }
 
-  return (
-    <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl max-w-md w-full p-5">
+  useEffect(() => {
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = '' }
+  }, [])
+
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div className="bg-white rounded-2xl max-w-md w-full p-5 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-bold text-gray-900">Enter Quest Code</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg">✕</button>
@@ -84,6 +99,7 @@ export default function BuyQuestCodeModal({ quest, business, user, userLocation,
           </button>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

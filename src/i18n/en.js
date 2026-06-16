@@ -406,4 +406,17 @@ export default {
     pinOutsideCabiao: "Please pin a location within Cabiao.",
     locationRequired: "Please pin your business location on the map",
   },
+  events: {
+    noActiveSeason: "There's currently no active tourism season. Check back later or contact the LGU.",
+    noActiveSeasonTitle: "No Active Season",
+    noActiveSeasonDesc: "Seasonal quests are only available during an active tourism season. Please check back when the next season opens.",
+    lastSeasonRecap: "Last Season Recap",
+    participants: "Participants",
+    questsCompleted: "Quests Completed",
+    noSeasonsYet: "No seasons have run yet.",
+    waitForNextSeason: "Quests are only available during an active tourism season. Please check back when the next season opens.",
+    ended: "Ended",
+    endsToday: "Ends today",
+    endsIn: "Ends in {days} day(s)",
+  },
 }
