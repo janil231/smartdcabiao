@@ -41,7 +41,7 @@ export default function RedeemRewardModal({ isOpen, onClose, businessId, busines
     setError(null)
     setLoading(true)
     try {
-      const result = await findRewardByCode(code.trim().toUpperCase(), businessId)
+      const result = await findRewardByCode(code.trim().toUpperCase(), businessId, user?.uid)
 
       if (!result.found) {
         setError(result.reason)
@@ -60,7 +60,11 @@ export default function RedeemRewardModal({ isOpen, onClose, businessId, busines
       setReward(result.reward)
       setStep('preview')
     } catch (err) {
-      setError(err.message || 'Lookup failed')
+      const msg = err.code === 'permission-denied'
+        ? 'Could not look up reward — you may not be the owner of this business, or the security rules need redeployment.'
+        : err.message || 'Lookup failed'
+      console.error('[RedeemRewardModal] lookup error:', err)
+      setError(msg)
     } finally {
       setLoading(false)
     }
@@ -75,7 +79,11 @@ export default function RedeemRewardModal({ isOpen, onClose, businessId, busines
       setStep('success')
       if (onRedeemed) onRedeemed(reward)
     } catch (err) {
-      setError(err.message || 'Redemption failed')
+      const msg = err.code === 'permission-denied'
+        ? 'Could not redeem — you may not be the owner of this reward, or the security rules need redeployment.'
+        : err.message || 'Redemption failed'
+      console.error('[RedeemRewardModal] redeem error:', err)
+      setError(msg)
     } finally {
       setLoading(false)
     }

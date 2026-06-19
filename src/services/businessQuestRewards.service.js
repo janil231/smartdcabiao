@@ -85,22 +85,27 @@ export async function createBusinessQuestReward(uid, userEmail, quest, participa
   return { id: docRef.id, ...rewardData }
 }
 
-export async function findRewardByCode(code, merchantBusinessId) {
+export async function findRewardByCode(code, merchantBusinessId, merchantUid) {
   if (!code || !merchantBusinessId) {
     return { found: false, reason: 'Missing code or business ID' }
   }
 
   const normalized = String(code).trim().toUpperCase()
 
+  if (!merchantUid) {
+    return { found: false, reason: 'Missing merchant UID' }
+  }
+
   const q = query(
     collection(db, REWARDS_COLLECTION),
+    where('ownerUid', '==', merchantUid),
     where('code', '==', normalized),
     limit(1)
   )
   const snap = await getDocs(q)
 
   if (snap.empty) {
-    return { found: false, reason: 'Reward code not found' }
+    return { found: false, reason: 'No reward found with that code at this business' }
   }
 
   const docSnap = snap.docs[0]
@@ -252,6 +257,84 @@ export async function markRewardAsUsed(rewardId, ownerUid) {
   })
 
   return { success: true }
+}
+
+export async function backfillRewardOwnerUids(adminUid) {
+  let scanned = 0
+  let backfilled = 0
+  let skipped = 0
+  let failed = 0
+  const details = []
+
+  const snapshot = await getDocs(collection(db, REWARDS_COLLECTION))
+
+  for (const docSnap of snapshot.docs) {
+    scanned++
+    const data = docSnap.data()
+
+    const hasOwnerUid = data.ownerUid && String(data.ownerUid).trim()
+    const hasBusinessId = data.businessId && String(data.businessId).trim()
+
+    if (hasOwnerUid && hasBusinessId) {
+      skipped++
+      details.push({ id: docSnap.id, name: data.code || docSnap.id, status: 'skipped', reason: 'already has ownerUid and businessId' })
+      continue
+    }
+
+    try {
+      const questId = data.questId
+      if (!questId) {
+        skipped++
+        details.push({ id: docSnap.id, name: data.code || docSnap.id, status: 'skipped', reason: 'no questId on reward doc' })
+        continue
+      }
+
+      const questSnap = await getDoc(doc(db, 'ownerQuests', String(questId)))
+      if (!questSnap.exists()) {
+        skipped++
+        details.push({ id: docSnap.id, name: data.code || docSnap.id, status: 'skipped', reason: `quest ${questId} not found` })
+        continue
+      }
+
+      const questData = questSnap.data()
+      const ownerUid = questData.ownerUid
+      const businessId = questData.businessId
+
+      if (!ownerUid) {
+        skipped++
+        details.push({ id: docSnap.id, name: data.code || docSnap.id, status: 'skipped', reason: 'parent quest has no ownerUid' })
+        continue
+      }
+
+      const updatePayload = sanitizeForFirestore({
+        ownerUid: String(ownerUid),
+        businessId: String(businessId || ''),
+        businessName: questData.businessName || data.businessName || '',
+        updatedAt: serverTimestamp(),
+      })
+
+      await updateDoc(doc(db, REWARDS_COLLECTION, docSnap.id), updatePayload)
+      backfilled++
+      details.push({ id: docSnap.id, name: data.code || docSnap.id, status: 'backfilled', ownerUid, reason: 'from parent quest' })
+    } catch (err) {
+      failed++
+      details.push({ id: docSnap.id, name: data.code || docSnap.id, status: 'failed', reason: err.message })
+    }
+  }
+
+  if (adminUid) {
+    try {
+      const { logAudit } = await import('./audit.service')
+      await logAudit({
+        action: 'backfill_reward_owner_uids',
+        targetType: 'businessQuestRewards',
+        adminUid,
+        meta: { scanned, backfilled, skipped, failed },
+      })
+    } catch { /* non-critical */ }
+  }
+
+  return { scanned, backfilled, skipped, failed, details }
 }
 
 export { assembleRewardDescription }

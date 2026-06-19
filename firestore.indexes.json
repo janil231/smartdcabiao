@@ -91,6 +91,14 @@
       ]
     },
     {
+      "collectionGroup": "businessQuestRewards",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ownerUid", "order": "ASCENDING" },
+        { "fieldPath": "code", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "participations",
       "queryScope": "COLLECTION",
       "fields": [

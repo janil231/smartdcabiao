@@ -51,6 +51,7 @@ import { seedSampleReviewsForAllBusinesses } from '../services/seedSampleReviews
 import { seedFakeUsers, deleteSeededUsers } from '../services/seedFakeUsers.service'
 import { seedQuestActivity, deleteSeededQuestActivity } from '../services/seedQuestActivity.service'
 import { repairAllReviewAggregates } from '../services/repairReviewAggregates.service'
+import { backfillRewardOwnerUids } from '../services/businessQuestRewards.service'
 import { repairAllDestinationImages } from '../services/destinations.service'
 import { listPendingReviews, setReviewStatus } from '../services/reviews.service'
 import { listTopByPoints, listTopByImpact, IMPACT_UNITS } from '../services/leaderboard.service'
@@ -968,6 +969,9 @@ function DataToolsPanel({ user }) {
   const [repairingQuestUids, setRepairingQuestUids] = useState(false)
   const [repairQuestUidsResult, setRepairQuestUidsResult] = useState(null)
   const [showRepairQuestUidsDetails, setShowRepairQuestUidsDetails] = useState(false)
+  const [backfillingReward, setBackfillingReward] = useState(false)
+  const [backfillRewardResult, setBackfillRewardResult] = useState(null)
+  const [showBackfillRewardDetails, setShowBackfillRewardDetails] = useState(false)
   const [showSeedConfirm, setShowSeedConfirm] = useState(false)
   const [seeding, setSeeding] = useState(false)
   const [seedProgress, setSeedProgress] = useState(null)
@@ -1078,6 +1082,22 @@ function DataToolsPanel({ user }) {
       addLog({ time: new Date().toLocaleTimeString(), msg: `❌ Error: ${err.message}` })
     } finally {
       setRepairingQuestUids(false)
+    }
+  }
+
+  const handleBackfillRewardOwnerUids = async () => {
+    setBackfillingReward(true)
+    setBackfillRewardResult(null)
+    setShowBackfillRewardDetails(false)
+    try {
+      addLog({ time: new Date().toLocaleTimeString(), msg: 'Starting reward ownerUid backfill...' })
+      const result = await backfillRewardOwnerUids(user?.uid)
+      setBackfillRewardResult(result)
+      addLog({ time: new Date().toLocaleTimeString(), msg: `Done. Scanned: ${result.scanned}, Backfilled: ${result.backfilled}, Skipped: ${result.skipped}, Failed: ${result.failed}` })
+    } catch (err) {
+      addLog({ time: new Date().toLocaleTimeString(), msg: `❌ Error: ${err.message}` })
+    } finally {
+      setBackfillingReward(false)
     }
   }
 
@@ -1654,6 +1674,74 @@ function DataToolsPanel({ user }) {
                           <div className="flex-1 min-w-0">
                             <span className="font-medium text-gray-900 truncate block">{d.name}</span>
                             {d.reason && <span className="text-gray-500 italic">{d.reason}</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-gray-200 pt-6 mt-6">
+          <h4 className="font-semibold text-gray-900 mb-2">🔗 Backfill Reward Owner UIDs</h4>
+          <p className="text-sm text-gray-600 mb-3">
+            Scans all business quest rewards and backfills missing <code className="text-xs bg-gray-100 px-1 rounded">ownerUid</code> and <code className="text-xs bg-gray-100 px-1 rounded">businessId</code> from the parent quest. Fixes rewards created before the ownerUid denormalization.
+          </p>
+          <button
+            onClick={handleBackfillRewardOwnerUids}
+            disabled={backfillingReward}
+            className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-50 text-sm"
+          >
+            {backfillingReward ? 'Backfilling...' : '🔗 Backfill Reward Owner UIDs'}
+          </button>
+
+          {backfillRewardResult && (
+            <div className="mt-4 p-4 bg-gray-50 rounded-xl border border-gray-200">
+              <div className="grid grid-cols-4 gap-3 text-center mb-3">
+                <div className="bg-blue-100 rounded-lg p-3">
+                  <p className="text-2xl font-bold text-blue-700">{backfillRewardResult.scanned}</p>
+                  <p className="text-xs text-blue-600">Scanned</p>
+                </div>
+                <div className="bg-green-100 rounded-lg p-3">
+                  <p className="text-2xl font-bold text-green-700">{backfillRewardResult.backfilled}</p>
+                  <p className="text-xs text-green-600">Backfilled</p>
+                </div>
+                <div className="bg-yellow-100 rounded-lg p-3">
+                  <p className="text-2xl font-bold text-yellow-700">{backfillRewardResult.skipped}</p>
+                  <p className="text-xs text-yellow-600">Skipped</p>
+                </div>
+                <div className="bg-red-100 rounded-lg p-3">
+                  <p className="text-2xl font-bold text-red-700">{backfillRewardResult.failed}</p>
+                  <p className="text-xs text-red-600">Failed</p>
+                </div>
+              </div>
+
+              {backfillRewardResult.details?.length > 0 && (
+                <>
+                  <button
+                    onClick={() => setShowBackfillRewardDetails(!showBackfillRewardDetails)}
+                    className="text-xs font-medium text-emerald-600 hover:text-emerald-700"
+                  >
+                    {showBackfillRewardDetails ? '▼ Hide details' : `▶ Show details (${backfillRewardResult.details.length})`}
+                  </button>
+
+                  {showBackfillRewardDetails && (
+                    <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
+                      {backfillRewardResult.details.map((d, i) => (
+                        <div key={i} className="flex items-start gap-2 text-xs bg-white rounded-lg px-3 py-2 border border-gray-200">
+                          <span className={`font-semibold w-20 shrink-0 ${
+                            d.status === 'backfilled' ? 'text-emerald-700' :
+                            d.status === 'skipped' ? 'text-amber-700' : 'text-red-700'
+                          }`}>
+                            {d.status.toUpperCase()}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <span className="font-medium text-gray-900 truncate block">{d.name}</span>
+                            {d.ownerUid && <span className="text-gray-500">→ {d.ownerUid}</span>}
+                            {d.reason && <span className="text-gray-500 italic ml-1">({d.reason})</span>}
                           </div>
                         </div>
                       ))}
