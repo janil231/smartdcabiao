@@ -237,8 +237,11 @@ service cloud.firestore {
 
     match /ownerQuestParticipations/{participationId} {
       allow read: if isSignedIn();
-      allow create, update: if isMasterAdmin() ||
+      allow create: if isMasterAdmin() ||
         (isSignedIn() && request.resource.data.uid == request.auth.uid);
+      allow update: if isMasterAdmin() ||
+        (isSignedIn() && resource.data.uid == request.auth.uid) ||
+        (isSignedIn() && resource.data.ownerUid == request.auth.uid);
       allow delete: if isMasterAdmin();
     }
 
@@ -250,6 +253,7 @@ service cloud.firestore {
       );
       allow create: if isSignedIn() && (
         request.resource.data.uid == request.auth.uid ||
+        request.resource.data.ownerUid == request.auth.uid ||
         isMasterAdmin()
       );
       allow update: if isSignedIn() && (

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, Fragment } from 'react'
+import { useState, useEffect, useMemo, Fragment, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useNavigate } from 'react-router-dom'
 import { MapContainer, TileLayer, Marker } from 'react-leaflet'
@@ -56,6 +56,7 @@ import { listPendingReviews, setReviewStatus } from '../services/reviews.service
 import { listTopByPoints, listTopByImpact, IMPACT_UNITS } from '../services/leaderboard.service'
 import { isWithinCabiaoBounds, CABIAO_BOUNDS } from '../constants/cabiaoGeo'
 import { listSeasonImpact, sumImpactByUnit } from '../services/impactLedger.service'
+import { getSeasonReportSummary, getSeasonReportTimeSeries } from '../services/seasonalReport.service'
 import { listSeasonRedemptions, findRedemptionByCode, adminMarkVoucherUsed } from '../services/voucherRedemptions.service'
 import { logAudit } from '../services/audit.service'
 import { rotateEventCode } from '../services/questVerification.service'
@@ -63,6 +64,8 @@ import {
   listAllOwnerQuests,
   toggleOwnerQuestActive as toggleOwnerQuest,
   getOwnerQuestParticipations,
+  backfillParticipationOwnerUids,
+  repairQuestOwnerUids,
 } from '../services/ownerQuests.service'
 import CheckInModal from '../components/quest/CheckInModal'
 import QRDisplayModal from '../components/quest/QRDisplayModal'
@@ -70,6 +73,8 @@ import QuestDetailsModal from '../components/quest/QuestDetailsModal'
 import SeasonStatusBadge from '../components/lgu/SeasonStatusBadge'
 import EditSeasonModal from '../components/lgu/EditSeasonModal'
 import ConfirmDialog from '../components/lgu/ConfirmDialog'
+
+const SeasonalReportChart = lazy(() => import('./SeasonalReportChart'))
 
 const TABS = {
   SUBMISSIONS: 'submissions',
@@ -81,6 +86,7 @@ const TABS = {
   VOUCHERS: 'vouchers',
   MANAGE_ADMINS: 'manage-admins',
   DATA_TOOLS: 'data-tools',
+  SEASONAL_REPORT: 'seasonal-report',
 }
 
 const MODERATION_ITEMS = [
@@ -94,6 +100,10 @@ const TOURISM_ITEMS = [
   { key: TABS.QUESTS, icon: '🎯', label: 'Quests' },
   { key: TABS.OWNER_QUESTS, icon: '🏪', label: 'Owner Quests' },
   { key: TABS.VOUCHERS, icon: '🎟️', label: 'Vouchers' },
+]
+
+const REPORTS_ITEMS = [
+  { key: TABS.SEASONAL_REPORT, icon: '📊', label: 'Seasonal Reports' },
 ]
 
 function StatusBadge({ status }) {
@@ -165,10 +175,10 @@ function SidebarSection({ title, items, activeKey, onSelect, navigate }) {
   )
 }
 
-function MobileTabSelector({ activeTab, onChange, moderationItems, tourismItems, settingsItems, navigate, counts }) {
+function MobileTabSelector({ activeTab, onChange, moderationItems, tourismItems, reportsItems, settingsItems, navigate, counts }) {
   const [open, setOpen] = useState(false)
 
-  const allItems = [...moderationItems, ...tourismItems, ...(settingsItems || [])]
+  const allItems = [...moderationItems, ...tourismItems, ...(reportsItems || []), ...(settingsItems || [])]
   const activeItem = allItems.find((t) => t.key === activeTab)
 
   return (
@@ -216,6 +226,23 @@ function MobileTabSelector({ activeTab, onChange, moderationItems, tourismItems,
               </button>
             ))}
 
+            {reportsItems && reportsItems.length > 0 && (
+              <>
+                <p className="text-xs font-semibold uppercase text-gray-500 mt-3 mb-2 px-2">Seasonal Reports</p>
+                {reportsItems.map((item) => (
+                  <button
+                    key={item.key}
+                    onClick={() => { onChange(item.key); setOpen(false) }}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-left ${
+                      activeTab === item.key ? 'bg-emerald-50 text-emerald-700' : 'hover:bg-gray-100'
+                    }`}
+                  >
+                    <span>{item.icon}</span>
+                    <span className="flex-1 font-medium text-sm">{item.label}</span>
+                  </button>
+                ))}
+              </>
+            )}
             {settingsItems && settingsItems.length > 0 && (
               <>
                 <p className="text-xs font-semibold uppercase text-gray-500 mt-3 mb-2 px-2">Settings</p>
@@ -935,6 +962,12 @@ function DataToolsPanel({ user }) {
   const [backfilling, setBackfilling] = useState(false)
   const [backfillResult, setBackfillResult] = useState(null)
   const [showBackfillDetails, setShowBackfillDetails] = useState(false)
+  const [backfillingParticipation, setBackfillingParticipation] = useState(false)
+  const [backfillParticipationResult, setBackfillParticipationResult] = useState(null)
+  const [showBackfillParticipationDetails, setShowBackfillParticipationDetails] = useState(false)
+  const [repairingQuestUids, setRepairingQuestUids] = useState(false)
+  const [repairQuestUidsResult, setRepairQuestUidsResult] = useState(null)
+  const [showRepairQuestUidsDetails, setShowRepairQuestUidsDetails] = useState(false)
   const [showSeedConfirm, setShowSeedConfirm] = useState(false)
   const [seeding, setSeeding] = useState(false)
   const [seedProgress, setSeedProgress] = useState(null)
@@ -1013,6 +1046,38 @@ function DataToolsPanel({ user }) {
       addLog({ time: new Date().toLocaleTimeString(), msg: `❌ Error: ${err.message}` })
     } finally {
       setBackfilling(false)
+    }
+  }
+
+  const handleBackfillParticipationOwnerUids = async () => {
+    setBackfillingParticipation(true)
+    setBackfillParticipationResult(null)
+    setShowBackfillParticipationDetails(false)
+    try {
+      addLog({ time: new Date().toLocaleTimeString(), msg: 'Starting participation ownerUid backfill...' })
+      const result = await backfillParticipationOwnerUids(user?.uid)
+      setBackfillParticipationResult(result)
+      addLog({ time: new Date().toLocaleTimeString(), msg: `Done. Scanned: ${result.scanned}, Backfilled: ${result.backfilled}, Skipped: ${result.skipped}, Failed: ${result.failed}` })
+    } catch (err) {
+      addLog({ time: new Date().toLocaleTimeString(), msg: `❌ Error: ${err.message}` })
+    } finally {
+      setBackfillingParticipation(false)
+    }
+  }
+
+  const handleRepairQuestOwnerUids = async () => {
+    setRepairingQuestUids(true)
+    setRepairQuestUidsResult(null)
+    setShowRepairQuestUidsDetails(false)
+    try {
+      addLog({ time: new Date().toLocaleTimeString(), msg: 'Starting quest ownerUid repair...' })
+      const result = await repairQuestOwnerUids(user?.uid)
+      setRepairQuestUidsResult(result)
+      addLog({ time: new Date().toLocaleTimeString(), msg: `Done. Scanned: ${result.scanned}, Repaired: ${result.repaired}, Skipped: ${result.skipped}, Failed: ${result.failed}` })
+    } catch (err) {
+      addLog({ time: new Date().toLocaleTimeString(), msg: `❌ Error: ${err.message}` })
+    } finally {
+      setRepairingQuestUids(false)
     }
   }
 
@@ -1454,6 +1519,141 @@ function DataToolsPanel({ user }) {
                             {d.ownerUid && <span className="text-gray-500 ml-1">→ {d.ownerUid}</span>}
                             {d.reason && <span className="text-gray-500 italic ml-1">({d.reason})</span>}
                             {d.strategy && <span className="text-blue-600 ml-1">via {d.strategy}</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-gray-200 pt-6 mt-6">
+          <h4 className="font-semibold text-gray-900 mb-2">🔗 Backfill Participation Owner UIDs</h4>
+          <p className="text-sm text-gray-600 mb-3">
+            Scans all owner-quest participations and backfills missing <code className="text-xs bg-gray-100 px-1 rounded">ownerUid</code> and <code className="text-xs bg-gray-100 px-1 rounded">businessId</code> from the parent quest. Fixes participations created before the ownerUid denormalization.
+          </p>
+          <button
+            onClick={handleBackfillParticipationOwnerUids}
+            disabled={backfillingParticipation}
+            className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-50 text-sm"
+          >
+            {backfillingParticipation ? 'Backfilling...' : '🔗 Backfill Participation Owner UIDs'}
+          </button>
+
+          {backfillParticipationResult && (
+            <div className="mt-4 p-4 bg-gray-50 rounded-xl border border-gray-200">
+              <div className="grid grid-cols-4 gap-3 text-center mb-3">
+                <div className="bg-blue-100 rounded-lg p-3">
+                  <p className="text-2xl font-bold text-blue-700">{backfillParticipationResult.scanned}</p>
+                  <p className="text-xs text-blue-600">Scanned</p>
+                </div>
+                <div className="bg-green-100 rounded-lg p-3">
+                  <p className="text-2xl font-bold text-green-700">{backfillParticipationResult.backfilled}</p>
+                  <p className="text-xs text-green-600">Backfilled</p>
+                </div>
+                <div className="bg-yellow-100 rounded-lg p-3">
+                  <p className="text-2xl font-bold text-yellow-700">{backfillParticipationResult.skipped}</p>
+                  <p className="text-xs text-yellow-600">Skipped</p>
+                </div>
+                <div className="bg-red-100 rounded-lg p-3">
+                  <p className="text-2xl font-bold text-red-700">{backfillParticipationResult.failed}</p>
+                  <p className="text-xs text-red-600">Failed</p>
+                </div>
+              </div>
+
+              {backfillParticipationResult.details?.length > 0 && (
+                <>
+                  <button
+                    onClick={() => setShowBackfillParticipationDetails(!showBackfillParticipationDetails)}
+                    className="text-xs font-medium text-emerald-600 hover:text-emerald-700"
+                  >
+                    {showBackfillParticipationDetails ? '▼ Hide details' : `▶ Show details (${backfillParticipationResult.details.length})`}
+                  </button>
+
+                  {showBackfillParticipationDetails && (
+                    <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
+                      {backfillParticipationResult.details.map((d, i) => (
+                        <div key={i} className="flex items-start gap-2 text-xs bg-white rounded-lg px-3 py-2 border border-gray-200">
+                          <span className={`font-semibold w-20 shrink-0 ${
+                            d.status === 'backfilled' ? 'text-emerald-700' :
+                            d.status === 'skipped' ? 'text-amber-700' : 'text-red-700'
+                          }`}>
+                            {d.status.toUpperCase()}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <span className="font-medium text-gray-900 truncate block">{d.name}</span>
+                            {d.ownerUid && <span className="text-gray-500">→ {d.ownerUid}</span>}
+                            {d.reason && <span className="text-gray-500 italic ml-1">({d.reason})</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-gray-200 pt-6 mt-6">
+          <h4 className="font-semibold text-gray-900 mb-2">🔧 Repair Quest Owner UIDs</h4>
+          <p className="text-sm text-gray-600 mb-3">
+            Scans all owner quests and repairs mismatched <code className="text-xs bg-gray-100 px-1 rounded">ownerUid</code> values by comparing with the parent business doc. Fixes seeded quests that inherited the admin's UID instead of the business owner's.
+          </p>
+          <button
+            onClick={handleRepairQuestOwnerUids}
+            disabled={repairingQuestUids}
+            className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-50 text-sm"
+          >
+            {repairingQuestUids ? 'Repairing...' : '🔧 Repair Quest Owner UIDs'}
+          </button>
+
+          {repairQuestUidsResult && (
+            <div className="mt-4 p-4 bg-gray-50 rounded-xl border border-gray-200">
+              <div className="grid grid-cols-4 gap-3 text-center mb-3">
+                <div className="bg-blue-100 rounded-lg p-3">
+                  <p className="text-2xl font-bold text-blue-700">{repairQuestUidsResult.scanned}</p>
+                  <p className="text-xs text-blue-600">Scanned</p>
+                </div>
+                <div className="bg-green-100 rounded-lg p-3">
+                  <p className="text-2xl font-bold text-green-700">{repairQuestUidsResult.repaired}</p>
+                  <p className="text-xs text-green-600">Repaired</p>
+                </div>
+                <div className="bg-yellow-100 rounded-lg p-3">
+                  <p className="text-2xl font-bold text-yellow-700">{repairQuestUidsResult.skipped}</p>
+                  <p className="text-xs text-yellow-600">Skipped</p>
+                </div>
+                <div className="bg-red-100 rounded-lg p-3">
+                  <p className="text-2xl font-bold text-red-700">{repairQuestUidsResult.failed}</p>
+                  <p className="text-xs text-red-600">Failed</p>
+                </div>
+              </div>
+
+              {repairQuestUidsResult.details?.length > 0 && (
+                <>
+                  <button
+                    onClick={() => setShowRepairQuestUidsDetails(!showRepairQuestUidsDetails)}
+                    className="text-xs font-medium text-emerald-600 hover:text-emerald-700"
+                  >
+                    {showRepairQuestUidsDetails ? '▼ Hide details' : `▶ Show details (${repairQuestUidsResult.details.length})`}
+                  </button>
+
+                  {showRepairQuestUidsDetails && (
+                    <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
+                      {repairQuestUidsResult.details.map((d, i) => (
+                        <div key={i} className="flex items-start gap-2 text-xs bg-white rounded-lg px-3 py-2 border border-gray-200">
+                          <span className={`font-semibold w-20 shrink-0 ${
+                            d.status === 'repaired' ? 'text-emerald-700' :
+                            d.status === 'skipped' ? 'text-amber-700' : 'text-red-700'
+                          }`}>
+                            {d.status.toUpperCase()}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <span className="font-medium text-gray-900 truncate block">{d.name}</span>
+                            {d.reason && <span className="text-gray-500 italic">{d.reason}</span>}
                           </div>
                         </div>
                       ))}
@@ -2066,6 +2266,13 @@ export default function LGUDashboardPage() {
   const [viewingSeason, setViewingSeason] = useState(null)
   const [confirmDialog, setConfirmDialog] = useState(null)
 
+  const [selectedReportSeason, setSelectedReportSeason] = useState('')
+  const [reportGranularity, setReportGranularity] = useState('daily')
+  const [reportSummary, setReportSummary] = useState(null)
+  const [reportTimeSeries, setReportTimeSeries] = useState([])
+  const [loadingReport, setLoadingReport] = useState(false)
+  const [reportSeasonList, setReportSeasonList] = useState([])
+
   const filteredQuests = useMemo(() => {
     if (!questSearchQuery.trim()) return quests
     const q = questSearchQuery.trim().toLowerCase()
@@ -2095,6 +2302,39 @@ export default function LGUDashboardPage() {
   }, [user])
 
   const isMaster = role === 'master'
+
+  useEffect(() => {
+    if (!isMaster || activeTab !== TABS.SEASONAL_REPORT) return
+    let cancelled = false
+    async function loadReportData() {
+      setLoadingReport(true)
+      const seasonList = await listSeasons()
+      if (cancelled) return
+      setReportSeasonList(seasonList)
+      const id = selectedReportSeason || seasonList.find(s => s.status === 'active')?.id || seasonList[0]?.id
+      if (id && id !== selectedReportSeason) {
+        setSelectedReportSeason(id)
+      }
+      if (id) {
+        const [summary, timeSeries] = await Promise.all([
+          getSeasonReportSummary(id),
+          getSeasonReportTimeSeries(id, { granularity: reportGranularity }),
+        ])
+        if (!cancelled) {
+          setReportSummary(summary)
+          setReportTimeSeries(timeSeries)
+        }
+      } else {
+        if (!cancelled) {
+          setReportSummary(null)
+          setReportTimeSeries([])
+        }
+      }
+      if (!cancelled) setLoadingReport(false)
+    }
+    loadReportData()
+    return () => { cancelled = true }
+  }, [isMaster, activeTab, selectedReportSeason, reportGranularity])
 
   useEffect(() => {
     if (role !== 'master') return;
@@ -2872,7 +3112,7 @@ export default function LGUDashboardPage() {
   }))
 
   const settingsItems = isMaster ? [{ key: TABS.MANAGE_ADMINS, icon: '🛡️', label: 'Manage Admins' }, { key: TABS.DATA_TOOLS, icon: '🛠️', label: 'Data Tools' }] : []
-  const allItemsFlat = [...moderationItems, ...TOURISM_ITEMS, ...settingsItems]
+  const allItemsFlat = [...moderationItems, ...TOURISM_ITEMS, ...(isMaster ? REPORTS_ITEMS : []), ...settingsItems]
   const activeItemMeta = allItemsFlat.find(t => t.key === activeTab)
 
   const EMPTY_STATES = {
@@ -2884,6 +3124,7 @@ export default function LGUDashboardPage() {
     [TABS.VOUCHERS]: { icon: '🎟️', title: 'No active season', desc: 'Activate a season to manage vouchers and redemptions.' },
     [TABS.DATA_TOOLS]: { icon: '🛠️', title: 'Data Tools', desc: 'Repair and maintain data integrity.' },
     [TABS.OWNER_QUESTS]: { icon: '🏪', title: 'No owner quests yet', desc: 'Business owner-created quests will appear here for oversight.' },
+    [TABS.SEASONAL_REPORT]: { icon: '📊', title: 'No report data', desc: 'Select a season to view the seasonal report.' },
   }
 
   return (
@@ -2918,6 +3159,9 @@ export default function LGUDashboardPage() {
                   activeKey={activeTab}
                   onSelect={setActiveTab}
                 />
+                {isMaster && (
+                  <SidebarSection title="Seasonal Reports" items={REPORTS_ITEMS} activeKey={activeTab} onSelect={setActiveTab} />
+                )}
                 {isMaster && settingsItems.length > 0 && (
                   <SidebarSection title="Settings" items={settingsItems} activeKey={activeTab} onSelect={setActiveTab} />
                 )}
@@ -2930,6 +3174,7 @@ export default function LGUDashboardPage() {
                 onChange={setActiveTab}
                 moderationItems={isMaster ? moderationItems : []}
                 tourismItems={isMaster ? TOURISM_ITEMS : TOURISM_ITEMS.filter(i => i.key === TABS.QUESTS || i.key === TABS.OWNER_QUESTS)}
+                reportsItems={isMaster ? REPORTS_ITEMS : []}
                 settingsItems={settingsItems}
                 navigate={navigate}
                 counts={{ newSubmissions, newReports, pendingReviews: pendingReviews.length }}
@@ -3764,6 +4009,174 @@ export default function LGUDashboardPage() {
                   <div className="h-full flex flex-col min-h-0">
                     <div className="flex-1 min-h-0 overflow-y-auto">
                       <DataToolsPanel user={user} />
+                    </div>
+                  </div>
+                )}
+
+                {isMaster && activeTab === TABS.SEASONAL_REPORT && (
+                  <div className="h-full flex flex-col min-h-0">
+                    <div className="shrink-0">
+                      <div className="flex items-center gap-2 mb-4">
+                        <span className="text-xl">📊</span>
+                        <div>
+                          <h2 className="text-lg font-semibold text-gray-900">Seasonal Reports</h2>
+                          <p className="text-sm text-gray-500">Summary metrics and activity timeline for a season</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex-1 min-h-0 overflow-y-auto">
+                      {loadingReport ? (
+                        <div className="flex items-center justify-center py-12">
+                          <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-600 border-t-transparent" />
+                        </div>
+                      ) : reportSeasonList.length === 0 ? (
+                        <div className="text-center py-12">
+                          <div className="text-5xl mb-3">{EMPTY_STATES[TABS.SEASONAL_REPORT].icon}</div>
+                          <h3 className="font-semibold text-gray-800">{EMPTY_STATES[TABS.SEASONAL_REPORT].title}</h3>
+                          <p className="text-sm text-gray-500 mt-1">{EMPTY_STATES[TABS.SEASONAL_REPORT].desc}</p>
+                        </div>
+                      ) : (
+                        <>
+                          {/* Season selector */}
+                          <div className="flex flex-wrap items-center gap-3 mb-5">
+                            <label className="text-sm font-medium text-gray-700">Season</label>
+                            <select
+                              value={selectedReportSeason}
+                              onChange={(e) => setSelectedReportSeason(e.target.value)}
+                              className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 focus:outline-none"
+                            >
+                              {reportSeasonList.map((s) => (
+                                <option key={s.id} value={s.id}>
+                                  {s.name || s.id} {s.status ? `(${s.status})` : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {!selectedReportSeason ? (
+                            <div className="text-center py-12">
+                              <p className="text-gray-500">Select a season to view the report.</p>
+                            </div>
+                          ) : !reportSummary ? (
+                            <div className="text-center py-12">
+                              <p className="text-gray-500">No data available for this season.</p>
+                            </div>
+                          ) : (
+                            <>
+                              {/* Summary cards */}
+                              <section className="mb-6">
+                                <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">Summary</h3>
+                                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                                  <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                                    <p className="text-xs text-gray-500 uppercase font-semibold tracking-wide">Reward Pledges</p>
+                                    <p className="text-2xl font-bold text-gray-900 mt-1">{reportSummary.rewardsCount}</p>
+                                  </div>
+                                  <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                                    <p className="text-xs text-gray-500 uppercase font-semibold tracking-wide">Participating Businesses</p>
+                                    <p className="text-2xl font-bold text-gray-900 mt-1">{reportSummary.participatingBusinessesCount}</p>
+                                  </div>
+                                  <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                                    <p className="text-xs text-gray-500 uppercase font-semibold tracking-wide">Total Quests</p>
+                                    <p className="text-2xl font-bold text-gray-900 mt-1">{reportSummary.questsCount.total}</p>
+                                    <p className="text-xs text-gray-400 mt-0.5">
+                                      {reportSummary.questsCount.lgu} LGU · {reportSummary.questsCount.owner} Owner
+                                    </p>
+                                  </div>
+                                  <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                                    <p className="text-xs text-gray-500 uppercase font-semibold tracking-wide">Claims</p>
+                                    <p className="text-2xl font-bold text-gray-900 mt-1">{reportSummary.claimsCount.total}</p>
+                                    <p className="text-xs text-gray-400 mt-0.5">
+                                      {reportSummary.claimsCount.voucherRedemptions} Voucher · {reportSummary.claimsCount.rewardClaims} Reward
+                                    </p>
+                                  </div>
+                                  <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                                    <p className="text-xs text-gray-500 uppercase font-semibold tracking-wide">Quests Taken</p>
+                                    <p className="text-2xl font-bold text-gray-900 mt-1">{reportSummary.participationsByStatus.total}</p>
+                                    <p className="text-xs text-gray-400 mt-0.5">
+                                      {reportSummary.participationsByStatus.joined} joined · {reportSummary.participationsByStatus.completed} done
+                                    </p>
+                                  </div>
+                                  <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                                    <p className="text-xs text-gray-500 uppercase font-semibold tracking-wide">Impact</p>
+                                    <p className="text-2xl font-bold text-emerald-600 mt-1">
+                                      {Object.keys(reportSummary.questsCount.byType).length} types
+                                    </p>
+                                    <p className="text-xs text-gray-400 mt-0.5">
+                                      {Object.entries(reportSummary.questsCount.byType).map(([k, v]) => `${k}: ${v}`).join(' · ')}
+                                    </p>
+                                  </div>
+                                </div>
+                              </section>
+
+                              {/* Participation breakdown */}
+                              {reportSummary.participationsByStatus.total > 0 && (
+                                <section className="mb-6">
+                                  <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">Participation Breakdown</h3>
+                                  <div className="flex flex-wrap gap-2">
+                                    {[
+                                      { key: 'joined', label: 'Joined', color: 'bg-blue-100 text-blue-700' },
+                                      { key: 'completed', label: 'Completed', color: 'bg-emerald-100 text-emerald-700' },
+                                      { key: 'cancelled', label: 'Cancelled', color: 'bg-red-100 text-red-700' },
+                                      { key: 'expired', label: 'Expired', color: 'bg-gray-100 text-gray-700' },
+                                      { key: 'pending', label: 'Pending', color: 'bg-amber-100 text-amber-700' },
+                                    ].map(({ key, label, color }) => {
+                                      const val = reportSummary.participationsByStatus[key] ?? 0
+                                      if (val === 0) return null
+                                      const pct = reportSummary.participationsByStatus.total > 0
+                                        ? Math.round((val / reportSummary.participationsByStatus.total) * 100)
+                                        : 0
+                                      return (
+                                        <div key={key} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${color}`}>
+                                          {label}: {val} ({pct}%)
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                </section>
+                              )}
+
+                              {/* Time-series chart */}
+                              <section>
+                                <div className="flex items-center justify-between mb-3">
+                                  <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">Activity Timeline</h3>
+                                  <div className="flex gap-1">
+                                    <button
+                                      onClick={() => setReportGranularity('daily')}
+                                      className={`px-3 py-1 rounded-lg text-xs font-medium transition ${
+                                        reportGranularity === 'daily'
+                                          ? 'bg-emerald-600 text-white'
+                                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                      }`}
+                                    >
+                                      Daily
+                                    </button>
+                                    <button
+                                      onClick={() => setReportGranularity('weekly')}
+                                      className={`px-3 py-1 rounded-lg text-xs font-medium transition ${
+                                        reportGranularity === 'weekly'
+                                          ? 'bg-emerald-600 text-white'
+                                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                      }`}
+                                    >
+                                      Weekly
+                                    </button>
+                                  </div>
+                                </div>
+                                <div className="border border-gray-200 rounded-xl p-4 bg-white">
+                                  <Suspense fallback={
+                                    <div className="flex items-center justify-center h-64">
+                                      <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-600 border-t-transparent" />
+                                    </div>
+                                  }>
+                                    <SeasonalReportChart data={reportTimeSeries} />
+                                  </Suspense>
+                                </div>
+                              </section>
+                            </>
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
                 )}

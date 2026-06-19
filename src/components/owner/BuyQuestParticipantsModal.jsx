@@ -103,7 +103,11 @@ export default function BuyQuestParticipantsModal({ quest, merchantUid, onClose 
       setConfirmId(null)
       showToast('Quest marked complete for customer')
     } catch (err) {
-      showToast(err.message || 'Failed to complete')
+      const msg = err.code === 'permission-denied'
+        ? 'Could not complete — you may not be the owner of this quest, or rules need redeploying.'
+        : err.message || 'Failed to complete'
+      console.error('[BuyQuestParticipantsModal] markComplete error:', err)
+      showToast(msg)
     } finally {
       setConfirming(false)
     }

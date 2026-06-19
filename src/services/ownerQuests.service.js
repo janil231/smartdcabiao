@@ -758,26 +758,38 @@ export async function merchantMarkParticipationComplete(merchantUid, participati
   if (!quest) throw new Error('Quest not found')
   if (quest.ownerUid !== merchantUid) throw new Error('Only the business owner can complete this')
 
-  const reward = await createBusinessQuestReward(participation.uid, participation.userEmail || '', quest, participation)
+  try {
+    const reward = await createBusinessQuestReward(participation.uid, participation.userEmail || '', quest, participation)
 
-  await updateDoc(partRef, {
-    status: 'completed',
-    completedAt: serverTimestamp(),
-    rewardCodeId: reward.id,
-    verifiedBy: 'merchant_manual',
-    verifiedAt: serverTimestamp(),
-    verifiedByMerchantUid: merchantUid,
-  })
+    await updateDoc(partRef, {
+      status: 'completed',
+      completedAt: serverTimestamp(),
+      rewardCodeId: reward.id,
+      verifiedBy: 'merchant_manual',
+      verifiedAt: serverTimestamp(),
+      verifiedByMerchantUid: merchantUid,
+    })
 
-  await logAudit({
-    action: 'merchant_manual_complete',
-    targetType: 'ownerQuestParticipations',
-    targetId: participationId,
-    adminUid: merchantUid,
-    meta: { questId: participation.questId, uid: participation.uid },
-  })
+    try {
+      await logAudit({
+        action: 'merchant_manual_complete',
+        targetType: 'ownerQuestParticipations',
+        targetId: participationId,
+        adminUid: merchantUid,
+        meta: { questId: participation.questId, uid: participation.uid },
+      })
+    } catch (auditErr) {
+      console.warn('[merchantMarkComplete] audit log failed:', auditErr)
+    }
 
-  return { success: true, reward }
+    return { success: true, reward }
+  } catch (err) {
+    if (err.code === 'permission-denied') {
+      console.warn('[merchantMarkComplete] permission denied — rules may need redeploying:', err)
+      throw new Error('Could not complete — you may not be the owner of this quest, or the security rules need redeployment.')
+    }
+    throw err
+  }
 }
 
 export async function getQuestParticipationsForMerchant(questId, merchantUid) {
@@ -934,6 +946,163 @@ export async function reactivateSinglePausedQuest(questId, ownerUid) {
   } catch (err) { console.warn('[reactivateSingle] logAudit failed:', err) }
 
   return { reactivated: 1 }
+}
+
+export async function backfillParticipationOwnerUids(adminUid) {
+  let scanned = 0
+  let backfilled = 0
+  let skipped = 0
+  let failed = 0
+  const details = []
+
+  const snapshot = await getDocs(collection(db, PARTICIPATIONS_COLLECTION))
+
+  for (const docSnap of snapshot.docs) {
+    scanned++
+    const data = docSnap.data()
+    const hasOwnerUid = data.ownerUid && String(data.ownerUid).trim()
+    const hasBusinessId = data.businessId && String(data.businessId).trim()
+
+    if (hasOwnerUid && hasBusinessId) {
+      skipped++
+      details.push({
+        id: docSnap.id,
+        name: docSnap.id,
+        status: 'skipped',
+        reason: 'already has ownerUid and businessId',
+      })
+      continue
+    }
+
+    try {
+      const questId = data.questId
+      if (!questId) {
+        skipped++
+        details.push({ id: docSnap.id, name: docSnap.id, status: 'skipped', reason: 'no questId' })
+        continue
+      }
+
+      const questSnap = await getDoc(doc(db, OWNER_QUESTS_COLLECTION, String(questId)))
+      if (!questSnap.exists()) {
+        skipped++
+        details.push({ id: docSnap.id, name: docSnap.id, status: 'skipped', reason: `quest ${questId} not found` })
+        continue
+      }
+
+      const questData = questSnap.data()
+      const ownerUid = questData.ownerUid
+      const businessId = questData.businessId
+
+      if (!ownerUid) {
+        skipped++
+        details.push({ id: docSnap.id, name: docSnap.id, status: 'skipped', reason: 'parent quest has no ownerUid' })
+        continue
+      }
+
+      const updatePayload = sanitizeForFirestore({
+        ownerUid: String(ownerUid),
+        businessId: String(businessId),
+        updatedAt: serverTimestamp(),
+      })
+
+      await updateDoc(doc(db, PARTICIPATIONS_COLLECTION, docSnap.id), updatePayload)
+      backfilled++
+      details.push({ id: docSnap.id, name: docSnap.id, status: 'backfilled', ownerUid, reason: 'from parent quest' })
+    } catch (err) {
+      failed++
+      details.push({ id: docSnap.id, name: docSnap.id, status: 'failed', reason: err.message })
+    }
+  }
+
+  if (adminUid) {
+    try {
+      await logAudit({
+        action: 'backfill_participation_owner_uids',
+        targetType: 'ownerQuestParticipations',
+        adminUid,
+        meta: { scanned, backfilled, skipped, failed },
+      })
+    } catch { /* non-critical */ }
+  }
+
+  return { scanned, backfilled, skipped, failed, details }
+}
+
+export async function repairQuestOwnerUids(adminUid) {
+  let scanned = 0
+  let repaired = 0
+  let skipped = 0
+  let failed = 0
+  const details = []
+
+  const snapshot = await getDocs(collection(db, OWNER_QUESTS_COLLECTION))
+
+  for (const docSnap of snapshot.docs) {
+    scanned++
+    const questData = docSnap.data()
+    const questOwnerUid = questData.ownerUid ? String(questData.ownerUid).trim() : ''
+    const businessId = questData.businessId ? String(questData.businessId).trim() : ''
+
+    if (!businessId) {
+      skipped++
+      details.push({ id: docSnap.id, name: questData.title || docSnap.id, status: 'skipped', reason: 'no businessId' })
+      continue
+    }
+
+    try {
+      const bizSnap = await getDoc(doc(db, BUSINESSES_COLLECTION, businessId))
+      if (!bizSnap.exists()) {
+        skipped++
+        details.push({ id: docSnap.id, name: questData.title || docSnap.id, status: 'skipped', reason: `business ${businessId} not found` })
+        continue
+      }
+
+      const bizData = bizSnap.data()
+      const bizOwnerUid = bizData.ownerUid ? String(bizData.ownerUid).trim() : ''
+
+      if (!bizOwnerUid) {
+        skipped++
+        details.push({ id: docSnap.id, name: questData.title || docSnap.id, status: 'skipped', reason: 'business has no ownerUid' })
+        continue
+      }
+
+      if (questOwnerUid === bizOwnerUid && questData.businessName) {
+        skipped++
+        details.push({ id: docSnap.id, name: questData.title || docSnap.id, status: 'skipped', reason: 'ownerUid already correct' })
+        continue
+      }
+
+      await updateDoc(doc(db, OWNER_QUESTS_COLLECTION, docSnap.id), sanitizeForFirestore({
+        ownerUid: String(bizOwnerUid),
+        businessName: bizData.name || questData.businessName || '',
+        updatedAt: serverTimestamp(),
+      }))
+
+      repaired++
+      details.push({
+        id: docSnap.id,
+        name: questData.title || docSnap.id,
+        status: 'repaired',
+        reason: questOwnerUid ? `changed from ${questOwnerUid} to ${bizOwnerUid}` : `set to ${bizOwnerUid}`,
+      })
+    } catch (err) {
+      failed++
+      details.push({ id: docSnap.id, name: questData.title || docSnap.id, status: 'failed', reason: err.message })
+    }
+  }
+
+  if (adminUid) {
+    try {
+      await logAudit({
+        action: 'repair_quest_owner_uids',
+        targetType: 'ownerQuests',
+        adminUid,
+        meta: { scanned, repaired, skipped, failed },
+      })
+    } catch { /* non-critical */ }
+  }
+
+  return { scanned, repaired, skipped, failed, details }
 }
 
 function generateEventCode() {
